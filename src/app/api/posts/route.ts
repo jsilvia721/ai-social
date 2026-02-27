@@ -1,12 +1,22 @@
-import { NextRequest, NextResponse } from "next/server";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getServerSession } from "next-auth/next";
+import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
 
   const posts = await prisma.post.findMany({
-    where: status ? { status: status as any } : undefined,
+    where: {
+      userId: session.user.id,
+      ...(status ? { status: status as any } : {}),
+    },
     include: { socialAccount: true },
     orderBy: { scheduledAt: "asc" },
   });
@@ -15,8 +25,22 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await req.json();
   const { content, socialAccountId, scheduledAt, mediaUrls } = body;
+
+  // Verify the social account belongs to the current user
+  const account = await prisma.socialAccount.findFirst({
+    where: { id: socialAccountId, userId: session.user.id },
+  });
+
+  if (!account) {
+    return NextResponse.json({ error: "Social account not found" }, { status: 404 });
+  }
 
   const post = await prisma.post.create({
     data: {
@@ -25,7 +49,7 @@ export async function POST(req: NextRequest) {
       scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
       mediaUrls: mediaUrls ?? [],
       status: scheduledAt ? "SCHEDULED" : "DRAFT",
-      userId: body.userId, // TODO: derive from session
+      userId: session.user.id,
     },
   });
 
