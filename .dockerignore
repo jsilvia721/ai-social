@@ -1,0 +1,8 @@
+.git
+.next
+node_modules
+docker/certs
+.env*
+*.md
+e2e
+coverage
