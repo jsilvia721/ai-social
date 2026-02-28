@@ -3,6 +3,18 @@ import { prisma } from "@/lib/db";
 import { publishTweet } from "@/lib/platforms/twitter";
 import { publishInstagramPost } from "@/lib/platforms/instagram";
 import { publishFacebookPost } from "@/lib/platforms/facebook";
+import type { Platform } from "@/types";
+
+interface DuePost {
+  id: string;
+  content: string;
+  mediaUrls: string[];
+  socialAccount: {
+    platform: Platform;
+    accessToken: string;
+    platformId: string;
+  };
+}
 
 // Called by a cron job to publish scheduled posts
 export async function POST(_req: NextRequest) {
@@ -17,7 +29,7 @@ export async function POST(_req: NextRequest) {
   });
 
   const results = await Promise.allSettled(
-    duePosts.map(async (post) => {
+    (duePosts as DuePost[]).map(async (post) => {
       const { socialAccount } = post;
 
       try {
