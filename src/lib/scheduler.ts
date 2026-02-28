@@ -39,7 +39,7 @@ export async function runScheduler() {
             token,
             socialAccount.platformId,
             post.content,
-            post.mediaUrls[0]
+            post.mediaUrls
           );
           platformPostId = result.id;
         } else {

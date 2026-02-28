@@ -112,7 +112,7 @@ describe("POST /api/schedule", () => {
       "ig-token",
       "ig-user-id",
       "IG caption",
-      "https://example.com/img.jpg"
+      ["https://example.com/img.jpg"]
     );
   });
 
