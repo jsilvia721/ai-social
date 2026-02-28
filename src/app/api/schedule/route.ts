@@ -1,19 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { SocialAccount } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { publishTweet } from "@/lib/platforms/twitter";
 import { publishInstagramPost } from "@/lib/platforms/instagram";
 import { publishFacebookPost } from "@/lib/platforms/facebook";
-import type { Platform } from "@/types";
+import { ensureValidToken } from "@/lib/token";
 
 interface DuePost {
   id: string;
   content: string;
   mediaUrls: string[];
-  socialAccount: {
-    platform: Platform;
-    accessToken: string;
-    platformId: string;
-  };
+  socialAccount: SocialAccount;
 }
 
 // Called by a cron job to publish scheduled posts
@@ -33,14 +30,15 @@ export async function POST(_req: NextRequest) {
       const { socialAccount } = post;
 
       try {
+        const token = await ensureValidToken(socialAccount);
         let platformPostId: string;
 
         if (socialAccount.platform === "TWITTER") {
-          const result = await publishTweet(socialAccount.accessToken, post.content);
+          const result = await publishTweet(token, post.content);
           platformPostId = result.id;
         } else if (socialAccount.platform === "INSTAGRAM") {
           const result = await publishInstagramPost(
-            socialAccount.accessToken,
+            token,
             socialAccount.platformId,
             post.content,
             post.mediaUrls[0]
@@ -48,7 +46,7 @@ export async function POST(_req: NextRequest) {
           platformPostId = result.id;
         } else {
           const result = await publishFacebookPost(
-            socialAccount.accessToken,
+            token,
             socialAccount.platformId,
             post.content
           );

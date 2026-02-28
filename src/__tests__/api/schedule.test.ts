@@ -7,16 +7,19 @@ jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/platforms/twitter", () => ({ publishTweet: jest.fn() }));
 jest.mock("@/lib/platforms/instagram", () => ({ publishInstagramPost: jest.fn() }));
 jest.mock("@/lib/platforms/facebook", () => ({ publishFacebookPost: jest.fn() }));
+jest.mock("@/lib/token", () => ({ ensureValidToken: jest.fn() }));
 
 import { POST } from "@/app/api/schedule/route";
 import { NextRequest } from "next/server";
 import { publishTweet } from "@/lib/platforms/twitter";
 import { publishInstagramPost } from "@/lib/platforms/instagram";
 import { publishFacebookPost } from "@/lib/platforms/facebook";
+import { ensureValidToken } from "@/lib/token";
 
 const mockPublishTweet = publishTweet as jest.Mock;
 const mockPublishInstagramPost = publishInstagramPost as jest.Mock;
 const mockPublishFacebookPost = publishFacebookPost as jest.Mock;
+const mockEnsureValidToken = ensureValidToken as jest.Mock;
 
 const makeRequest = () =>
   new NextRequest("http://localhost/api/schedule", { method: "POST" });
@@ -40,6 +43,10 @@ function makePost(overrides: object) {
 beforeEach(() => {
   resetPrismaMock();
   jest.clearAllMocks();
+  // Default: return the account's accessToken unchanged
+  mockEnsureValidToken.mockImplementation((account: { accessToken: string }) =>
+    Promise.resolve(account.accessToken)
+  );
 });
 
 describe("POST /api/schedule", () => {
