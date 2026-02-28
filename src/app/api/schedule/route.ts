@@ -13,8 +13,7 @@ interface DuePost {
   socialAccount: SocialAccount;
 }
 
-// Called by a cron job to publish scheduled posts
-export async function POST(_req: NextRequest) {
+async function runScheduler() {
   const now = new Date();
 
   const duePosts = await prisma.post.findMany({
@@ -73,5 +72,25 @@ export async function POST(_req: NextRequest) {
     })
   );
 
-  return NextResponse.json({ processed: duePosts.length, results });
+  return { processed: duePosts.length, results };
+}
+
+// Called by Vercel Cron — validates CRON_SECRET when set
+export async function GET(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret) {
+    const auth = req.headers.get("authorization");
+    if (auth !== `Bearer ${cronSecret}`) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+  }
+
+  const data = await runScheduler();
+  return NextResponse.json(data);
+}
+
+// Available for manual triggering (e.g. local dev, integration tests)
+export async function POST(_req: NextRequest) {
+  const data = await runScheduler();
+  return NextResponse.json(data);
 }

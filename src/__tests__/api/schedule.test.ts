@@ -9,7 +9,7 @@ jest.mock("@/lib/platforms/instagram", () => ({ publishInstagramPost: jest.fn() 
 jest.mock("@/lib/platforms/facebook", () => ({ publishFacebookPost: jest.fn() }));
 jest.mock("@/lib/token", () => ({ ensureValidToken: jest.fn() }));
 
-import { POST } from "@/app/api/schedule/route";
+import { GET, POST } from "@/app/api/schedule/route";
 import { NextRequest } from "next/server";
 import { publishTweet } from "@/lib/platforms/twitter";
 import { publishInstagramPost } from "@/lib/platforms/instagram";
@@ -21,8 +21,8 @@ const mockPublishInstagramPost = publishInstagramPost as jest.Mock;
 const mockPublishFacebookPost = publishFacebookPost as jest.Mock;
 const mockEnsureValidToken = ensureValidToken as jest.Mock;
 
-const makeRequest = () =>
-  new NextRequest("http://localhost/api/schedule", { method: "POST" });
+const makeRequest = (method = "POST", headers?: Record<string, string>) =>
+  new NextRequest("http://localhost/api/schedule", { method, headers });
 
 function makePost(overrides: object) {
   return {
@@ -153,5 +153,53 @@ describe("POST /api/schedule", () => {
     expect(body.processed).toBe(2);
     // Both posts should have been attempted
     expect(prismaMock.post.update).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("GET /api/schedule (Vercel Cron)", () => {
+  const originalEnv = process.env;
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("runs scheduler and returns results when no CRON_SECRET is set", async () => {
+    process.env = { ...originalEnv, CRON_SECRET: undefined };
+    prismaMock.post.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeRequest("GET"));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.processed).toBe(0);
+  });
+
+  it("runs scheduler when correct CRON_SECRET is provided", async () => {
+    process.env = { ...originalEnv, CRON_SECRET: "secret-abc" };
+    prismaMock.post.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeRequest("GET", { authorization: "Bearer secret-abc" }));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.processed).toBe(0);
+  });
+
+  it("returns 401 when CRON_SECRET is set but Authorization header is missing", async () => {
+    process.env = { ...originalEnv, CRON_SECRET: "secret-abc" };
+
+    const res = await GET(makeRequest("GET"));
+
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toBe("Unauthorized");
+  });
+
+  it("returns 401 when CRON_SECRET is set but Authorization header is wrong", async () => {
+    process.env = { ...originalEnv, CRON_SECRET: "secret-abc" };
+
+    const res = await GET(makeRequest("GET", { authorization: "Bearer wrong-secret" }));
+
+    expect(res.status).toBe(401);
   });
 });
