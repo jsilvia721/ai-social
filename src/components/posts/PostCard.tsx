@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Trash2, Loader2, Calendar, CheckCircle2, XCircle, FileText } from "lucide-react";
+import { Trash2, Loader2, Calendar, CheckCircle2, XCircle, FileText, Pencil, RefreshCw } from "lucide-react";
 import type { PostStatus, Platform } from "@/types";
 
 const STATUS_CONFIG: Record<PostStatus, { label: string; icon: React.ElementType; className: string }> = {
@@ -55,13 +56,16 @@ interface PostCardProps {
     content: string;
     status: PostStatus;
     scheduledAt: string | null;
+    errorMessage?: string | null;
     socialAccount: { platform: Platform; username: string };
   };
   onDelete: (id: string) => Promise<void>;
+  onRetry?: (id: string) => Promise<void>;
 }
 
-export function PostCard({ post, onDelete }: PostCardProps) {
+export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const statusConfig = STATUS_CONFIG[post.status];
   const StatusIcon = statusConfig.icon;
   const platformColor = PLATFORM_COLOR[post.socialAccount.platform];
@@ -75,6 +79,19 @@ export function PostCard({ post, onDelete }: PostCardProps) {
       setIsDeleting(false);
     }
   }
+
+  async function handleRetry() {
+    if (!onRetry) return;
+    setIsRetrying(true);
+    try {
+      await onRetry(post.id);
+    } finally {
+      setIsRetrying(false);
+    }
+  }
+
+  const canEdit = post.status === "DRAFT" || post.status === "SCHEDULED";
+  const canRetry = post.status === "FAILED" && !!onRetry;
 
   return (
     <div className="flex items-start gap-4 rounded-lg border border-zinc-700 bg-zinc-800 p-4">
@@ -101,14 +118,51 @@ export function PostCard({ post, onDelete }: PostCardProps) {
             </span>
           )}
         </div>
+        {post.status === "FAILED" && post.errorMessage && (
+          <p className="text-xs text-red-400 truncate" title={post.errorMessage}>
+            {post.errorMessage}
+          </p>
+        )}
       </div>
 
-      {/* Status + delete */}
+      {/* Status + actions */}
       <div className="flex items-center gap-2 shrink-0">
         <Badge variant="outline" className={`gap-1 ${statusConfig.className}`}>
           <StatusIcon className="h-3 w-3" />
           {statusConfig.label}
         </Badge>
+
+        {canEdit && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-zinc-600 hover:text-violet-400 hover:bg-violet-950/50"
+            aria-label="Edit post"
+            asChild
+          >
+            <Link href={`/dashboard/posts/${post.id}/edit`}>
+              <Pencil className="h-4 w-4" />
+            </Link>
+          </Button>
+        )}
+
+        {canRetry && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-zinc-600 hover:text-amber-400 hover:bg-amber-950/50"
+            onClick={handleRetry}
+            disabled={isRetrying}
+            aria-label="Retry post"
+          >
+            {isRetrying ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+          </Button>
+        )}
+
         <Button
           variant="ghost"
           size="icon"

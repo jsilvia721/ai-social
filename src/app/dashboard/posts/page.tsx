@@ -19,6 +19,7 @@ interface Post {
   content: string;
   status: PostStatus;
   scheduledAt: string | null;
+  errorMessage: string | null;
   socialAccount: { platform: Platform; username: string };
 }
 
@@ -46,6 +47,15 @@ export default function PostsPage() {
     const res = await fetch(`/api/posts?id=${id}`, { method: "DELETE" });
     if (res.ok) {
       setPosts((prev) => prev.filter((p) => p.id !== id));
+    }
+  }
+
+  async function handleRetry(id: string) {
+    const res = await fetch(`/api/posts/${id}/retry`, { method: "POST" });
+    if (res.ok) {
+      setPosts((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, status: "SCHEDULED" as PostStatus, errorMessage: null } : p))
+      );
     }
   }
 
@@ -94,7 +104,7 @@ export default function PostsPage() {
           </div>
         ) : (
           posts.map((post) => (
-            <PostCard key={post.id} post={post} onDelete={handleDelete} />
+            <PostCard key={post.id} post={post} onDelete={handleDelete} onRetry={handleRetry} />
           ))
         )}
       </div>

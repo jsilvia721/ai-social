@@ -32,27 +32,43 @@ interface Account {
   username: string;
 }
 
-export function PostComposer() {
+interface EditPostData {
+  id: string;
+  content: string;
+  socialAccountId: string;
+  platform: Platform;
+  username: string;
+  scheduledAt: string | null;
+  mediaUrls: string[];
+}
+
+export function PostComposer({ editPost }: { editPost?: EditPostData }) {
+  const isEditMode = !!editPost;
   const router = useRouter();
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState("");
-  const [content, setContent] = useState("");
+  const [selectedAccountId, setSelectedAccountId] = useState(editPost?.socialAccountId ?? "");
+  const [content, setContent] = useState(editPost?.content ?? "");
   const [aiTopic, setAiTopic] = useState("");
-  const [scheduleMode, setScheduleMode] = useState<"draft" | "schedule">("draft");
-  const [scheduledAt, setScheduledAt] = useState("");
+  const [scheduleMode, setScheduleMode] = useState<"draft" | "schedule">(
+    editPost?.scheduledAt ? "schedule" : "draft"
+  );
+  const [scheduledAt, setScheduledAt] = useState(
+    editPost?.scheduledAt ? new Date(editPost.scheduledAt).toISOString().slice(0, 16) : ""
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mediaUrls, setMediaUrls] = useState<string[]>([]);
+  const [mediaUrls, setMediaUrls] = useState<string[]>(editPost?.mediaUrls ?? []);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (isEditMode) return; // don't fetch accounts in edit mode
     fetch("/api/accounts")
       .then((res) => res.json())
       .then((data) => setAccounts(data))
       .catch(() => {});
-  }, []);
+  }, [isEditMode]);
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
   const charLimit = selectedAccount ? CHAR_LIMITS[selectedAccount.platform] : undefined;
@@ -144,11 +160,14 @@ export function PostComposer() {
         body.scheduledAt = new Date(scheduledAt).toISOString();
       }
 
-      const res = await fetch("/api/posts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await fetch(
+        isEditMode ? `/api/posts/${editPost.id}` : "/api/posts",
+        {
+          method: isEditMode ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -173,7 +192,11 @@ export function PostComposer() {
       {/* Account select */}
       <div className="space-y-2">
         <label className="text-sm font-medium text-zinc-300">Social Account</label>
-        {accounts.length === 0 ? (
+        {isEditMode ? (
+          <p className="text-sm text-zinc-400 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2">
+            {PLATFORM_LABELS[editPost.platform]} · @{editPost.username}
+          </p>
+        ) : accounts.length === 0 ? (
           <p className="text-sm text-zinc-500">
             No accounts connected.{" "}
             <a href="/dashboard/accounts" className="text-violet-400 hover:underline">
