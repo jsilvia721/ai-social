@@ -28,6 +28,11 @@ ENV TWITTER_CLIENT_SECRET=placeholder
 ENV META_APP_ID=placeholder
 ENV META_APP_SECRET=placeholder
 ENV ANTHROPIC_API_KEY=placeholder
+ENV MINIO_ENDPOINT=http://placeholder:9000
+ENV MINIO_ACCESS_KEY=placeholder
+ENV MINIO_SECRET_KEY=placeholder
+ENV MINIO_BUCKET=ai-social
+ENV MINIO_PUBLIC_URL=http://placeholder
 
 RUN npm run build
 

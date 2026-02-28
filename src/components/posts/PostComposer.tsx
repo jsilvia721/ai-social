@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, Loader2, Send, Clock } from "lucide-react";
+import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X } from "lucide-react";
 import type { Platform } from "@/types";
 
 const CHAR_LIMITS: Partial<Record<Platform, number>> = {
@@ -43,6 +43,9 @@ export function PostComposer() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mediaUrls, setMediaUrls] = useState<string[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/accounts")
@@ -79,6 +82,50 @@ export function PostComposer() {
     }
   }
 
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+
+    const videos = files.filter((f) => f.type === "video/mp4");
+    const images = files.filter((f) => f.type !== "video/mp4");
+
+    if (videos.length > 1) {
+      setError("You can attach at most 1 video.");
+      return;
+    }
+    if (images.length + mediaUrls.length > 4) {
+      setError("You can attach at most 4 images.");
+      return;
+    }
+
+    setIsUploading(true);
+    setError(null);
+    try {
+      const uploaded: string[] = [];
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error ?? "Upload failed");
+        }
+        const { url } = await res.json();
+        uploaded.push(url);
+      }
+      setMediaUrls((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function removeMedia(index: number) {
+    setMediaUrls((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedAccountId || !content.trim() || isOverLimit) return;
@@ -90,6 +137,7 @@ export function PostComposer() {
       const body: Record<string, unknown> = {
         content: content.trim(),
         socialAccountId: selectedAccountId,
+        mediaUrls,
       };
 
       if (scheduleMode === "schedule" && scheduledAt) {
@@ -173,6 +221,81 @@ export function PostComposer() {
         />
       </div>
 
+      {/* hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp,video/mp4"
+        multiple
+        className="hidden"
+        onChange={handleFileSelect}
+      />
+
+      {/* Media */}
+      <Card className="bg-zinc-900 border-zinc-700">
+        <CardContent className="pt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="h-4 w-4 text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">Media</span>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading || mediaUrls.length >= 4}
+              className="border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+            >
+              {isUploading ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+              ) : (
+                <Upload className="h-3 w-3 mr-1" />
+              )}
+              {isUploading ? "Uploading…" : "Add media"}
+            </Button>
+          </div>
+          {mediaUrls.length > 0 && (
+            <div className="grid grid-cols-2 gap-2">
+              {mediaUrls.map((url, i) =>
+                url.endsWith(".mp4") ? (
+                  <div key={i} className="relative group">
+                    <video
+                      src={url}
+                      className="w-full rounded-md object-cover max-h-40"
+                      controls={false}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeMedia(i)}
+                      className="absolute top-1 right-1 bg-black/60 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="h-3 w-3 text-white" />
+                    </button>
+                  </div>
+                ) : (
+                  <div key={i} className="relative group">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt={`media ${i + 1}`}
+                      className="w-full rounded-md object-cover max-h-40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeMedia(i)}
+                      className="absolute top-1 right-1 bg-black/60 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="h-3 w-3 text-white" />
+                    </button>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* AI Generate */}
       <Card className="bg-zinc-900 border-zinc-700">
         <CardContent className="pt-4 space-y-3">
@@ -255,7 +378,7 @@ export function PostComposer() {
       {/* Submit */}
       <Button
         type="submit"
-        disabled={!selectedAccountId || !content.trim() || isOverLimit || isSubmitting}
+        disabled={!selectedAccountId || !content.trim() || isOverLimit || isSubmitting || isUploading}
         className="w-full bg-violet-600 hover:bg-violet-700 text-white"
       >
         {isSubmitting ? (
