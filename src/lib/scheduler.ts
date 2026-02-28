@@ -32,7 +32,7 @@ export async function runScheduler() {
         let platformPostId: string;
 
         if (socialAccount.platform === "TWITTER") {
-          const result = await publishTweet(token, post.content);
+          const result = await publishTweet(token, post.content, post.mediaUrls);
           platformPostId = result.id;
         } else if (socialAccount.platform === "INSTAGRAM") {
           const result = await publishInstagramPost(

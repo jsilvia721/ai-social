@@ -69,13 +69,31 @@ describe("POST /api/schedule", () => {
     const res = await POST(makeRequest());
     const body = await res.json();
 
-    expect(mockPublishTweet).toHaveBeenCalledWith("tw-token", "Test content");
+    expect(mockPublishTweet).toHaveBeenCalledWith("tw-token", "Test content", []);
     expect(prismaMock.post.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "PUBLISHED", platformPostId: "tweet-123" }),
       })
     );
     expect(body.processed).toBe(1);
+  });
+
+  it("passes mediaUrls to publishTweet", async () => {
+    const post = makePost({
+      mediaUrls: ["https://example.com/img.jpg"],
+      socialAccount: { platform: "TWITTER", platformId: "tw-id", accessToken: "tw-token" },
+    });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    mockPublishTweet.mockResolvedValue({ id: "tweet-123", url: "https://twitter.com/i/web/status/tweet-123" });
+    prismaMock.post.update.mockResolvedValue({} as any);
+
+    await POST(makeRequest());
+
+    expect(mockPublishTweet).toHaveBeenCalledWith(
+      "tw-token",
+      "Test content",
+      ["https://example.com/img.jpg"]
+    );
   });
 
   it("publishes an Instagram post via publishInstagramPost", async () => {
