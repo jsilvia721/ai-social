@@ -46,7 +46,8 @@ export async function runScheduler() {
           const result = await publishFacebookPost(
             token,
             socialAccount.platformId,
-            post.content
+            post.content,
+            post.mediaUrls
           );
           platformPostId = result.id;
         }

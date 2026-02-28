@@ -129,7 +129,8 @@ describe("POST /api/schedule", () => {
     expect(mockPublishFacebookPost).toHaveBeenCalledWith(
       "page-token",
       "page-id",
-      "Test content"
+      "Test content",
+      []
     );
   });
 
