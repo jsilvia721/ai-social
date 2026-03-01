@@ -15,11 +15,32 @@ const config: Config = {
   testMatch: ["<rootDir>/src/__tests__/**/*.test.ts?(x)"],
   collectCoverageFrom: [
     "src/**/*.{ts,tsx}",
+    // Framework / generated files
     "!src/**/*.d.ts",
-    "!src/app/layout.tsx",
-    "!src/app/page.tsx",
     "!src/app/globals.css",
+    "!src/app/**/layout.tsx",
+    "!src/app/**/page.tsx",         // server components — DB-coupled, covered via API route tests
+    "!src/components/ui/**",        // shadcn/ui — generated, no logic
+    "!src/components/providers/**",
+    "!src/types/**",
+    "!src/instrumentation.ts",
+    "!src/middleware.ts",
+    // Config / setup files — no testable business logic
+    "!src/lib/auth.ts",             // NextAuth config
+    "!src/lib/db.ts",               // Prisma singleton
+    "!src/lib/storage.ts",          // AWS S3 client
+    "!src/lib/utils.ts",            // cn() one-liner (shadcn helper)
+    // React components — need React Testing Library (deferred)
+    "!src/components/**",
   ],
+  coverageThreshold: {
+    global: {
+      statements: 75,
+      branches: 75,
+      functions: 70,
+      lines: 75,
+    },
+  },
 };
 
 export default createJestConfig(config);

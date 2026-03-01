@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+jobs:
+  # ── Test & Coverage ────────────────────────────────────────────────────────
+  test:
+    name: Test & Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+
+      - name: Run tests with coverage
+        run: npm run test:coverage -- --ci
+
+  # ── Deploy to Production ───────────────────────────────────────────────────
+  deploy-production:
+    name: Deploy → Production
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Railway production deploy
+        run: curl -fsSX POST "${{ secrets.RAILWAY_DEPLOY_HOOK_PRODUCTION }}"
+
+  # ── Deploy to Staging ──────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy → Staging
+    needs: test
+    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Railway staging deploy
+        run: curl -fsSX POST "${{ secrets.RAILWAY_DEPLOY_HOOK_STAGING }}"
