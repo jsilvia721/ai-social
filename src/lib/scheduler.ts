@@ -146,7 +146,7 @@ export function schedulePostPublisher() {
     });
     console.log("[scheduler] Post publisher started — running every minute");
 
-    cron.schedule("* * * * *", async () => {
+    cron.schedule("0 * * * *", async () => {
       try {
         await runMetricsRefresh();
       } catch (err) {
