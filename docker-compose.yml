@@ -16,31 +16,11 @@ services:
       timeout: 5s
       retries: 10
 
-  minio:
-    image: minio/minio:latest
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # MinIO web console
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   app:
     build: .
     restart: unless-stopped
     depends_on:
       db:
-        condition: service_healthy
-      minio:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/ai_social
@@ -73,4 +53,3 @@ services:
 
 volumes:
   postgres_data:
-  minio_data:

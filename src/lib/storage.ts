@@ -57,5 +57,8 @@ export async function uploadFile(
     })
   );
   const publicUrl = process.env.MINIO_PUBLIC_URL ?? "http://localhost:9000";
-  return `${publicUrl}/${bucket}/${key}`;
+  // R2 public URLs map the domain directly to the bucket (no bucket name in path)
+  // MinIO/self-hosted S3 uses /{bucket}/{key} — detect by checking if endpoint is R2
+  const isR2 = (process.env.MINIO_ENDPOINT ?? "").includes("r2.cloudflarestorage.com");
+  return isR2 ? `${publicUrl}/${key}` : `${publicUrl}/${bucket}/${key}`;
 }
