@@ -3,6 +3,6 @@ builder = "nixpacks"
 buildCommand = "npx prisma generate && npm run build"
 
 [deploy]
-startCommand = "cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && npx prisma db push --accept-data-loss && node .next/standalone/server.js"
+startCommand = "mkdir -p .next/standalone/.next && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && npx prisma db push --accept-data-loss && node .next/standalone/server.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
