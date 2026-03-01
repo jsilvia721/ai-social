@@ -3,6 +3,11 @@ import { publishTweet } from "@/lib/platforms/twitter";
 import { publishInstagramPost } from "@/lib/platforms/instagram";
 import { publishFacebookPost } from "@/lib/platforms/facebook";
 import { ensureValidToken } from "@/lib/token";
+import {
+  fetchTwitterMetrics,
+  fetchFacebookMetrics,
+  fetchInstagramMetrics,
+} from "@/lib/analytics/fetchers";
 import type { SocialAccount } from "@prisma/client";
 
 interface DuePost {
@@ -75,6 +80,55 @@ export async function runScheduler() {
   return { processed: duePosts.length, results };
 }
 
+export async function runMetricsRefresh() {
+  const staleThreshold = new Date(Date.now() - 50 * 60 * 1000); // 50 min ago
+
+  const posts = await prisma.post.findMany({
+    where: {
+      status: "PUBLISHED",
+      platformPostId: { not: null },
+      OR: [
+        { metricsUpdatedAt: null },
+        { metricsUpdatedAt: { lt: staleThreshold } },
+      ],
+    },
+    include: { socialAccount: true },
+  });
+
+  const results = await Promise.allSettled(
+    posts.map(async (post) => {
+      try {
+        const token = await ensureValidToken(post.socialAccount);
+        const { platform } = post.socialAccount;
+        const postId = post.platformPostId!;
+
+        let metrics;
+        if (platform === "TWITTER") {
+          metrics = await fetchTwitterMetrics(token, postId);
+        } else if (platform === "INSTAGRAM") {
+          metrics = await fetchInstagramMetrics(token, postId);
+        } else {
+          metrics = await fetchFacebookMetrics(token, postId);
+        }
+
+        if (!metrics) return;
+
+        await prisma.post.update({
+          where: { id: post.id },
+          data: metrics,
+        });
+      } catch (err) {
+        console.error(`[metrics] failed for post ${post.id}:`, err);
+      }
+    })
+  );
+
+  const errors = results.filter((r) => r.status === "rejected").length;
+  if (errors > 0) {
+    console.error(`[metrics] ${errors} refresh(es) failed`);
+  }
+}
+
 let cronStarted = false;
 
 export function schedulePostPublisher() {
@@ -91,5 +145,14 @@ export function schedulePostPublisher() {
       }
     });
     console.log("[scheduler] Post publisher started — running every minute");
+
+    cron.schedule("0 * * * *", async () => {
+      try {
+        await runMetricsRefresh();
+      } catch (err) {
+        console.error("[metrics] error:", err);
+      }
+    });
+    console.log("[scheduler] Metrics refresher started — running every hour");
   });
 }

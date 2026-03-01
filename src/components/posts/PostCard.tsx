@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Trash2, Loader2, Calendar, CheckCircle2, XCircle, FileText, Pencil, RefreshCw } from "lucide-react";
+import { Trash2, Loader2, Calendar, CheckCircle2, XCircle, FileText, Pencil, RefreshCw, Heart, MessageCircle, Repeat2, Eye, Bookmark, TrendingUp } from "lucide-react";
 import type { PostStatus, Platform } from "@/types";
 
 const STATUS_CONFIG: Record<PostStatus, { label: string; icon: React.ElementType; className: string }> = {
@@ -50,6 +50,22 @@ const PLATFORM_ICONS: Record<Platform, React.ComponentType<{ className?: string 
   FACEBOOK: FacebookIcon,
 };
 
+function fmt(n: number | null | undefined): string {
+  if (n == null) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function MetricPill({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
+  return (
+    <span className="flex items-center gap-1 text-xs text-zinc-400" title={label}>
+      <Icon className="h-3.5 w-3.5" />
+      {value}
+    </span>
+  );
+}
+
 interface PostCardProps {
   post: {
     id: string;
@@ -57,6 +73,12 @@ interface PostCardProps {
     status: PostStatus;
     scheduledAt: string | null;
     errorMessage?: string | null;
+    metricsLikes?: number | null;
+    metricsComments?: number | null;
+    metricsShares?: number | null;
+    metricsImpressions?: number | null;
+    metricsReach?: number | null;
+    metricsSaves?: number | null;
     socialAccount: { platform: Platform; username: string };
   };
   onDelete: (id: string) => Promise<void>;
@@ -122,6 +144,20 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
           <p className="text-xs text-red-400 truncate" title={post.errorMessage}>
             {post.errorMessage}
           </p>
+        )}
+        {post.status === "PUBLISHED" && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-zinc-700/50">
+            <MetricPill icon={Heart}          label="Likes"       value={fmt(post.metricsLikes)} />
+            <MetricPill icon={MessageCircle}  label="Comments"    value={fmt(post.metricsComments)} />
+            <MetricPill icon={Repeat2}        label="Shares"      value={fmt(post.metricsShares)} />
+            <MetricPill icon={Eye}            label="Impressions" value={fmt(post.metricsImpressions)} />
+            {post.metricsReach != null && (
+              <MetricPill icon={TrendingUp} label="Reach" value={fmt(post.metricsReach)} />
+            )}
+            {post.metricsSaves != null && (
+              <MetricPill icon={Bookmark} label="Saves" value={fmt(post.metricsSaves)} />
+            )}
+          </div>
         )}
       </div>
 

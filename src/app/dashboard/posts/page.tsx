@@ -20,6 +20,12 @@ interface Post {
   status: PostStatus;
   scheduledAt: string | null;
   errorMessage: string | null;
+  metricsLikes: number | null;
+  metricsComments: number | null;
+  metricsShares: number | null;
+  metricsImpressions: number | null;
+  metricsReach: number | null;
+  metricsSaves: number | null;
   socialAccount: { platform: Platform; username: string };
 }
 

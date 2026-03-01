@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Clock, CheckCircle2, Link2 } from "lucide-react";
+import { FileText, Clock, CheckCircle2, Link2, Heart, Eye } from "lucide-react";
 import type { PostStatus, Platform } from "@/types";
 
 interface RecentPost {
@@ -33,7 +33,7 @@ export default async function DashboardPage() {
 
   const userId = session.user.id;
 
-  const [totalPosts, scheduledCount, publishedCount, connectedAccounts, recentPosts] =
+  const [totalPosts, scheduledCount, publishedCount, connectedAccounts, recentPosts, totalLikesAgg, totalImpressionsAgg] =
     await Promise.all([
       prisma.post.count({ where: { userId } }),
       prisma.post.count({ where: { userId, status: "SCHEDULED" } }),
@@ -45,6 +45,8 @@ export default async function DashboardPage() {
         take: 5,
         include: { socialAccount: { select: { platform: true, username: true } } },
       }),
+      prisma.post.aggregate({ where: { userId, status: "PUBLISHED" }, _sum: { metricsLikes: true } }),
+      prisma.post.aggregate({ where: { userId, status: "PUBLISHED" }, _sum: { metricsImpressions: true } }),
     ]);
 
   const stats = [
@@ -52,6 +54,8 @@ export default async function DashboardPage() {
     { label: "Scheduled", value: scheduledCount, icon: Clock, color: "text-amber-400" },
     { label: "Published", value: publishedCount, icon: CheckCircle2, color: "text-emerald-400" },
     { label: "Connected Accounts", value: connectedAccounts, icon: Link2, color: "text-violet-400" },
+    { label: "Total Likes", value: totalLikesAgg._sum.metricsLikes ?? 0, icon: Heart, color: "text-pink-400" },
+    { label: "Impressions", value: totalImpressionsAgg._sum.metricsImpressions ?? 0, icon: Eye, color: "text-sky-400" },
   ];
 
   return (
@@ -62,7 +66,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {stats.map(({ label, value, icon: Icon, color }) => (
           <Card key={label} className="bg-zinc-800 border-zinc-700">
             <CardHeader className="flex flex-row items-center justify-between pb-2">

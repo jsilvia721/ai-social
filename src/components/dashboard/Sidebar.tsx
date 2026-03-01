@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles } from "lucide-react";
+import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { icon: LayoutDashboard, label: "Overview", href: "/dashboard" },
   { icon: CalendarDays, label: "Posts", href: "/dashboard/posts" },
   { icon: PenSquare, label: "New Post", href: "/dashboard/posts/new" },
+  { icon: BarChart2, label: "Analytics", href: "/dashboard/analytics" },
   { icon: Link2, label: "Accounts", href: "/dashboard/accounts" },
 ] as const;
 
