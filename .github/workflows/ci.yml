@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, staging]
 
+env:
+  RAILWAY_PROJECT_ID: 1fdd3354-08b4-4bf5-aef7-19c798c3d191
+  RAILWAY_SERVICE_ID: 34366bcb-7e20-4826-9bc8-c754a7fd19fb
+
 jobs:
   # ── Test & Coverage ────────────────────────────────────────────────────────
   test:
@@ -39,8 +43,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Trigger Railway production deploy
-        run: curl -fsSX POST "${{ secrets.RAILWAY_DEPLOY_HOOK_PRODUCTION }}"
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Railway (production)
+        run: npx --yes @railway/cli@latest up --detach --environment production --service $RAILWAY_SERVICE_ID
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
   # ── Deploy to Staging ──────────────────────────────────────────────────────
   deploy-staging:
@@ -50,5 +58,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Trigger Railway staging deploy
-        run: curl -fsSX POST "${{ secrets.RAILWAY_DEPLOY_HOOK_STAGING }}"
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Railway (staging)
+        # RAILWAY_SERVICE_ID here refers to the staging service — update once created
+        run: npx --yes @railway/cli@latest up --detach --environment staging --service $RAILWAY_SERVICE_ID
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
