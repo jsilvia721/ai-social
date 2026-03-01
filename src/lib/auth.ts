@@ -6,7 +6,7 @@ import GoogleProvider from "next-auth/providers/google";
 
 export const authOptions: AuthOptions = {
   adapter: PrismaAdapter(prisma) as any,
-  session: { strategy: "database" },
+  session: { strategy: "jwt" },
   secret: env.NEXTAUTH_SECRET,
   providers: [
     GoogleProvider({
@@ -15,9 +15,19 @@ export const authOptions: AuthOptions = {
     }),
   ],
   callbacks: {
-    async session({ session, user }) {
+    async signIn({ user }) {
+      const allowed = env.ALLOWED_EMAILS.split(",").map((e) => e.trim().toLowerCase());
+      return allowed.includes((user.email ?? "").toLowerCase());
+    },
+    async jwt({ token, user }) {
       if (user) {
-        session.user.id = user.id;
+        token.sub = user.id;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (token?.sub && session.user) {
+        session.user.id = token.sub;
       }
       return session;
     },

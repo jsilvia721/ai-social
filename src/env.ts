@@ -11,6 +11,7 @@ const serverSchema = z.object({
   META_APP_ID: z.string().min(1),
   META_APP_SECRET: z.string().min(1),
   ANTHROPIC_API_KEY: z.string().min(1),
+  ALLOWED_EMAILS: z.string().min(1),
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),

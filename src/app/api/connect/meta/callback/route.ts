@@ -30,24 +30,28 @@ export async function GET(req: NextRequest) {
   cookieStore.delete("meta_oauth_state");
 
   if (!savedState || state !== savedState || !code) {
+    console.error("[meta/callback] state mismatch:", { savedState: !!savedState, stateMatch: state === savedState, hasCode: !!code });
     return NextResponse.redirect(
       new URL("/dashboard/accounts?error=state_mismatch", req.url)
     );
   }
 
   // Step 1: Exchange code for short-lived User Access Token
+  const redirectUri = `${env.NEXTAUTH_URL}/api/connect/meta/callback`;
   const shortTokenRes = await fetch(`${GRAPH_URL}/oauth/access_token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       client_id: env.META_APP_ID,
       client_secret: env.META_APP_SECRET,
-      redirect_uri: `${env.NEXTAUTH_URL}/api/connect/meta/callback`,
+      redirect_uri: redirectUri,
       code,
     }),
   });
 
   if (!shortTokenRes.ok) {
+    const body = await shortTokenRes.text();
+    console.error("[meta/callback] short token exchange failed:", shortTokenRes.status, body);
     return NextResponse.redirect(
       new URL("/dashboard/accounts?error=meta_token_failed", req.url)
     );
@@ -66,6 +70,8 @@ export async function GET(req: NextRequest) {
   );
 
   if (!longTokenRes.ok) {
+    const body = await longTokenRes.text();
+    console.error("[meta/callback] long token exchange failed:", longTokenRes.status, body);
     return NextResponse.redirect(
       new URL("/dashboard/accounts?error=meta_long_token_failed", req.url)
     );
@@ -81,12 +87,16 @@ export async function GET(req: NextRequest) {
   );
 
   if (!pagesRes.ok) {
+    const body = await pagesRes.text();
+    console.error("[meta/callback] pages fetch failed:", pagesRes.status, body);
     return NextResponse.redirect(
       new URL("/dashboard/accounts?error=meta_pages_failed", req.url)
     );
   }
 
-  const { data: pages } = await pagesRes.json();
+  const pagesJson = await pagesRes.json();
+  console.log("[meta/callback] pages response:", JSON.stringify(pagesJson));
+  const { data: pages } = pagesJson;
 
   if (!pages || pages.length === 0) {
     return NextResponse.redirect(

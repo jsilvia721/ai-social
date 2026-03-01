@@ -14,6 +14,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   EmailCreateAccount: "Could not create account. Please try again.",
   Callback: "Error during callback. Please try again.",
   OAuthAccountNotLinked: "This email is already linked to another account.",
+  AccessDenied: "Your account is not authorized to access this app.",
   SessionRequired: "Please sign in to access this page.",
   Default: "An error occurred. Please try again.",
 };

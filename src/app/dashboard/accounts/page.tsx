@@ -37,9 +37,17 @@ function AccountsContent() {
         message: messages[successParam] ?? "Account connected successfully.",
       });
     } else if (errorParam) {
+      const errorMessages: Record<string, string> = {
+        meta_denied: "You denied the Meta permissions request.",
+        state_mismatch: "OAuth state mismatch — please try again (cookie issue).",
+        meta_token_failed: "Failed to exchange Meta auth code for a token. Check that your redirect URI is whitelisted in the Meta app settings.",
+        meta_long_token_failed: "Failed to get long-lived Meta token.",
+        meta_pages_failed: "Failed to fetch your Facebook Pages.",
+        no_pages_found: "No Facebook Pages found. You must have at least one Facebook Page to connect Instagram/Facebook.",
+      };
       setNotification({
         type: "error",
-        message: "Failed to connect account. Please try again.",
+        message: errorMessages[errorParam] ?? `Failed to connect account (${errorParam}). Please try again.`,
       });
     }
   }, [successParam, errorParam]);
