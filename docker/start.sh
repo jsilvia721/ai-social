@@ -1,9 +1,19 @@
 #!/bin/sh
 set -e
 
-# Railway injects PORT=5432 from the Postgres service when DATABASE_URL uses
-# ${{Postgres.DATABASE_URL}}. Force the Next.js port to 3000 regardless.
+# Railway injects PORT=5432 from the Postgres service. Force port 3000.
 export PORT=3000
+
+# Railway private networking (postgres.railway.internal) uses IPv6, which can
+# cause ECONNREFUSED in some container configs. If the TCP proxy variables are
+# available (set automatically by Railway when Postgres has external networking),
+# construct the public URL from its parts and override DATABASE_URL.
+if [ -n "${RAILWAY_TCP_PROXY_DOMAIN}" ] && [ -n "${RAILWAY_TCP_PROXY_PORT}" ]; then
+  export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}?sslmode=no-verify"
+  echo "[start] DB: public TCP proxy (${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT})"
+else
+  echo "[start] DB: using injected DATABASE_URL (${DATABASE_URL%%@*}@...)"
+fi
 
 echo "[start] Pushing database schema..."
 node ./node_modules/prisma/build/index.js db push --url "$DATABASE_URL" \
