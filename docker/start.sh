@@ -12,7 +12,10 @@ if [ -n "${RAILWAY_TCP_PROXY_DOMAIN}" ] && [ -n "${RAILWAY_TCP_PROXY_PORT}" ]; t
   # sslmode=require: server requires SSL. Cert verification is handled in the
   # pg.Pool (ssl: { rejectUnauthorized: false }) rather than the connection
   # string, so the hostname mismatch between proxy and cert doesn't block us.
-  export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}?sslmode=require"
+  # No sslmode in URL — SSL is controlled by pg.Pool's ssl option in db.ts
+  # (ssl: { rejectUnauthorized: false }), which allows SSL without cert verify.
+  # Including sslmode=require in the URL would override rejectUnauthorized.
+  export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}"
   echo "[start] DB: public TCP proxy (${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT})"
 else
   echo "[start] DB: using injected DATABASE_URL"
