@@ -52,12 +52,14 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-# Prisma: generated client binary + CLI (for db push on startup) + schema
-COPY --from=builder /app/node_modules/.prisma              ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma              ./node_modules/@prisma
-COPY --from=builder /app/node_modules/prisma               ./node_modules/prisma
-COPY --from=builder /app/node_modules/pg                   ./node_modules/pg
-COPY --from=builder /app/prisma                            ./prisma
+# Full node_modules needed so the Prisma CLI can run `db push` on startup.
+# The Prisma CLI (prisma/build/index.js) transitively requires many packages
+# (@prisma/dev → valibot, remeda, hono, @electric-sql/pglite, …) that are not
+# in the @prisma scope, making selective copying fragile. Copying the whole
+# directory is the reliable alternative; image size is acceptable for a private
+# internal tool.
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/prisma       ./prisma
 
 COPY docker/start.sh ./start.sh
 RUN chmod +x ./start.sh
