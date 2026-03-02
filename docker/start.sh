@@ -1,7 +1,10 @@
 #!/bin/sh
 set -e
 
-echo "[debug] PORT=$PORT HOSTNAME=$HOSTNAME DATABASE_URL_HOST=$(echo $DATABASE_URL | sed 's|.*@||' | sed 's|/.*||')"
+# Railway injects PORT=5432 from the Postgres service when DATABASE_URL uses
+# ${{Postgres.DATABASE_URL}}. Force the Next.js port to 3000 regardless.
+export PORT=3000
+
 echo "[start] Pushing database schema..."
 node ./node_modules/prisma/build/index.js db push --url "$DATABASE_URL" \
   && echo "[start] Schema push succeeded." \
