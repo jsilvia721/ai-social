@@ -5,13 +5,15 @@ import pg from "pg";
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
 function createPrismaClient() {
-  // Use a pg.Pool so we can pass ssl: { rejectUnauthorized: false }.
-  // Railway's TCP proxy SSL cert is issued for postgres.railway.internal, not
-  // the proxy hostname, so full cert verification (pg v8 default for sslmode=require)
-  // fails with P1017. rejectUnauthorized: false allows SSL without hostname check.
+  const connectionString = process.env.DATABASE_URL!;
+  // Private network connections (sslmode=disable in URL) need no SSL.
+  // Public proxy connections need ssl: { rejectUnauthorized: false } because
+  // Railway's proxy cert is issued for postgres.railway.internal, not the proxy
+  // hostname, so full cert verification fails.
+  const sslDisabled = connectionString.includes("sslmode=disable");
   const pool = new pg.Pool({
-    connectionString: process.env.DATABASE_URL!,
-    ssl: { rejectUnauthorized: false },
+    connectionString,
+    ...(sslDisabled ? {} : { ssl: { rejectUnauthorized: false } }),
   });
   const adapter = new PrismaPg(pool);
   return new PrismaClient({
