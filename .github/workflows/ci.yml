@@ -48,7 +48,7 @@ jobs:
       - name: Deploy to Railway (production)
         run: npx --yes @railway/cli@latest up --detach --environment production --service $RAILWAY_SERVICE_ID
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
 
   # ── Deploy to Staging ──────────────────────────────────────────────────────
   deploy-staging:
@@ -64,4 +64,4 @@ jobs:
         # RAILWAY_SERVICE_ID here refers to the staging service — update once created
         run: npx --yes @railway/cli@latest up --detach --environment staging --service $RAILWAY_SERVICE_ID
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
