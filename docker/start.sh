@@ -10,7 +10,8 @@ export PORT=3000
 # Railway's TCP proxy (shinkansen.proxy.rlwy.net style hostnames).
 if [ -n "${RAILWAY_TCP_PROXY_DOMAIN}" ] && [ -n "${RAILWAY_TCP_PROXY_PORT}" ]; then
   export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}?sslmode=disable"
-  echo "[start] DB: public TCP proxy (${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT})"
+  # Debug: show variable lengths to verify Railway resolves nested references
+  echo "[start] DB: public TCP proxy (${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}) user=${PGUSER} db=${PGDATABASE} pass_len=$(echo -n "${PGPASSWORD}" | wc -c | tr -d ' ')"
 else
   echo "[start] DB: using injected DATABASE_URL"
 fi
