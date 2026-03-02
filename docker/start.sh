@@ -9,9 +9,11 @@ export PORT=3000
 # the public proxy URL for the app. sslmode=require is the correct mode for
 # Railway's TCP proxy (shinkansen.proxy.rlwy.net style hostnames).
 if [ -n "${RAILWAY_TCP_PROXY_DOMAIN}" ] && [ -n "${RAILWAY_TCP_PROXY_PORT}" ]; then
-  export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}?sslmode=disable"
-  # Debug: show variable lengths to verify Railway resolves nested references
-  echo "[start] DB: public TCP proxy (${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}) user=${PGUSER} db=${PGDATABASE} pass_len=$(echo -n "${PGPASSWORD}" | wc -c | tr -d ' ')"
+  # sslmode=require: server requires SSL. Cert verification is handled in the
+  # pg.Pool (ssl: { rejectUnauthorized: false }) rather than the connection
+  # string, so the hostname mismatch between proxy and cert doesn't block us.
+  export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}?sslmode=require"
+  echo "[start] DB: public TCP proxy (${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT})"
 else
   echo "[start] DB: using injected DATABASE_URL"
 fi
