@@ -12,4 +12,5 @@ process.env.TWITTER_CLIENT_SECRET = "test-twitter-client-secret";
 process.env.META_APP_ID = "test-meta-app-id";
 process.env.META_APP_SECRET = "test-meta-app-secret";
 process.env.ANTHROPIC_API_KEY = "test-anthropic-api-key";
+process.env.ALLOWED_EMAILS = "test@example.com";
 process.env.NODE_ENV = "test";
