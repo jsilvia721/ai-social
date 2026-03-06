@@ -134,29 +134,14 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
-  # ── Deploy to Production ───────────────────────────────────────────────────
-  # Uses a Railway deploy hook (permanent URL, no token expiry).
-  # Setup: Railway dashboard → your service → Settings → Deploy Hooks → create hook
-  # for the "production" environment → copy URL → save as RAILWAY_DEPLOY_HOOK_PRODUCTION
-  # GitHub secret.  Railway will pull and build from the `main` branch automatically.
-  deploy-production:
-    name: Deploy → Production
-    needs: [lint, test, e2e]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Trigger Railway deploy (production)
-        run: curl -fsSL -X POST "${{ secrets.RAILWAY_DEPLOY_HOOK_PRODUCTION }}"
-
-  # ── Deploy to Staging ──────────────────────────────────────────────────────
-  # Same pattern — hook URL saved as RAILWAY_DEPLOY_HOOK_STAGING.
-  deploy-staging:
-    name: Deploy → Staging
-    needs: [lint, test, e2e]
-    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Trigger Railway deploy (staging)
-        run: curl -fsSL -X POST "${{ secrets.RAILWAY_DEPLOY_HOOK_STAGING }}"
+  # ── Deploy ─────────────────────────────────────────────────────────────────
+  # Deployment is handled by Railway's native GitHub integration (no tokens).
+  # Railway watches the `staging` and `main` branches directly via the GitHub App
+  # and auto-deploys on every push.
+  #
+  # Setup (one-time per service):
+  #   Railway dashboard → service → Settings → Source → Connect Repo
+  #   → select jsilvia721/ai-social → set Branch to `staging` (or `main`)
+  #   → enable Auto Deploy
+  #
+  # No secrets or tokens required — Railway uses its own GitHub App credentials.
