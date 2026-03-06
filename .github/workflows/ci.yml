@@ -95,6 +95,7 @@ jobs:
       TOKEN_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
       ALLOWED_EMAILS: test@example.com
       NODE_ENV: test
+      PLAYWRIGHT_E2E: "true"
 
     steps:
       - uses: actions/checkout@v4

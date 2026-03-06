@@ -6,7 +6,8 @@ import { env } from "@/env";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
-  if (process.env.NODE_ENV !== "test") {
+  // next dev forces NODE_ENV="development", so we use a dedicated flag instead.
+  if (!process.env.PLAYWRIGHT_E2E) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

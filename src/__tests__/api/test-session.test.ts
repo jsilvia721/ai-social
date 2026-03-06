@@ -18,26 +18,23 @@ beforeEach(() => {
 });
 
 describe("GET /api/test/session", () => {
-  describe("outside test environment", () => {
-    const originalEnv = process.env.NODE_ENV;
-
+  describe("when PLAYWRIGHT_E2E is not set", () => {
     beforeEach(() => {
-      // Temporarily set to non-test
-      Object.defineProperty(process.env, "NODE_ENV", { value: "production", configurable: true });
+      delete process.env.PLAYWRIGHT_E2E;
     });
 
     afterEach(() => {
-      Object.defineProperty(process.env, "NODE_ENV", { value: originalEnv, configurable: true });
+      process.env.PLAYWRIGHT_E2E = "true";
     });
 
-    it("returns 404 in production environment", async () => {
+    it("returns 404 when PLAYWRIGHT_E2E is absent", async () => {
       const res = await GET(makeRequest({ email: "test@example.com" }));
       expect(res.status).toBe(404);
       expect(prismaMock.user.upsert).not.toHaveBeenCalled();
     });
   });
 
-  describe("in test environment", () => {
+  describe("when PLAYWRIGHT_E2E is set", () => {
     it("returns 400 when email is missing", async () => {
       const res = await GET(makeRequest());
       expect(res.status).toBe(400);

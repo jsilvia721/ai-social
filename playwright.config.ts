@@ -27,9 +27,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "NODE_ENV=test npm run dev",
+    command: "npm run dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
-    env: { NODE_ENV: "test" },
+    env: { PLAYWRIGHT_E2E: "true" },
   },
 });
