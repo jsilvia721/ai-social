@@ -46,7 +46,7 @@ export async function publishYouTubeVideo(
   }
 
   // SSRF guard: only fetch from our own storage
-  const allowedStoragePrefix = env.MINIO_PUBLIC_URL ?? "http://localhost:9000";
+  const allowedStoragePrefix = env.AWS_S3_PUBLIC_URL ?? "http://localhost:9000";
   if (!mediaUrls[0].startsWith(allowedStoragePrefix)) {
     throw new Error("Invalid media URL: only internal storage URLs are permitted");
   }

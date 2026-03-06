@@ -25,6 +25,7 @@ const config: Config = {
     "!src/types/**",
     "!src/instrumentation.ts",
     "!src/middleware.ts",
+    "!src/cron/**",               // EventBridge Lambda handlers — no testable logic
     // Config / setup files — no testable business logic
     "!src/lib/auth.ts",             // NextAuth config
     "!src/lib/db.ts",               // Prisma singleton

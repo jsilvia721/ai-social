@@ -135,13 +135,44 @@ jobs:
           retention-days: 7
 
   # ── Deploy ─────────────────────────────────────────────────────────────────
-  # Deployment is handled by Railway's native GitHub integration (no tokens).
-  # Railway watches the `staging` and `main` branches directly via the GitHub App
-  # and auto-deploys on every push.
-  #
-  # Setup (one-time per service):
-  #   Railway dashboard → service → Settings → Source → Connect Repo
-  #   → select jsilvia721/ai-social → set Branch to `staging` (or `main`)
-  #   → enable Auto Deploy
-  #
-  # No secrets or tokens required — Railway uses its own GitHub App credentials.
+  deploy:
+    name: Deploy
+    needs: [e2e]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Set stage
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "STAGE=production" >> $GITHUB_ENV
+          else
+            echo "STAGE=staging" >> $GITHUB_ENV
+          fi
+
+      - name: Run DB migrations
+        env:
+          DATABASE_URL: ${{ github.ref == 'refs/heads/main' && secrets.PROD_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Deploy with SST
+        run: npx sst deploy --stage $STAGE
