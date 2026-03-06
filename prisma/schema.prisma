@@ -99,6 +99,8 @@ enum Platform {
   TWITTER
   INSTAGRAM
   FACEBOOK
+  TIKTOK
+  YOUTUBE
 }
 
 enum PostStatus {

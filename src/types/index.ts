@@ -1,4 +1,4 @@
-export type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK";
+export type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK" | "TIKTOK" | "YOUTUBE";
 export type PostStatus = "DRAFT" | "SCHEDULED" | "PUBLISHED" | "FAILED";
 
 export interface SocialAccount {

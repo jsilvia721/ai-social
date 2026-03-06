@@ -1,6 +1,8 @@
 import type { SocialAccount } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { refreshTwitterToken } from "@/lib/platforms/twitter";
+import { refreshYouTubeToken } from "@/lib/platforms/youtube";
+import { refreshTikTokToken } from "@/lib/platforms/tiktok";
 
 const REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -17,13 +19,38 @@ export async function ensureValidToken(account: SocialAccount): Promise<string> 
     return accessToken;
   }
 
-  // Twitter: attempt refresh
   if (!refreshToken) {
-    throw new Error("Twitter token expired and no refresh token available");
+    throw new Error(`${platform} token expired and no refresh token available`);
   }
 
-  const newTokenData = await refreshTwitterToken(refreshToken);
+  if (platform === "TWITTER") {
+    const newTokenData = await refreshTwitterToken(refreshToken);
+    await prisma.socialAccount.update({
+      where: { id: account.id },
+      data: {
+        accessToken: newTokenData.accessToken,
+        refreshToken: newTokenData.refreshToken,
+        expiresAt: newTokenData.expiresAt,
+      },
+    });
+    return newTokenData.accessToken;
+  }
 
+  if (platform === "YOUTUBE") {
+    // Google refresh tokens don't rotate — only access token changes
+    const newTokenData = await refreshYouTubeToken(refreshToken);
+    await prisma.socialAccount.update({
+      where: { id: account.id },
+      data: {
+        accessToken: newTokenData.accessToken,
+        expiresAt: newTokenData.expiresAt,
+      },
+    });
+    return newTokenData.accessToken;
+  }
+
+  // TIKTOK
+  const newTokenData = await refreshTikTokToken(refreshToken);
   await prisma.socialAccount.update({
     where: { id: account.id },
     data: {
@@ -32,6 +59,5 @@ export async function ensureValidToken(account: SocialAccount): Promise<string> 
       expiresAt: newTokenData.expiresAt,
     },
   });
-
   return newTokenData.accessToken;
 }

@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const posts = await prisma.post.findMany({
     where: {
       userId: session.user.id,
-      ...(status ? { status: status as any } : {}),
+      ...(status ? { status: status as import("@prisma/client").PostStatus } : {}),
     },
     include: { socialAccount: true },
     orderBy: { scheduledAt: "asc" },

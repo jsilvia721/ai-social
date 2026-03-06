@@ -35,6 +35,7 @@ Return only the post text, no explanation.`,
 
 export async function suggestOptimalTimes(
   platform: Platform,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   timezone: string
 ): Promise<Date[]> {
   const now = new Date();

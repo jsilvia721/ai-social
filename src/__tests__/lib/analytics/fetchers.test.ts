@@ -2,6 +2,8 @@ import {
   fetchTwitterMetrics,
   fetchFacebookMetrics,
   fetchInstagramMetrics,
+  fetchTikTokMetrics,
+  fetchYouTubeMetrics,
 } from "@/lib/analytics/fetchers";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -236,5 +238,120 @@ describe("fetchInstagramMetrics", () => {
   it("returns null on fetch error without throwing", async () => {
     jest.spyOn(global, "fetch").mockRejectedValue(new Error("Network error"));
     expect(await fetchInstagramMetrics("token", "media-123")).toBeNull();
+  });
+});
+
+// ── fetchTikTokMetrics ───────────────────────────────────────────────────────
+
+describe("fetchTikTokMetrics", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it("returns mapped metrics on a successful response", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          videos: [
+            { like_count: 50, comment_count: 10, share_count: 5, view_count: 2000 },
+          ],
+        },
+      }),
+    } as Response);
+
+    const result = await fetchTikTokMetrics("token", "pub-123");
+
+    expect(result).toMatchObject({
+      metricsLikes: 50,
+      metricsComments: 10,
+      metricsShares: 5,
+      metricsImpressions: 2000,
+      metricsReach: null,
+      metricsSaves: null,
+    });
+    expect(result?.metricsUpdatedAt).toBeInstanceOf(Date);
+  });
+
+  it("returns null when the API response is not ok", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue({ ok: false } as Response);
+    expect(await fetchTikTokMetrics("token", "pub-123")).toBeNull();
+  });
+
+  it("returns null when videos array is empty", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { videos: [] } }),
+    } as Response);
+    expect(await fetchTikTokMetrics("token", "pub-123")).toBeNull();
+  });
+
+  it("returns null on fetch error without throwing", async () => {
+    jest.spyOn(global, "fetch").mockRejectedValue(new Error("Network error"));
+    expect(await fetchTikTokMetrics("token", "pub-123")).toBeNull();
+  });
+});
+
+// ── fetchYouTubeMetrics ──────────────────────────────────────────────────────
+
+describe("fetchYouTubeMetrics", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it("returns mapped metrics on a successful response", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            statistics: {
+              likeCount: "123",
+              commentCount: "45",
+              viewCount: "9000",
+            },
+          },
+        ],
+      }),
+    } as Response);
+
+    const result = await fetchYouTubeMetrics("token", "yt-video-id");
+
+    expect(result).toMatchObject({
+      metricsLikes: 123,
+      metricsComments: 45,
+      metricsImpressions: 9000,
+      metricsShares: null,
+      metricsReach: null,
+      metricsSaves: null,
+    });
+    expect(result?.metricsUpdatedAt).toBeInstanceOf(Date);
+  });
+
+  it("returns null when the API response is not ok", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue({ ok: false } as Response);
+    expect(await fetchYouTubeMetrics("token", "yt-id")).toBeNull();
+  });
+
+  it("returns null when items array is empty", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [] }),
+    } as Response);
+    expect(await fetchYouTubeMetrics("token", "yt-id")).toBeNull();
+  });
+
+  it("returns null on fetch error without throwing", async () => {
+    jest.spyOn(global, "fetch").mockRejectedValue(new Error("Network error"));
+    expect(await fetchYouTubeMetrics("token", "yt-id")).toBeNull();
+  });
+
+  it("parses string counts to integers", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [{ statistics: { likeCount: "42", commentCount: "7", viewCount: "100" } }],
+      }),
+    } as Response);
+
+    const result = await fetchYouTubeMetrics("token", "yt-id");
+    expect(typeof result?.metricsLikes).toBe("number");
+    expect(result?.metricsLikes).toBe(42);
   });
 });
