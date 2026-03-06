@@ -49,7 +49,7 @@ export default function PostsPage() {
     setIsLoading(true);
     const url = activeTab === "ALL" ? "/api/posts" : `/api/posts?status=${activeTab}`;
     fetch(url).then(async (res) => {
-      if (res.ok && !cancelled) setPosts(await res.json());
+      if (res.ok && !cancelled) setPosts((await res.json()).posts);
       if (!cancelled) setIsLoading(false);
     }).catch(() => {
       if (!cancelled) setIsLoading(false);

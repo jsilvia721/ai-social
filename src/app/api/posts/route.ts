@@ -11,17 +11,26 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
+  const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10) || 50));
+  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
 
-  const posts = await prisma.post.findMany({
-    where: {
-      userId: session.user.id,
-      ...(status ? { status: status as import("@prisma/client").PostStatus } : {}),
-    },
-    include: { socialAccount: true },
-    orderBy: { scheduledAt: "asc" },
-  });
+  const where = {
+    userId: session.user.id,
+    ...(status ? { status: status as import("@prisma/client").PostStatus } : {}),
+  };
 
-  return NextResponse.json(posts);
+  const [posts, total] = await prisma.$transaction([
+    prisma.post.findMany({
+      where,
+      include: { socialAccount: true },
+      orderBy: { scheduledAt: "asc" },
+      take: limit,
+      skip: (page - 1) * limit,
+    }),
+    prisma.post.count({ where }),
+  ]);
+
+  return NextResponse.json({ posts, total, page, limit });
 }
 
 export async function DELETE(req: NextRequest) {

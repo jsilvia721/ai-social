@@ -5,6 +5,14 @@ import { prisma } from "@/lib/db";
 import { getServerSession } from "next-auth/next";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+
+const TikTokTokenSchema = z.object({
+  access_token: z.string(),
+  refresh_token: z.string().optional(),
+  expires_in: z.number().optional(),
+  open_id: z.string(),
+});
 
 const TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const TIKTOK_USER_URL = "https://open.tiktokapis.com/v2/user/info/";
@@ -74,8 +82,14 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const tokenData = await tokenRes.json();
-  const { access_token, refresh_token, expires_in, open_id } = tokenData;
+  const tokenParseResult = TikTokTokenSchema.safeParse(await tokenRes.json());
+  if (!tokenParseResult.success) {
+    console.error("[tiktok/callback] unexpected token response shape:", tokenParseResult.error);
+    return NextResponse.redirect(
+      new URL("/dashboard/accounts?error=tiktok_token_failed", req.url)
+    );
+  }
+  const { access_token, refresh_token, expires_in, open_id } = tokenParseResult.data;
 
   // Fetch TikTok user info to get display name
   const userRes = await fetch(

@@ -91,7 +91,7 @@ export async function publishTikTokVideo(
   }
 
   const data = await res.json();
-  const publishId = data?.data?.publish_id as string;
+  const publishId = typeof data?.data?.publish_id === "string" ? data.data.publish_id : null;
 
   if (!publishId) {
     throw new Error("TikTok publish init did not return a publish_id");

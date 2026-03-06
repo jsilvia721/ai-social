@@ -5,6 +5,13 @@ import { prisma } from "@/lib/db";
 import { getServerSession } from "next-auth/next";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+
+const GoogleTokenSchema = z.object({
+  access_token: z.string(),
+  refresh_token: z.string().optional(),
+  expires_in: z.number().optional(),
+});
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const YOUTUBE_CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels";
@@ -57,8 +64,14 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const tokenData = await tokenRes.json();
-  const { access_token, refresh_token, expires_in } = tokenData;
+  const tokenParseResult = GoogleTokenSchema.safeParse(await tokenRes.json());
+  if (!tokenParseResult.success) {
+    console.error("[youtube/callback] unexpected token response shape:", tokenParseResult.error);
+    return NextResponse.redirect(
+      new URL("/dashboard/accounts?error=youtube_token_failed", req.url)
+    );
+  }
+  const { access_token, refresh_token, expires_in } = tokenParseResult.data;
 
   // Fetch the YouTube channel info (name + channel ID)
   const channelRes = await fetch(
