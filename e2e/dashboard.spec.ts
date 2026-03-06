@@ -18,7 +18,8 @@ test.describe("Dashboard (authenticated)", () => {
   test("stat cards are rendered (Total Posts, Scheduled, Connected Accounts)", async ({ page }) => {
     await page.goto("/dashboard");
     await expect(page.getByText("Total Posts")).toBeVisible();
-    await expect(page.getByText("Scheduled")).toBeVisible();
+    // "Scheduled" also appears in seeded post status badges; use .first() to target the stat card.
+    await expect(page.getByText("Scheduled").first()).toBeVisible();
     await expect(page.getByText("Connected Accounts")).toBeVisible();
   });
 

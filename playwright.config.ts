@@ -30,6 +30,11 @@ export default defineConfig({
     command: "npm run dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
-    env: { PLAYWRIGHT_E2E: "true" },
+    env: {
+      PLAYWRIGHT_E2E: "true",
+      // Allow the E2E test user regardless of what .env.local has for ALLOWED_EMAILS.
+      // process.env vars take precedence over Next.js .env files.
+      ALLOWED_EMAILS: "test@example.com",
+    },
   },
 });
