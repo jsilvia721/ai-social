@@ -5,6 +5,7 @@ import {
   PutBucketPolicyCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const bucket = process.env.MINIO_BUCKET ?? "ai-social";
 
@@ -61,4 +62,24 @@ export async function uploadFile(
   // MinIO/self-hosted S3 uses /{bucket}/{key} — detect by checking if endpoint is R2
   const isR2 = (process.env.MINIO_ENDPOINT ?? "").includes("r2.cloudflarestorage.com");
   return isR2 ? `${publicUrl}/${key}` : `${publicUrl}/${bucket}/${key}`;
+}
+
+export function getPublicUrl(key: string): string {
+  const publicUrl = process.env.MINIO_PUBLIC_URL ?? "http://localhost:9000";
+  const isR2 = (process.env.MINIO_ENDPOINT ?? "").includes("r2.cloudflarestorage.com");
+  return isR2 ? `${publicUrl}/${key}` : `${publicUrl}/${bucket}/${key}`;
+}
+
+export async function getPresignedUploadUrl(
+  key: string,
+  mimeType: string,
+  expiresInSeconds = 3600
+): Promise<string> {
+  await ensureBucket();
+  const command = new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ContentType: mimeType,
+  });
+  return getSignedUrl(s3, command, { expiresIn: expiresInSeconds });
 }

@@ -2,11 +2,15 @@ import { prisma } from "@/lib/db";
 import { publishTweet } from "@/lib/platforms/twitter";
 import { publishInstagramPost } from "@/lib/platforms/instagram";
 import { publishFacebookPost } from "@/lib/platforms/facebook";
+import { publishTikTokVideo } from "@/lib/platforms/tiktok";
+import { publishYouTubeVideo } from "@/lib/platforms/youtube";
 import { ensureValidToken } from "@/lib/token";
 import {
   fetchTwitterMetrics,
   fetchFacebookMetrics,
   fetchInstagramMetrics,
+  fetchTikTokMetrics,
+  fetchYouTubeMetrics,
 } from "@/lib/analytics/fetchers";
 import type { SocialAccount } from "@prisma/client";
 
@@ -47,7 +51,7 @@ export async function runScheduler() {
             post.mediaUrls
           );
           platformPostId = result.id;
-        } else {
+        } else if (socialAccount.platform === "FACEBOOK") {
           const result = await publishFacebookPost(
             token,
             socialAccount.platformId,
@@ -55,6 +59,14 @@ export async function runScheduler() {
             post.mediaUrls
           );
           platformPostId = result.id;
+        } else if (socialAccount.platform === "TIKTOK") {
+          const result = await publishTikTokVideo(token, post.content, post.mediaUrls);
+          platformPostId = result.id;
+        } else if (socialAccount.platform === "YOUTUBE") {
+          const result = await publishYouTubeVideo(token, post.content, post.mediaUrls);
+          platformPostId = result.id;
+        } else {
+          throw new Error(`Unsupported platform: ${socialAccount.platform}`);
         }
 
         await prisma.post.update({
@@ -107,8 +119,14 @@ export async function runMetricsRefresh() {
           metrics = await fetchTwitterMetrics(token, postId);
         } else if (platform === "INSTAGRAM") {
           metrics = await fetchInstagramMetrics(token, postId);
-        } else {
+        } else if (platform === "FACEBOOK") {
           metrics = await fetchFacebookMetrics(token, postId);
+        } else if (platform === "TIKTOK") {
+          metrics = await fetchTikTokMetrics(token, postId);
+        } else if (platform === "YOUTUBE") {
+          metrics = await fetchYouTubeMetrics(token, postId);
+        } else {
+          throw new Error(`Unsupported platform for metrics: ${platform}`);
         }
 
         if (!metrics) return;

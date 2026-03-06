@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { AccountCard } from "@/components/accounts/AccountCard";
 import type { Platform } from "@/types";
 
-const PLATFORMS: Platform[] = ["TWITTER", "INSTAGRAM", "FACEBOOK"];
+const PLATFORMS: Platform[] = ["TWITTER", "INSTAGRAM", "FACEBOOK", "TIKTOK", "YOUTUBE"];
 
 interface Account {
   id: string;
@@ -31,7 +31,10 @@ function AccountsContent() {
       const messages: Record<string, string> = {
         twitter_connected: "Twitter account connected successfully.",
         meta_connected: "Facebook and Instagram accounts connected successfully.",
+        tiktok_connected: "TikTok account connected successfully.",
+        youtube_connected: "YouTube channel connected successfully.",
       };
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setNotification({
         type: "success",
         message: messages[successParam] ?? "Account connected successfully.",
@@ -44,6 +47,16 @@ function AccountsContent() {
         meta_long_token_failed: "Failed to get long-lived Meta token.",
         meta_pages_failed: "Failed to fetch your Facebook Pages.",
         no_pages_found: "No Facebook Pages found. You must have at least one Facebook Page to connect Instagram/Facebook.",
+        tiktok_denied: "You denied the TikTok permissions request.",
+        tiktok_state_missing: "TikTok OAuth state missing — please try again.",
+        tiktok_state_invalid: "TikTok OAuth state invalid — please try again.",
+        tiktok_state_mismatch: "TikTok OAuth state mismatch — please try again (cookie issue).",
+        tiktok_token_failed: "Failed to exchange TikTok auth code. Ensure your redirect URI is registered in the TikTok developer portal.",
+        youtube_denied: "You denied the YouTube permissions request.",
+        youtube_state_mismatch: "YouTube OAuth state mismatch — please try again (cookie issue).",
+        youtube_token_failed: "Failed to exchange YouTube auth code for a token.",
+        youtube_channel_failed: "Failed to fetch your YouTube channel info.",
+        youtube_no_channel: "No YouTube channel found on this Google account.",
       };
       setNotification({
         type: "error",
@@ -61,6 +74,7 @@ function AccountsContent() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchAccounts();
   }, [fetchAccounts]);
 
@@ -119,6 +133,7 @@ function AccountsContent() {
 
       <p className="text-xs text-zinc-600">
         Instagram and Facebook use the same Meta OAuth connection. Connecting Meta will link both platforms.
+        TikTok requires business API approval — your account will connect but posting may be unavailable until approved.
       </p>
     </div>
   );

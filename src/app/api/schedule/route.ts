@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
 }
 
 // Available for manual triggering (e.g. local dev, integration tests)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function POST(_req: NextRequest) {
   const data = await runScheduler();
   return NextResponse.json(data);

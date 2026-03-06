@@ -38,22 +38,50 @@ describe("GET /api/posts", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns posts for the current user", async () => {
+  it("returns paginated posts with total count", async () => {
     mockAuthenticated();
     const fakePosts = [{ id: "post-1", content: "hello", status: "DRAFT" }];
-    prismaMock.post.findMany.mockResolvedValue(fakePosts as any);
+    prismaMock.$transaction.mockResolvedValue([fakePosts, 1] as any);
 
     const res = await GET(makeGetRequest());
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toHaveLength(1);
-    expect(body[0].id).toBe("post-1");
+    expect(body.posts).toHaveLength(1);
+    expect(body.posts[0].id).toBe("post-1");
+    expect(body.total).toBe(1);
+    expect(body.page).toBe(1);
+    expect(body.limit).toBe(50);
+  });
+
+  it("respects page and limit query params", async () => {
+    mockAuthenticated();
+    prismaMock.$transaction.mockResolvedValue([[], 100] as any);
+
+    const res = await GET(makeGetRequest({ page: "3", limit: "20" }));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.page).toBe(3);
+    expect(body.limit).toBe(20);
+    expect(body.total).toBe(100);
+  });
+
+  it("caps limit at 200", async () => {
+    mockAuthenticated();
+    prismaMock.$transaction.mockResolvedValue([[], 0] as any);
+
+    await GET(makeGetRequest({ limit: "999" }));
+
+    // $transaction receives already-evaluated PrismaPromises — verify findMany was called with take:200
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 200 })
+    );
   });
 
   it("always filters by the current user's id", async () => {
     mockAuthenticated();
-    prismaMock.post.findMany.mockResolvedValue([]);
+    prismaMock.$transaction.mockResolvedValue([[], 0] as any);
 
     await GET(makeGetRequest());
 
@@ -66,7 +94,7 @@ describe("GET /api/posts", () => {
 
   it("passes status filter to the database query when provided", async () => {
     mockAuthenticated();
-    prismaMock.post.findMany.mockResolvedValue([]);
+    prismaMock.$transaction.mockResolvedValue([[], 0] as any);
 
     await GET(makeGetRequest({ status: "SCHEDULED" }));
 

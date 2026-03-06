@@ -14,7 +14,7 @@ import Anthropic from "@anthropic-ai/sdk";
 // mock.results[0].value is the return value of that constructor call
 // (the object with messages.create), not the `this` object (mock.instances[0]).
 const getCreateSpy = (): jest.Mock =>
-  (Anthropic as jest.Mock).mock.results[0]?.value?.messages?.create;
+  (Anthropic as unknown as jest.Mock).mock.results[0]?.value?.messages?.create;
 
 import { generatePostContent, suggestOptimalTimes } from "@/lib/ai";
 import type { Platform } from "@/types";

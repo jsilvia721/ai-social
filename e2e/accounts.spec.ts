@@ -1,0 +1,30 @@
+import { test, expect } from "@playwright/test";
+
+test.describe("Accounts page (authenticated)", () => {
+  test("accounts page loads with the heading", async ({ page }) => {
+    await page.goto("/dashboard/accounts");
+    await expect(page).not.toHaveURL(/auth\/signin/);
+    await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
+  });
+
+  test("all platform connect buttons are rendered", async ({ page }) => {
+    await page.goto("/dashboard/accounts");
+    // Twitter and Instagram are seeded/connected; Facebook, TikTok, YouTube are not.
+    // Unconnected platforms render an <a> link (role=link) with "Connect {Platform}".
+    await expect(page.getByRole("link", { name: /connect facebook/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /connect tiktok/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /connect youtube/i })).toBeVisible();
+  });
+
+  test("seeded Twitter account shows as connected", async ({ page }) => {
+    await page.goto("/dashboard/accounts");
+    // Use exact:true — "@e2etestuser" is a substring of "@e2etestuser_ig" (Instagram).
+    await expect(page.getByText("@e2etestuser", { exact: true })).toBeVisible();
+  });
+
+  test("seeded Instagram account shows as connected", async ({ page }) => {
+    await page.goto("/dashboard/accounts");
+    // The seeded Instagram account (@e2etestuser_ig) should appear connected
+    await expect(page.getByText("@e2etestuser_ig")).toBeVisible();
+  });
+});

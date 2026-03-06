@@ -8,10 +8,12 @@ export async function generatePostContent(
   platform: Platform,
   tone?: string
 ): Promise<string> {
-  const platformGuide = {
+  const platformGuide: Record<Platform, string> = {
     TWITTER: "Keep it under 280 characters. Use hashtags sparingly.",
     INSTAGRAM: "Can be longer. Use emojis and 3-5 relevant hashtags.",
     FACEBOOK: "Conversational tone. Can include a question to drive engagement.",
+    TIKTOK: "Short, punchy caption. Use trending hashtags. Keep it casual and energetic.",
+    YOUTUBE: "Write a compelling video description. Include keywords naturally in the first 2 sentences.",
   };
 
   const message = await client.messages.create({
@@ -35,6 +37,7 @@ Return only the post text, no explanation.`,
 
 export async function suggestOptimalTimes(
   platform: Platform,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   timezone: string
 ): Promise<Date[]> {
   const now = new Date();
@@ -44,6 +47,8 @@ export async function suggestOptimalTimes(
     TWITTER: [9, 12, 17],
     INSTAGRAM: [11, 14, 19],
     FACEBOOK: [9, 13, 16],
+    TIKTOK: [7, 14, 21],
+    YOUTUBE: [15, 17, 20],
   };
 
   return defaults[platform].map((hour) => {

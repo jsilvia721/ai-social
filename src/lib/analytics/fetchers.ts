@@ -1,3 +1,5 @@
+const TIKTOK_VIDEO_URL = "https://open.tiktokapis.com/v2/video/query/";
+
 export interface FetchedMetrics {
   metricsLikes: number | null;
   metricsComments: number | null;
@@ -67,6 +69,69 @@ export async function fetchFacebookMetrics(
       metricsComments: comments,
       metricsShares: shares,
       metricsImpressions: impressions,
+      metricsReach: null,
+      metricsSaves: null,
+      metricsUpdatedAt: new Date(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchTikTokMetrics(
+  accessToken: string,
+  publishId: string
+): Promise<FetchedMetrics | null> {
+  try {
+    const res = await fetch(
+      `${TIKTOK_VIDEO_URL}?fields=like_count,comment_count,share_count,view_count`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ filters: { video_ids: [publishId] } }),
+      }
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const video = json?.data?.videos?.[0];
+    if (!video) return null;
+    return {
+      metricsLikes: video.like_count ?? null,
+      metricsComments: video.comment_count ?? null,
+      metricsShares: video.share_count ?? null,
+      metricsImpressions: video.view_count ?? null,
+      metricsReach: null,
+      metricsSaves: null,
+      metricsUpdatedAt: new Date(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchYouTubeMetrics(
+  accessToken: string,
+  videoId: string
+): Promise<FetchedMetrics | null> {
+  try {
+    const url = new URL("https://www.googleapis.com/youtube/v3/videos");
+    url.searchParams.set("part", "statistics");
+    url.searchParams.set("id", videoId);
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const stats = json?.items?.[0]?.statistics;
+    if (!stats) return null;
+    return {
+      metricsLikes: stats.likeCount ? parseInt(stats.likeCount, 10) : null,
+      metricsComments: stats.commentCount ? parseInt(stats.commentCount, 10) : null,
+      metricsShares: null,
+      metricsImpressions: stats.viewCount ? parseInt(stats.viewCount, 10) : null,
       metricsReach: null,
       metricsSaves: null,
       metricsUpdatedAt: new Date(),

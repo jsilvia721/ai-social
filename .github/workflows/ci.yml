@@ -6,11 +6,34 @@ on:
   pull_request:
     branches: [main, staging]
 
-env:
-  RAILWAY_PROJECT_ID: 1fdd3354-08b4-4bf5-aef7-19c798c3d191
-  RAILWAY_SERVICE_ID: 34366bcb-7e20-4826-9bc8-c754a7fd19fb
-
 jobs:
+  # ── Lint & Type-check ──────────────────────────────────────────────────────
+  lint:
+    name: Lint & Type-check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
   # ── Test & Coverage ────────────────────────────────────────────────────────
   test:
     name: Test & Coverage
@@ -35,33 +58,90 @@ jobs:
       - name: Run tests with coverage
         run: npm run test:coverage -- --ci
 
-  # ── Deploy to Production ───────────────────────────────────────────────────
-  deploy-production:
-    name: Deploy → Production
-    needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  # ── E2E Tests ──────────────────────────────────────────────────────────────
+  e2e:
+    name: E2E Tests (Playwright)
+    needs: [test]
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: ai_social_e2e
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/ai_social_e2e?sslmode=disable
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: e2e-test-secret-at-least-32-chars-long
+      GOOGLE_CLIENT_ID: e2e-google-client-id
+      GOOGLE_CLIENT_SECRET: e2e-google-client-secret
+      TWITTER_CLIENT_ID: e2e-twitter-client-id
+      TWITTER_CLIENT_SECRET: e2e-twitter-client-secret
+      META_APP_ID: e2e-meta-app-id
+      META_APP_SECRET: e2e-meta-app-secret
+      ANTHROPIC_API_KEY: e2e-anthropic-api-key
+      TIKTOK_CLIENT_ID: e2e-tiktok-client-id
+      TIKTOK_CLIENT_SECRET: e2e-tiktok-client-secret
+      TOKEN_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      ALLOWED_EMAILS: test@example.com
+      NODE_ENV: test
+      PLAYWRIGHT_E2E: "true"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to Railway (production)
-        run: npx --yes @railway/cli@latest up --detach --environment production --service $RAILWAY_SERVICE_ID
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
 
-  # ── Deploy to Staging ──────────────────────────────────────────────────────
-  deploy-staging:
-    name: Deploy → Staging
-    needs: test
-    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
-    runs-on: ubuntu-latest
+      - name: Install dependencies
+        run: npm ci
 
-    steps:
-      - uses: actions/checkout@v4
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
 
-      - name: Deploy to Railway (staging)
-        # RAILWAY_SERVICE_ID here refers to the staging service — update once created
-        run: npx --yes @railway/cli@latest up --detach --environment staging --service $RAILWAY_SERVICE_ID
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Push schema to test DB
+        run: npx prisma db push
+
+      - name: Seed test data
+        run: npx tsx prisma/seed.ts
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Run Playwright tests
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # ── Deploy ─────────────────────────────────────────────────────────────────
+  # Deployment is handled by Railway's native GitHub integration (no tokens).
+  # Railway watches the `staging` and `main` branches directly via the GitHub App
+  # and auto-deploys on every push.
+  #
+  # Setup (one-time per service):
+  #   Railway dashboard → service → Settings → Source → Connect Repo
+  #   → select jsilvia721/ai-social → set Branch to `staging` (or `main`)
+  #   → enable Auto Deploy
+  #
+  # No secrets or tokens required — Railway uses its own GitHub App credentials.
