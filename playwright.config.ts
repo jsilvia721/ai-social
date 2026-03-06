@@ -11,11 +11,25 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // Runs once before all tests: hits /api/test/session and saves cookies to disk.
+    {
+      name: "setup",
+      testMatch: /fixtures\/auth\.setup\.ts/,
+    },
+    // Main test project — reuses the authenticated session saved by setup.
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: "e2e/.auth/user.json",
+      },
+      dependencies: ["setup"],
+    },
   ],
   webServer: {
-    command: "npm run dev",
+    command: "NODE_ENV=test npm run dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
+    env: { NODE_ENV: "test" },
   },
 });
