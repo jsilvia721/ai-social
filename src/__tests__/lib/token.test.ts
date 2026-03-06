@@ -202,6 +202,13 @@ describe("ensureValidToken", () => {
     });
   });
 
+  it("throws for unsupported platform instead of silently falling through", async () => {
+    const account = makeAccountForPlatform("LINKEDIN" as any);
+    await expect(ensureValidToken(account)).rejects.toThrow(
+      "Token refresh not supported for platform: LINKEDIN"
+    );
+  });
+
   describe("TikTok token refresh", () => {
     it("refreshes expired TikTok token, updates DB with rotated tokens", async () => {
       const account = makeAccountForPlatform("TIKTOK");

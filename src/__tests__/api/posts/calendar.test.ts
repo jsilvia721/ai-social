@@ -72,8 +72,8 @@ describe("GET /api/posts/calendar", () => {
 
     const call = prismaMock.post.findMany.mock.calls[0]?.[0] as { where: { userId: string; scheduledAt: { gte: Date; lt: Date } } };
     expect(call.where.userId).toBe(mockSession.user.id);
-    expect(call.where.scheduledAt.gte).toEqual(new Date(2026, 2, 1)); // Mar 1
-    expect(call.where.scheduledAt.lt).toEqual(new Date(2026, 3, 1));  // Apr 1
+    expect(call.where.scheduledAt.gte).toEqual(new Date(Date.UTC(2026, 2, 1))); // Mar 1 UTC
+    expect(call.where.scheduledAt.lt).toEqual(new Date(Date.UTC(2026, 3, 1)));  // Apr 1 UTC
   });
 
   it("handles month=11 (December) without overflow", async () => {
@@ -84,7 +84,7 @@ describe("GET /api/posts/calendar", () => {
     expect(res.status).toBe(200);
 
     const call = prismaMock.post.findMany.mock.calls[0]?.[0] as { where: { scheduledAt: { gte: Date; lt: Date } } };
-    expect(call.where.scheduledAt.gte).toEqual(new Date(2026, 11, 1)); // Dec 1
-    expect(call.where.scheduledAt.lt).toEqual(new Date(2027, 0, 1));  // Jan 1 next year
+    expect(call.where.scheduledAt.gte).toEqual(new Date(Date.UTC(2026, 11, 1))); // Dec 1 UTC
+    expect(call.where.scheduledAt.lt).toEqual(new Date(Date.UTC(2027, 0, 1)));  // Jan 1 next year UTC
   });
 });

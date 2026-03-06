@@ -5,6 +5,8 @@
 // Until approved, publishTikTokVideo() will throw a clear error so the
 // post is marked FAILED with an explanatory message rather than silently hanging.
 
+import { env } from "@/env";
+
 const TIKTOK_POST_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
 const TIKTOK_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
 const TIKTOK_REFRESH_URL = "https://open.tiktokapis.com/v2/oauth/token/";
@@ -12,8 +14,8 @@ const TIKTOK_REFRESH_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 export async function refreshTikTokToken(
   refreshToken: string
 ): Promise<{ accessToken: string; refreshToken: string; expiresAt: Date }> {
-  const clientId = process.env.TIKTOK_CLIENT_ID!;
-  const clientSecret = process.env.TIKTOK_CLIENT_SECRET!;
+  const clientId = env.TIKTOK_CLIENT_ID;
+  const clientSecret = env.TIKTOK_CLIENT_SECRET;
 
   const res = await fetch(TIKTOK_REFRESH_URL, {
     method: "POST",

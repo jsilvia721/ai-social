@@ -41,6 +41,14 @@ describe("GET /api/upload/presigned", () => {
     expect(body.error).toContain("Unsupported video type");
   });
 
+  it("returns 400 when fileSize is missing", async () => {
+    mockAuthenticated();
+    const res = await GET(makeRequest({ mimeType: "video/mp4" }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("fileSize is required");
+  });
+
   it("returns 400 when file size exceeds 500MB", async () => {
     mockAuthenticated();
     const tooBig = String(501 * 1024 * 1024);
@@ -68,7 +76,7 @@ describe("GET /api/upload/presigned", () => {
     mockGetPresignedUploadUrl.mockResolvedValue("https://presigned-url");
     mockGetPublicUrl.mockReturnValue("https://public-url");
 
-    await GET(makeRequest({ mimeType: "video/mp4" }));
+    await GET(makeRequest({ mimeType: "video/mp4", fileSize: "1000000" }));
 
     const [key, mimeType] = mockGetPresignedUploadUrl.mock.calls[0] as [string, string];
     expect(key).toMatch(new RegExp(`^uploads/${mockSession.user.id}/`));
@@ -81,7 +89,7 @@ describe("GET /api/upload/presigned", () => {
     mockGetPresignedUploadUrl.mockResolvedValue("https://presigned-url");
     mockGetPublicUrl.mockReturnValue("https://public-url");
 
-    const res = await GET(makeRequest({ mimeType: "video/quicktime" }));
+    const res = await GET(makeRequest({ mimeType: "video/quicktime", fileSize: "1000000" }));
     expect(res.status).toBe(200);
 
     const [key] = mockGetPresignedUploadUrl.mock.calls[0] as [string, string];
@@ -93,7 +101,7 @@ describe("GET /api/upload/presigned", () => {
     mockGetPresignedUploadUrl.mockResolvedValue("https://presigned-url");
     mockGetPublicUrl.mockReturnValue("https://public-url");
 
-    const res = await GET(makeRequest({ mimeType: "video/webm" }));
+    const res = await GET(makeRequest({ mimeType: "video/webm", fileSize: "1000000" }));
     expect(res.status).toBe(200);
   });
 });

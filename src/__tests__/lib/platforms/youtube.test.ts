@@ -8,6 +8,7 @@ beforeEach(() => {
     ...originalEnv,
     GOOGLE_CLIENT_ID: "test-google-client-id",
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
+    MINIO_PUBLIC_URL: "https://storage.example.com",
   };
   jest.spyOn(global, "fetch").mockImplementation(() => {
     throw new Error("fetch not mocked");
@@ -69,6 +70,29 @@ describe("publishYouTubeVideo", () => {
     );
   });
 
+  it("throws when media URL is not from internal storage (SSRF guard)", async () => {
+    await expect(
+      publishYouTubeVideo("token", "desc", ["https://evil.com/video.mp4"])
+    ).rejects.toThrow("Invalid media URL");
+  });
+
+  it("throws when YouTube response is missing video ID", async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(8),
+        headers: { get: () => "video/mp4" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ kind: "youtube#video" }), // no id field
+      });
+
+    await expect(
+      publishYouTubeVideo("token", "desc", ["https://storage.example.com/video.mp4"])
+    ).rejects.toThrow("YouTube upload response missing video ID");
+  });
+
   it("throws when video fetch from storage fails", async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: false,
@@ -76,7 +100,7 @@ describe("publishYouTubeVideo", () => {
     });
 
     await expect(
-      publishYouTubeVideo("token", "desc", ["https://s3.example.com/video.mp4"])
+      publishYouTubeVideo("token", "desc", ["https://storage.example.com/video.mp4"])
     ).rejects.toThrow("Failed to fetch video from storage");
   });
 
@@ -97,7 +121,7 @@ describe("publishYouTubeVideo", () => {
     const result = await publishYouTubeVideo(
       "access-token",
       "My Video\nDescription here",
-      ["https://s3.example.com/video.mp4"]
+      ["https://storage.example.com/video.mp4"]
     );
 
     expect(result.id).toBe("yt-video-123");
@@ -117,7 +141,7 @@ describe("publishYouTubeVideo", () => {
         json: async () => ({ id: "yt-456" }),
       });
 
-    await publishYouTubeVideo("token", longTitle, ["https://example.com/v.mp4"]);
+    await publishYouTubeVideo("token", longTitle, ["https://storage.example.com/v.mp4"]);
 
     const uploadCall = (global.fetch as jest.Mock).mock.calls[1];
     const bodyStr = uploadCall[1].body.toString();
@@ -136,7 +160,7 @@ describe("publishYouTubeVideo", () => {
         json: async () => ({ id: "yt-789" }),
       });
 
-    await publishYouTubeVideo("token", "", ["https://example.com/v.mp4"]);
+    await publishYouTubeVideo("token", "", ["https://storage.example.com/v.mp4"]);
 
     const uploadCall = (global.fetch as jest.Mock).mock.calls[1];
     const bodyStr = uploadCall[1].body.toString();
@@ -156,7 +180,7 @@ describe("publishYouTubeVideo", () => {
       });
 
     await expect(
-      publishYouTubeVideo("token", "desc", ["https://example.com/v.mp4"])
+      publishYouTubeVideo("token", "desc", ["https://storage.example.com/v.mp4"])
     ).rejects.toThrow("YouTube upload failed");
   });
 });

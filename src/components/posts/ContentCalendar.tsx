@@ -41,9 +41,9 @@ const MONTH_NAMES = [
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-function toLocalDateKey(dateStr: string): string {
+function toUTCDateKey(dateStr: string): string {
   const d = new Date(dateStr);
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
 }
 
 export function ContentCalendar({ posts, year, month, onNavigate }: ContentCalendarProps) {
@@ -51,16 +51,16 @@ export function ContentCalendar({ posts, year, month, onNavigate }: ContentCalen
   const byDay = new Map<string, CalendarPost[]>();
   for (const post of posts) {
     if (!post.scheduledAt) continue;
-    const key = toLocalDateKey(post.scheduledAt);
+    const key = toUTCDateKey(post.scheduledAt);
     if (!byDay.has(key)) byDay.set(key, []);
     byDay.get(key)!.push(post);
   }
 
-  // Build calendar grid
-  const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  // Build calendar grid (all calculations in UTC for consistency with stored dates)
+  const firstDay = new Date(Date.UTC(year, month, 1)).getUTCDay(); // 0=Sun
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   const today = new Date();
-  const todayKey = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+  const todayKey = `${today.getUTCFullYear()}-${today.getUTCMonth()}-${today.getUTCDate()}`;
 
   const cells: (number | null)[] = [
     ...Array(firstDay).fill(null),

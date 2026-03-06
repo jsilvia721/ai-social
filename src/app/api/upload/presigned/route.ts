@@ -35,7 +35,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unsupported video type" }, { status: 400 });
   }
 
-  if (fileSize && parseInt(fileSize, 10) > MAX_VIDEO_SIZE) {
+  if (!fileSize) {
+    return NextResponse.json({ error: "fileSize is required" }, { status: 400 });
+  }
+  const fileSizeNum = parseInt(fileSize, 10);
+  if (isNaN(fileSizeNum) || fileSizeNum > MAX_VIDEO_SIZE) {
     return NextResponse.json({ error: "File too large (max 500 MB)" }, { status: 400 });
   }
 

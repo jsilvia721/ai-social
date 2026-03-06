@@ -62,10 +62,11 @@ export async function runScheduler() {
         } else if (socialAccount.platform === "TIKTOK") {
           const result = await publishTikTokVideo(token, post.content, post.mediaUrls);
           platformPostId = result.id;
-        } else {
-          // YOUTUBE
+        } else if (socialAccount.platform === "YOUTUBE") {
           const result = await publishYouTubeVideo(token, post.content, post.mediaUrls);
           platformPostId = result.id;
+        } else {
+          throw new Error(`Unsupported platform: ${socialAccount.platform}`);
         }
 
         await prisma.post.update({
@@ -122,9 +123,10 @@ export async function runMetricsRefresh() {
           metrics = await fetchFacebookMetrics(token, postId);
         } else if (platform === "TIKTOK") {
           metrics = await fetchTikTokMetrics(token, postId);
-        } else {
-          // YOUTUBE
+        } else if (platform === "YOUTUBE") {
           metrics = await fetchYouTubeMetrics(token, postId);
+        } else {
+          throw new Error(`Unsupported platform for metrics: ${platform}`);
         }
 
         if (!metrics) return;

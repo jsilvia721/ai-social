@@ -1,6 +1,8 @@
 // YouTube Data API v3 client
 // Uses Google OAuth 2.0 (access_type=offline for refresh tokens)
 
+import { env } from "@/env";
+
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const YOUTUBE_UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos";
 
@@ -12,8 +14,8 @@ export async function refreshYouTubeToken(refreshToken: string): Promise<{
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     }),
@@ -41,6 +43,12 @@ export async function publishYouTubeVideo(
     throw new Error(
       "YouTube requires a video file. Attach a video before scheduling."
     );
+  }
+
+  // Validate the media URL is from our own storage (SSRF guard)
+  const allowedStoragePrefix = process.env.MINIO_PUBLIC_URL ?? "http://localhost:9000";
+  if (!mediaUrls[0].startsWith(allowedStoragePrefix)) {
+    throw new Error("Invalid media URL: only internal storage URLs are permitted");
   }
 
   // Fetch the video from our S3 URL
@@ -72,7 +80,7 @@ export async function publishYouTubeVideo(
     part: "snippet,status",
   });
 
-  const boundary = "boundary_ai_social";
+  const boundary = `boundary_${crypto.randomUUID().replace(/-/g, "")}`;
   const metadataPart = JSON.stringify(metadata);
   const body = [
     `--${boundary}`,
@@ -107,7 +115,10 @@ export async function publishYouTubeVideo(
   }
 
   const data = await res.json();
-  const videoId = data.id as string;
+  const videoId = typeof data?.id === "string" ? data.id : null;
+  if (!videoId) {
+    throw new Error(`YouTube upload response missing video ID: ${JSON.stringify(data)}`);
+  }
 
   return {
     id: videoId,

@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -17,8 +17,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Invalid year or month" }, { status: 400 });
   }
 
-  const start = new Date(year, month, 1);
-  const end = new Date(year, month + 1, 1);
+  const start = new Date(Date.UTC(year, month, 1));
+  const end = new Date(Date.UTC(year, month + 1, 1));
 
   const posts = await prisma.post.findMany({
     where: {

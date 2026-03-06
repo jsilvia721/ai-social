@@ -49,15 +49,18 @@ export async function ensureValidToken(account: SocialAccount): Promise<string> 
     return newTokenData.accessToken;
   }
 
-  // TIKTOK
-  const newTokenData = await refreshTikTokToken(refreshToken);
-  await prisma.socialAccount.update({
-    where: { id: account.id },
-    data: {
-      accessToken: newTokenData.accessToken,
-      refreshToken: newTokenData.refreshToken,
-      expiresAt: newTokenData.expiresAt,
-    },
-  });
-  return newTokenData.accessToken;
+  if (platform === "TIKTOK") {
+    const newTokenData = await refreshTikTokToken(refreshToken);
+    await prisma.socialAccount.update({
+      where: { id: account.id },
+      data: {
+        accessToken: newTokenData.accessToken,
+        refreshToken: newTokenData.refreshToken,
+        expiresAt: newTokenData.expiresAt,
+      },
+    });
+    return newTokenData.accessToken;
+  }
+
+  throw new Error(`Token refresh not supported for platform: ${platform}`);
 }

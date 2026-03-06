@@ -6,12 +6,15 @@ jest.mock("@/lib/analytics/fetchers", () => ({
   fetchTwitterMetrics: jest.fn(),
   fetchFacebookMetrics: jest.fn(),
   fetchInstagramMetrics: jest.fn(),
+  fetchTikTokMetrics: jest.fn(),
+  fetchYouTubeMetrics: jest.fn(),
 }));
-// Platform publishers are only used by runScheduler (covered separately via
-// the /api/schedule route tests), but we mock them here so the module loads.
+// Platform publishers are mocked so the module loads without side effects.
 jest.mock("@/lib/platforms/twitter", () => ({ publishTweet: jest.fn() }));
 jest.mock("@/lib/platforms/instagram", () => ({ publishInstagramPost: jest.fn() }));
 jest.mock("@/lib/platforms/facebook", () => ({ publishFacebookPost: jest.fn() }));
+jest.mock("@/lib/platforms/tiktok", () => ({ publishTikTokVideo: jest.fn() }));
+jest.mock("@/lib/platforms/youtube", () => ({ publishYouTubeVideo: jest.fn() }));
 
 import { runMetricsRefresh } from "@/lib/scheduler";
 import { ensureValidToken } from "@/lib/token";
@@ -143,6 +146,19 @@ describe("runMetricsRefresh", () => {
     mockEnsureValidToken.mockRejectedValue(new Error("Token expired"));
 
     await expect(runMetricsRefresh()).resolves.not.toThrow();
+    expect(prismaMock.post.update).not.toHaveBeenCalled();
+  });
+
+  it("throws (caught per-post) for unknown platform instead of silently routing to YouTube", async () => {
+    const post = {
+      ...makePost(),
+      socialAccount: { ...makeSocialAccount(), platform: "LINKEDIN" as any },
+    };
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+
+    // The error is caught per-post, so runMetricsRefresh resolves without throwing
+    await expect(runMetricsRefresh()).resolves.not.toThrow();
+    // No update should happen since it threw before fetching metrics
     expect(prismaMock.post.update).not.toHaveBeenCalled();
   });
 
