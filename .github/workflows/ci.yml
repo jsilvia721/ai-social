@@ -80,7 +80,7 @@ jobs:
           - 5432:5432
 
     env:
-      DATABASE_URL: postgresql://test:test@localhost:5432/ai_social_e2e
+      DATABASE_URL: postgresql://test:test@localhost:5432/ai_social_e2e?sslmode=disable
       NEXTAUTH_URL: http://localhost:3000
       NEXTAUTH_SECRET: e2e-test-secret-at-least-32-chars-long
       GOOGLE_CLIENT_ID: e2e-google-client-id
