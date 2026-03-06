@@ -14,5 +14,6 @@ process.env.META_APP_SECRET = "test-meta-app-secret";
 process.env.ANTHROPIC_API_KEY = "test-anthropic-api-key";
 process.env.TIKTOK_CLIENT_ID = "test-tiktok-client-id";
 process.env.TIKTOK_CLIENT_SECRET = "test-tiktok-client-secret";
+process.env.TOKEN_ENCRYPTION_KEY = "0".repeat(64); // 32 zero-bytes as hex — test only
 process.env.ALLOWED_EMAILS = "test@example.com";
 (process.env as any).NODE_ENV = "test";

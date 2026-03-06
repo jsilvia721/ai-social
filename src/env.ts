@@ -13,6 +13,7 @@ const serverSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1),
   TIKTOK_CLIENT_ID: z.string().min(1),
   TIKTOK_CLIENT_SECRET: z.string().min(1),
+  TOKEN_ENCRYPTION_KEY: z.string().length(64), // 32-byte AES-256 key as 64 hex chars
   ALLOWED_EMAILS: z.string().min(1),
   NODE_ENV: z
     .enum(["development", "production", "test"])

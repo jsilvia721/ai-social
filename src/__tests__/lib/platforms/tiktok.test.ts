@@ -100,44 +100,18 @@ describe("publishTikTokVideo", () => {
     ).rejects.toThrow("TikTok publish init did not return a publish_id");
   });
 
-  it("polls status and resolves when publish completes", async () => {
-    // Init returns publish_id
-    (global.fetch as jest.Mock)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { publish_id: "pub-123" } }),
-      })
-      // First status check — still processing
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { status: "PROCESSING_UPLOAD" } }),
-      })
-      // Second status check — complete
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { status: "PUBLISH_COMPLETE" } }),
-      });
+  it("returns publishId immediately after init succeeds (no polling)", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: { publish_id: "pub-123" } }),
+    });
 
     const result = await publishTikTokVideo("token", "caption", [
       "https://example.com/video.mp4",
     ]);
 
     expect(result.id).toBe("pub-123");
-  });
-
-  it("throws when publish status is FAILED", async () => {
-    (global.fetch as jest.Mock)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { publish_id: "pub-456" } }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ data: { status: "FAILED", fail_reason: "content_violation" } }),
-      });
-
-    await expect(
-      publishTikTokVideo("token", "caption", ["https://example.com/video.mp4"])
-    ).rejects.toThrow("TikTok publish failed: content_violation");
+    // Only one fetch — no status polling
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 });

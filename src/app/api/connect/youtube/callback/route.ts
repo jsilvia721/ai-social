@@ -1,4 +1,5 @@
 import { env } from "@/env";
+import { encryptToken } from "@/lib/crypto";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getServerSession } from "next-auth/next";
@@ -95,15 +96,15 @@ export async function GET(req: NextRequest) {
       platform: "YOUTUBE",
       platformId: channelId,
       username: channelName,
-      accessToken: access_token,
-      refreshToken: refresh_token ?? null,
+      accessToken: encryptToken(access_token),
+      refreshToken: refresh_token ? encryptToken(refresh_token) : null,
       expiresAt,
     },
     update: {
       userId: session.user.id,
       username: channelName,
-      accessToken: access_token,
-      refreshToken: refresh_token ?? null,
+      accessToken: encryptToken(access_token),
+      refreshToken: refresh_token ? encryptToken(refresh_token) : null,
       expiresAt,
     },
   });

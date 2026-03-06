@@ -1,4 +1,5 @@
 import { env } from "@/env";
+import { encryptToken } from "@/lib/crypto";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getServerSession } from "next-auth/next";
@@ -119,14 +120,14 @@ export async function GET(req: NextRequest) {
         platform: "FACEBOOK",
         platformId: page.id,
         username: page.name,
-        accessToken: page.access_token,
+        accessToken: encryptToken(page.access_token),
         refreshToken: null,
         expiresAt: null,
       },
       update: {
         userId: session.user.id,
         username: page.name,
-        accessToken: page.access_token,
+        accessToken: encryptToken(page.access_token),
         expiresAt: null,
       },
     });
@@ -151,14 +152,14 @@ export async function GET(req: NextRequest) {
             platform: "INSTAGRAM",
             platformId: igData.id,
             username: igData.username,
-            accessToken: page.access_token, // Instagram Graph API uses the Page token
+            accessToken: encryptToken(page.access_token), // Instagram Graph API uses the Page token
             refreshToken: null,
             expiresAt: null,
           },
           update: {
             userId: session.user.id,
             username: igData.username,
-            accessToken: page.access_token,
+            accessToken: encryptToken(page.access_token),
             expiresAt: null,
           },
         });

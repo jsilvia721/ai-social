@@ -4,6 +4,10 @@ import { mockAuthenticated, mockUnauthenticated, mockSession } from "@/__tests__
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("next-auth/next");
 jest.mock("@/lib/auth", () => ({ authOptions: {} }));
+jest.mock("@/lib/crypto", () => ({
+  encryptToken: (s: string) => s,
+  decryptToken: (s: string) => s,
+}));
 
 jest.mock("next/headers", () => {
   const store = { get: jest.fn(), set: jest.fn(), delete: jest.fn() };

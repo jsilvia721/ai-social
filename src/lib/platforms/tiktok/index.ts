@@ -4,11 +4,14 @@
 // NOTE: The Content Posting API requires TikTok business account approval.
 // Until approved, publishTikTokVideo() will throw a clear error so the
 // post is marked FAILED with an explanatory message rather than silently hanging.
+//
+// Publish status is NOT polled synchronously. TikTok processes uploads
+// asynchronously; polling up to 30s would block the scheduler. The publish_id
+// is stored as the post's platform ID so status can be checked later if needed.
 
 import { env } from "@/env";
 
 const TIKTOK_POST_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
-const TIKTOK_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/";
 const TIKTOK_REFRESH_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 
 export async function refreshTikTokToken(
@@ -39,40 +42,6 @@ export async function refreshTikTokToken(
     refreshToken: data.refresh_token,
     expiresAt: new Date(Date.now() + data.expires_in * 1000),
   };
-}
-
-async function waitForPublishStatus(
-  accessToken: string,
-  publishId: string,
-  maxWaitMs = 30_000
-): Promise<void> {
-  const deadline = Date.now() + maxWaitMs;
-  while (Date.now() < deadline) {
-    const res = await fetch(TIKTOK_STATUS_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ publish_id: publishId }),
-    });
-
-    if (!res.ok) {
-      throw new Error(`TikTok publish status check failed: ${res.status}`);
-    }
-
-    const data = await res.json();
-    const status = data?.data?.status;
-
-    if (status === "PUBLISH_COMPLETE") return;
-    if (status === "FAILED") {
-      const failReason = data?.data?.fail_reason ?? "unknown";
-      throw new Error(`TikTok publish failed: ${failReason}`);
-    }
-    // PROCESSING_UPLOAD, PROCESSING_DOWNLOAD — wait and retry
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  throw new Error("TikTok publish timed out after 30s");
 }
 
 export async function publishTikTokVideo(
@@ -127,8 +96,6 @@ export async function publishTikTokVideo(
   if (!publishId) {
     throw new Error("TikTok publish init did not return a publish_id");
   }
-
-  await waitForPublishStatus(accessToken, publishId);
 
   return { id: publishId };
 }
