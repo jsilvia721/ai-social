@@ -29,10 +29,10 @@ jobs:
           DATABASE_URL: postgresql://test:test@localhost:5432/test
 
       - name: Lint
-        run: node node_modules/eslint/bin/eslint.js src/
+        run: npm run lint
 
       - name: Type-check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
   # ── Test & Coverage ────────────────────────────────────────────────────────
   test:

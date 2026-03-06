@@ -70,7 +70,7 @@ describe("GET /api/posts/calendar", () => {
 
     await GET(makeRequest({ year: "2026", month: "2" })); // March
 
-    const call = prismaMock.post.findMany.mock.calls[0][0];
+    const call = prismaMock.post.findMany.mock.calls[0]?.[0] as { where: { userId: string; scheduledAt: { gte: Date; lt: Date } } };
     expect(call.where.userId).toBe(mockSession.user.id);
     expect(call.where.scheduledAt.gte).toEqual(new Date(2026, 2, 1)); // Mar 1
     expect(call.where.scheduledAt.lt).toEqual(new Date(2026, 3, 1));  // Apr 1
@@ -83,7 +83,7 @@ describe("GET /api/posts/calendar", () => {
     const res = await GET(makeRequest({ year: "2026", month: "11" }));
     expect(res.status).toBe(200);
 
-    const call = prismaMock.post.findMany.mock.calls[0][0];
+    const call = prismaMock.post.findMany.mock.calls[0]?.[0] as { where: { scheduledAt: { gte: Date; lt: Date } } };
     expect(call.where.scheduledAt.gte).toEqual(new Date(2026, 11, 1)); // Dec 1
     expect(call.where.scheduledAt.lt).toEqual(new Date(2027, 0, 1));  // Jan 1 next year
   });

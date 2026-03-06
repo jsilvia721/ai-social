@@ -15,4 +15,4 @@ process.env.ANTHROPIC_API_KEY = "test-anthropic-api-key";
 process.env.TIKTOK_CLIENT_ID = "test-tiktok-client-id";
 process.env.TIKTOK_CLIENT_SECRET = "test-tiktok-client-secret";
 process.env.ALLOWED_EMAILS = "test@example.com";
-process.env.NODE_ENV = "test";
+(process.env as any).NODE_ENV = "test";

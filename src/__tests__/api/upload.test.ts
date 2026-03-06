@@ -24,7 +24,7 @@ function makeUploadRequest(
   filename: string,
   mimeType: string
 ): NextRequest {
-  const blob = new Blob([content], { type: mimeType });
+  const blob = new Blob([content as BlobPart], { type: mimeType });
   const file = new File([blob], filename, { type: mimeType });
   const formData = new FormData();
   formData.append("file", file);

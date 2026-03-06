@@ -24,6 +24,8 @@ const PLATFORM_LABELS: Record<Platform, string> = {
   TWITTER: "Twitter / X",
   INSTAGRAM: "Instagram",
   FACEBOOK: "Facebook",
+  TIKTOK: "TikTok",
+  YOUTUBE: "YouTube",
 };
 
 interface Account {

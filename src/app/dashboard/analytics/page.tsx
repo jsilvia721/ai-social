@@ -10,6 +10,8 @@ const PLATFORM_COLOR: Record<Platform, string> = {
   TWITTER: "text-sky-400",
   INSTAGRAM: "text-pink-500",
   FACEBOOK: "text-blue-500",
+  TIKTOK: "text-zinc-100",
+  YOUTUBE: "text-red-500",
 };
 
 function fmt(n: number): string {
