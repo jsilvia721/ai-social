@@ -135,6 +135,10 @@ jobs:
           retention-days: 7
 
   # ── Deploy to Production ───────────────────────────────────────────────────
+  # Uses a Railway deploy hook (permanent URL, no token expiry).
+  # Setup: Railway dashboard → your service → Settings → Deploy Hooks → create hook
+  # for the "production" environment → copy URL → save as RAILWAY_DEPLOY_HOOK_PRODUCTION
+  # GitHub secret.  Railway will pull and build from the `main` branch automatically.
   deploy-production:
     name: Deploy → Production
     needs: [lint, test, e2e]
@@ -142,14 +146,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy to Railway (production)
-        run: npx --yes @railway/cli@3 up --detach --environment production --service ai-social
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+      - name: Trigger Railway deploy (production)
+        run: curl -fsSL -X POST "${{ secrets.RAILWAY_DEPLOY_HOOK_PRODUCTION }}"
 
   # ── Deploy to Staging ──────────────────────────────────────────────────────
+  # Same pattern — hook URL saved as RAILWAY_DEPLOY_HOOK_STAGING.
   deploy-staging:
     name: Deploy → Staging
     needs: [lint, test, e2e]
@@ -157,9 +158,5 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy to Railway (staging)
-        run: npx --yes @railway/cli@3 up --detach --environment staging --service ai-social
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+      - name: Trigger Railway deploy (staging)
+        run: curl -fsSL -X POST "${{ secrets.RAILWAY_DEPLOY_HOOK_STAGING }}"
