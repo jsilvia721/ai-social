@@ -6,11 +6,34 @@ on:
   pull_request:
     branches: [main, staging]
 
-env:
-  RAILWAY_PROJECT_ID: 1fdd3354-08b4-4bf5-aef7-19c798c3d191
-  RAILWAY_SERVICE_ID: 34366bcb-7e20-4826-9bc8-c754a7fd19fb
-
 jobs:
+  # ── Lint & Type-check ──────────────────────────────────────────────────────
+  lint:
+    name: Lint & Type-check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+
+      - name: Lint
+        run: node node_modules/eslint/bin/eslint.js src/
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
   # ── Test & Coverage ────────────────────────────────────────────────────────
   test:
     name: Test & Coverage
@@ -38,7 +61,7 @@ jobs:
   # ── Deploy to Production ───────────────────────────────────────────────────
   deploy-production:
     name: Deploy → Production
-    needs: test
+    needs: [lint, test]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
@@ -46,14 +69,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Deploy to Railway (production)
-        run: npx --yes @railway/cli@latest up --detach --environment production --service $RAILWAY_SERVICE_ID
+        run: npx --yes @railway/cli@3 up --detach --environment production --service ${{ secrets.RAILWAY_SERVICE_ID_PRODUCTION }}
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
 
   # ── Deploy to Staging ──────────────────────────────────────────────────────
   deploy-staging:
     name: Deploy → Staging
-    needs: test
+    needs: [lint, test]
     if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
@@ -61,7 +84,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Deploy to Railway (staging)
-        # RAILWAY_SERVICE_ID here refers to the staging service — update once created
-        run: npx --yes @railway/cli@latest up --detach --environment staging --service $RAILWAY_SERVICE_ID
+        run: npx --yes @railway/cli@3 up --detach --environment staging --service ${{ secrets.RAILWAY_SERVICE_ID_STAGING }}
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
