@@ -8,7 +8,6 @@ beforeEach(() => {
     ...originalEnv,
     GOOGLE_CLIENT_ID: "test-google-client-id",
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
-    MINIO_PUBLIC_URL: "https://storage.example.com",
   };
   jest.spyOn(global, "fetch").mockImplementation(() => {
     throw new Error("fetch not mocked");

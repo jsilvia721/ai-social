@@ -15,6 +15,7 @@ const serverSchema = z.object({
   TIKTOK_CLIENT_SECRET: z.string().min(1),
   TOKEN_ENCRYPTION_KEY: z.string().length(64), // 32-byte AES-256 key as 64 hex chars
   ALLOWED_EMAILS: z.string().min(1),
+  MINIO_PUBLIC_URL: z.string().url().optional(), // Base URL for internal S3 storage; defaults to http://localhost:9000 in dev
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),

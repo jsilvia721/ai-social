@@ -16,4 +16,5 @@ process.env.TIKTOK_CLIENT_ID = "test-tiktok-client-id";
 process.env.TIKTOK_CLIENT_SECRET = "test-tiktok-client-secret";
 process.env.TOKEN_ENCRYPTION_KEY = "0".repeat(64); // 32 zero-bytes as hex — test only
 process.env.ALLOWED_EMAILS = "test@example.com";
+process.env.MINIO_PUBLIC_URL = "https://storage.example.com";
 (process.env as any).NODE_ENV = "test";
