@@ -4,9 +4,17 @@
  *
  * Run: npx tsx prisma/seed.ts
  */
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
+import pg from "pg";
 
-const prisma = new PrismaClient();
+const connectionString = process.env.DATABASE_URL!;
+const sslDisabled = connectionString.includes("sslmode=disable");
+const pool = new pg.Pool({
+  connectionString,
+  ...(sslDisabled ? {} : { ssl: { rejectUnauthorized: false } }),
+});
+const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
 async function main() {
   // ── Test user ──────────────────────────────────────────────────────────────
