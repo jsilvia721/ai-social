@@ -17,6 +17,6 @@ test.describe("Authentication (unauthenticated)", () => {
   test("sign-in page renders the Google sign-in button", async ({ page }) => {
     await page.goto("/auth/signin");
     await expect(page).not.toHaveTitle(/error/i);
-    await expect(page.getByRole("button", { name: /sign in with google/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /continue with google/i })).toBeVisible();
   });
 });
