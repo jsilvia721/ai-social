@@ -1,10 +1,13 @@
 // Twitter/X API client
 // Uses OAuth 2.0 with PKCE (user context — required for tweet.write)
 
+import { assertSafeMediaUrl } from "@/lib/platforms/ssrf-guard";
+
 async function uploadTwitterMedia(
   accessToken: string,
   url: string
 ): Promise<string> {
+  assertSafeMediaUrl(url);
   const fileRes = await fetch(url);
   if (!fileRes.ok) throw new Error(`Failed to fetch media from: ${url}`);
 
