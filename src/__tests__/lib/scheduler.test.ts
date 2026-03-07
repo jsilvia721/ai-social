@@ -293,16 +293,9 @@ describe("runScheduler", () => {
   });
 
   it("recovers stuck PUBLISHING posts (older than 5 min) by resetting to RETRYING", async () => {
-    const stuckPost = makePost({
-      status: "PUBLISHING",
-      updatedAt: new Date(Date.now() - 6 * 60_000), // 6 min ago
-    } as any);
-
-    // First findMany: no due posts; second findMany path for stuck posts
+    // First findMany: no due posts; stuck-post recovery still runs via updateMany
     prismaMock.post.findMany.mockResolvedValueOnce([]);
-    prismaMock.post.updateMany
-      .mockResolvedValueOnce({ count: 0 }) // no initial claims
-      .mockResolvedValueOnce({ count: 1 }); // stuck post recovery
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 }); // stuck post recovery
 
     await runScheduler();
 

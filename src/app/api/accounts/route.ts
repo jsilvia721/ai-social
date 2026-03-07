@@ -3,15 +3,25 @@ import { prisma } from "@/lib/db";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 
-// GET /api/accounts — list all social accounts across businesses the user belongs to
-export async function GET() {
+// GET /api/accounts?businessId=... — list social accounts (optionally scoped to a business)
+export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const { searchParams } = new URL(req.url);
+  const businessId = searchParams.get("businessId");
+
+  const where = businessId
+    ? {
+        businessId,
+        business: { members: { some: { userId: session.user.id } } },
+      }
+    : { business: { members: { some: { userId: session.user.id } } } };
+
   const accounts = await prisma.socialAccount.findMany({
-    where: { business: { members: { some: { userId: session.user.id } } } },
+    where,
     select: {
       id: true,
       businessId: true,

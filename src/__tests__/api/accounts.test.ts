@@ -14,13 +14,14 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
+const makeGetRequest = (url = "http://localhost/api/accounts") => new NextRequest(url);
 const makeRequest = (url: string) => new NextRequest(url);
 
 describe("GET /api/accounts", () => {
   it("returns 401 when not authenticated", async () => {
     mockUnauthenticated();
 
-    const res = await GET();
+    const res = await GET(makeGetRequest());
 
     expect(res.status).toBe(401);
     const body = await res.json();
@@ -41,7 +42,7 @@ describe("GET /api/accounts", () => {
     ];
     prismaMock.socialAccount.findMany.mockResolvedValue(fakeAccounts as any);
 
-    const res = await GET();
+    const res = await GET(makeGetRequest());
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -54,11 +55,24 @@ describe("GET /api/accounts", () => {
     mockAuthenticated();
     prismaMock.socialAccount.findMany.mockResolvedValue([]);
 
-    await GET();
+    await GET(makeGetRequest());
 
     expect(prismaMock.socialAccount.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { business: { members: { some: { userId: mockSession.user.id } } } },
+      })
+    );
+  });
+
+  it("filters by businessId when query param is provided", async () => {
+    mockAuthenticated();
+    prismaMock.socialAccount.findMany.mockResolvedValue([]);
+
+    await GET(makeGetRequest("http://localhost/api/accounts?businessId=biz-1"));
+
+    expect(prismaMock.socialAccount.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ businessId: "biz-1" }),
       })
     );
   });
@@ -69,7 +83,7 @@ describe("GET /api/accounts", () => {
       { id: "acc-1", businessId: "biz-1", platform: "TWITTER", username: "user", blotatoAccountId: "b-1", createdAt: new Date() } as any,
     ]);
 
-    const res = await GET();
+    const res = await GET(makeGetRequest());
     const body = await res.json();
 
     expect(body[0]).not.toHaveProperty("accessToken");

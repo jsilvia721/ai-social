@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -47,6 +48,9 @@ interface EditPostData {
 export function PostComposer({ editPost }: { editPost?: EditPostData }) {
   const isEditMode = !!editPost;
   const router = useRouter();
+  const { data: session } = useSession();
+  const activeBusinessId = (session?.user as { id: string; activeBusinessId?: string | null })
+    ?.activeBusinessId;
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState(editPost?.socialAccountId ?? "");
   const [content, setContent] = useState(editPost?.content ?? "");
@@ -66,11 +70,14 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
 
   useEffect(() => {
     if (isEditMode) return; // don't fetch accounts in edit mode
-    fetch("/api/accounts")
+    const url = activeBusinessId
+      ? `/api/accounts?businessId=${activeBusinessId}`
+      : "/api/accounts";
+    fetch(url)
       .then((res) => res.json())
       .then((data) => setAccounts(data))
       .catch(() => {});
-  }, [isEditMode]);
+  }, [isEditMode, activeBusinessId]);
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
   const charLimit = selectedAccount ? CHAR_LIMITS[selectedAccount.platform] : undefined;
@@ -156,6 +163,7 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
         content: content.trim(),
         socialAccountId: selectedAccountId,
         mediaUrls,
+        ...(activeBusinessId ? { businessId: activeBusinessId } : {}),
       };
 
       if (scheduleMode === "schedule" && scheduledAt) {
