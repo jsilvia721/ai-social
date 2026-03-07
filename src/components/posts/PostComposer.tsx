@@ -44,7 +44,7 @@ interface EditPostData {
   mediaUrls: string[];
 }
 
-export function PostComposer({ editPost }: { editPost?: EditPostData }) {
+export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: EditPostData; defaultScheduledAt?: string }) {
   const isEditMode = !!editPost;
   const router = useRouter();
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -52,10 +52,12 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
   const [content, setContent] = useState(editPost?.content ?? "");
   const [aiTopic, setAiTopic] = useState("");
   const [scheduleMode, setScheduleMode] = useState<"draft" | "schedule">(
-    editPost?.scheduledAt ? "schedule" : "draft"
+    editPost?.scheduledAt || defaultScheduledAt ? "schedule" : "draft"
   );
   const [scheduledAt, setScheduledAt] = useState(
-    editPost?.scheduledAt ? new Date(editPost.scheduledAt).toISOString().slice(0, 16) : ""
+    editPost?.scheduledAt
+      ? new Date(editPost.scheduledAt).toISOString().slice(0, 16)
+      : defaultScheduledAt ?? ""
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);

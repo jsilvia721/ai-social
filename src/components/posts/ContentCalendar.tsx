@@ -1,7 +1,9 @@
 "use client";
 
+import { useState, useCallback } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DayDetailPanel } from "@/components/posts/DayDetailPanel";
 import type { Platform, PostStatus } from "@/types";
 
 interface CalendarPost {
@@ -47,6 +49,8 @@ function toUTCDateKey(dateStr: string): string {
 }
 
 export function ContentCalendar({ posts, year, month, onNavigate }: ContentCalendarProps) {
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+
   // Group posts by local day key
   const byDay = new Map<string, CalendarPost[]>();
   for (const post of posts) {
@@ -71,17 +75,35 @@ export function ContentCalendar({ posts, year, month, onNavigate }: ContentCalen
   while (cells.length % 7 !== 0) cells.push(null);
 
   function prevMonth() {
+    setSelectedDay(null);
     if (month === 0) onNavigate(year - 1, 11);
     else onNavigate(year, month - 1);
   }
 
   function nextMonth() {
+    setSelectedDay(null);
     if (month === 11) onNavigate(year + 1, 0);
     else onNavigate(year, month + 1);
   }
 
+  function handleDayClick(day: number) {
+    setSelectedDay((prev) => (prev === day ? null : day));
+  }
+
+  const handleClosePanel = useCallback(() => {
+    setSelectedDay(null);
+  }, []);
+
+  // Get posts for the selected day
+  const selectedDayPosts = selectedDay
+    ? byDay.get(`${year}-${month}-${selectedDay}`) ?? []
+    : [];
+  const selectedDate = selectedDay
+    ? new Date(Date.UTC(year, month, selectedDay))
+    : null;
+
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 overflow-hidden">
+    <div className="relative rounded-lg border border-zinc-700 bg-zinc-800/50 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
         <Button
@@ -126,13 +148,17 @@ export function ContentCalendar({ posts, year, month, onNavigate }: ContentCalen
           const cellKey = `${year}-${month}-${day}`;
           const dayPosts = byDay.get(cellKey) ?? [];
           const isToday = cellKey === todayKey;
+          const isSelected = selectedDay === day;
 
           return (
-            <div
+            <button
               key={cellKey}
-              className={`min-h-[80px] p-1.5 border-b border-r border-zinc-700/50 ${
+              type="button"
+              onClick={() => handleDayClick(day)}
+              className={`min-h-[80px] p-1.5 border-b border-r border-zinc-700/50 text-left transition-colors cursor-pointer ${
                 isToday ? "bg-violet-950/20" : ""
-              }`}
+              } ${isSelected ? "bg-violet-950/40 ring-1 ring-inset ring-violet-500/50" : "hover:bg-zinc-700/30"}`}
+              aria-label={`${MONTH_NAMES[month]} ${day}, ${dayPosts.length} posts`}
             >
               {/* Day number */}
               <div className="flex items-center justify-end mb-1">
@@ -169,7 +195,7 @@ export function ContentCalendar({ posts, year, month, onNavigate }: ContentCalen
                   </div>
                 )}
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -183,6 +209,15 @@ export function ContentCalendar({ posts, year, month, onNavigate }: ContentCalen
           </span>
         ))}
       </div>
+
+      {/* Day detail panel */}
+      {selectedDay !== null && selectedDate && (
+        <DayDetailPanel
+          date={selectedDate}
+          posts={selectedDayPosts}
+          onClose={handleClosePanel}
+        />
+      )}
     </div>
   );
 }
