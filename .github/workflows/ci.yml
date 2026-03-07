@@ -95,6 +95,8 @@ jobs:
       TOKEN_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
       ALLOWED_EMAILS: test@example.com
       NODE_ENV: test
+      AWS_S3_BUCKET: e2e-test-bucket
+      AWS_S3_PUBLIC_URL: http://localhost:9000/e2e-test-bucket
       PLAYWRIGHT_E2E: "true"
 
     steps:
