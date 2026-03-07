@@ -954,40 +954,40 @@ if (result.count === 0) {
 
 ### Functional
 
-- [ ] All 8 platform OAuth connect routes deleted; single Blotato connect flow at `/api/connect/blotato`
-- [ ] `src/lib/platforms/`, `src/lib/token.ts`, `src/lib/crypto.ts` deleted
-- [ ] `src/lib/blotato/` module: client (with `BlotatoApiError` hierarchy + Zod validation), publish, accounts, metrics, ssrf-guard
-- [ ] SSRF guard has trailing-slash check; test for subdomain-bypass vector exists
-- [ ] Twitter `uploadTwitterMedia` calls `assertSafeMediaUrl()` (existing bug fixed)
-- [ ] Partner can create a Business workspace
-- [ ] `BusinessMember` junction table with `role: OWNER | MEMBER`
-- [ ] Active business stored in JWT session; `POST /api/businesses/switch` updates it
-- [ ] `BusinessSelector` in Sidebar updates active business without full page reload
+- [x] All 8 platform OAuth connect routes deleted; single Blotato connect flow at `/api/connect/blotato`
+- [x] `src/lib/platforms/`, `src/lib/token.ts`, `src/lib/crypto.ts` deleted
+- [x] `src/lib/blotato/` module: client (with `BlotatoApiError` hierarchy + Zod validation), publish, accounts, metrics, ssrf-guard
+- [x] SSRF guard has trailing-slash check; test for subdomain-bypass vector exists
+- [x] Twitter `uploadTwitterMedia` calls `assertSafeMediaUrl()` (existing bug fixed)
+- [x] Partner can create a Business workspace
+- [x] `BusinessMember` junction table with `role: OWNER | MEMBER`
+- [x] Active business stored in JWT session; `POST /api/businesses/switch` updates it
+- [x] `BusinessSelector` in Sidebar updates active business without full page reload
 - [ ] AI onboarding wizard collects 5-10 answers; Claude tool_use synthesizes into ContentStrategy
 - [ ] Onboarding endpoint is idempotent — returns existing ContentStrategy on re-submit
-- [ ] Post composer workspace-scoped (filtered accounts, businessId on post create, server-side cross-ownership check)
+- [x] Post composer workspace-scoped (filtered accounts, businessId on post create, server-side cross-ownership check)
 - [ ] Review window: configurable per workspace (default off); when enabled, posts create as `PENDING_REVIEW`
 - [ ] `PATCH /api/posts/[id]` handles approve (→ `SCHEDULED`) and reject (→ `DRAFT`) with atomic `PUBLISHING` claim
-- [ ] Auto-retry: 3 attempts with full-jitter delays, `RETRYING` status + `retryAt`; smart retry skips 4xx non-429
-- [ ] After 3 failures: `FAILED` + partner SES email (best-effort)
-- [ ] `PUBLISHING` stuck-post recovery in scheduler (reset to `RETRYING` after 5 min)
+- [x] Auto-retry: 3 attempts with full-jitter delays, `RETRYING` status + `retryAt`; smart retry skips 4xx non-429
+- [x] After 3 failures: `FAILED` + partner SES email (best-effort)
+- [x] `PUBLISHING` stuck-post recovery in scheduler (reset to `RETRYING` after 5 min)
 
 ### Non-Functional
 
-- [ ] Env vars `TWITTER_CLIENT_ID/SECRET`, `META_APP_ID/SECRET`, `TIKTOK_CLIENT_ID/SECRET`, `TOKEN_ENCRYPTION_KEY` removed from all env contexts
-- [ ] `BLOTATO_API_KEY`, `SES_FROM_EMAIL` added everywhere (env.ts, sst.config.ts, CI, test setup)
+- [x] Env vars `TWITTER_CLIENT_ID/SECRET`, `META_APP_ID/SECRET`, `TIKTOK_CLIENT_ID/SECRET`, `TOKEN_ENCRYPTION_KEY` removed from all env contexts
+- [x] `BLOTATO_API_KEY`, `SES_FROM_EMAIL` added everywhere (env.ts, sst.config.ts, CI, test setup)
 - [ ] `DIRECT_URL` (non-pooled Neon) added as GitHub Actions secret; referenced in `prisma.config.ts`
-- [ ] No AES-256 token encryption anywhere (Blotato manages tokens)
-- [ ] All `Post` and `SocialAccount` queries scoped by `businessId` via `assertBusinessMember`
-- [ ] New indexes: `[status, scheduledAt]`, `[status, retryAt]`, `[status, metricsUpdatedAt]` on Post
+- [x] No AES-256 token encryption anywhere (Blotato manages tokens)
+- [x] All `Post` and `SocialAccount` queries scoped by `businessId` via `assertBusinessMember`
+- [x] New indexes: `[status, scheduledAt]`, `[status, retryAt]`, `[status, metricsUpdatedAt]` on Post
 - [ ] SES sender domain verified in us-east-1; SES production access requested
 
 ### Quality Gates
 
-- [ ] `npm run ci:check` passes (lint + typecheck + tests)
-- [ ] Coverage thresholds maintained: `src/lib/blotato/` covered, scheduler retry logic covered
+- [x] `npm run ci:check` passes (lint + typecheck + tests)
+- [x] Coverage thresholds maintained: `src/lib/blotato/` covered, scheduler retry logic covered
 - [ ] E2E tests updated for new connect flow and workspace-scoped composer
-- [ ] Test for SSRF subdomain-bypass vector: `https://storage.example.com.evil.com/file.jpg` must throw
+- [x] Test for SSRF subdomain-bypass vector: `https://storage.example.com.evil.com/file.jpg` must throw
 
 ---
 
