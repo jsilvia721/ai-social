@@ -85,6 +85,19 @@ describe("runMetricsRefresh", () => {
     expect(prismaMock.post.update).not.toHaveBeenCalled();
   });
 
+  it("queries with take: 50 and orderBy metricsUpdatedAt asc to cap batch size", async () => {
+    prismaMock.post.findMany.mockResolvedValue([]);
+
+    await runMetricsRefresh();
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 50,
+        orderBy: { metricsUpdatedAt: "asc" },
+      })
+    );
+  });
+
   it("calls fetchTwitterMetrics for TWITTER posts", async () => {
     prismaMock.post.findMany.mockResolvedValue([makePost({ platform: "TWITTER" })] as any);
     mockFetchTwitterMetrics.mockResolvedValue(METRICS);

@@ -104,6 +104,8 @@ export async function runMetricsRefresh() {
         { metricsUpdatedAt: { lt: staleThreshold } },
       ],
     },
+    orderBy: { metricsUpdatedAt: "asc" },
+    take: 50,
     include: { socialAccount: true },
   });
 
