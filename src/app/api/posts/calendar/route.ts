@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
 
   const posts = await prisma.post.findMany({
     where: {
-      userId: session.user.id,
+      business: { members: { some: { userId: session.user.id } } },
       scheduledAt: { gte: start, lt: end },
     },
     include: { socialAccount: { select: { platform: true, username: true } } },

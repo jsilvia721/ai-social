@@ -2,21 +2,18 @@ import { mockAuthenticated, mockUnauthenticated, mockSession } from "@/__tests__
 
 jest.mock("@/lib/storage", () => ({
   uploadFile: jest.fn(),
-  ensureBucket: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock("next-auth/next");
 jest.mock("@/lib/auth", () => ({ authOptions: {} }));
 
 import { POST } from "@/app/api/upload/route";
 import { NextRequest } from "next/server";
-import { uploadFile, ensureBucket } from "@/lib/storage";
+import { uploadFile } from "@/lib/storage";
 
 const mockUploadFile = uploadFile as jest.Mock;
-const mockEnsureBucket = ensureBucket as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockEnsureBucket.mockResolvedValue(undefined);
 });
 
 function makeUploadRequest(

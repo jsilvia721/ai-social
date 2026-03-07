@@ -1,47 +1,13 @@
-import {
-  S3Client,
-  HeadBucketCommand,
-  CreateBucketCommand,
-  PutBucketPolicyCommand,
-  PutObjectCommand,
-} from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { env } from "@/env";
 
-const bucket = process.env.MINIO_BUCKET ?? "ai-social";
+// In Lambda, credentials come from the IAM execution role — no static keys needed.
+// Locally, set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION in .env.local.
+const s3 = new S3Client({ region: process.env.AWS_REGION ?? "us-east-1" });
 
-const s3 = new S3Client({
-  endpoint: process.env.MINIO_ENDPOINT ?? "http://minio:9000",
-  region: "us-east-1",
-  forcePathStyle: true,
-  credentials: {
-    accessKeyId: process.env.MINIO_ACCESS_KEY ?? "",
-    secretAccessKey: process.env.MINIO_SECRET_KEY ?? "",
-  },
-});
-
-export async function ensureBucket(): Promise<void> {
-  try {
-    await s3.send(new HeadBucketCommand({ Bucket: bucket }));
-  } catch {
-    await s3.send(new CreateBucketCommand({ Bucket: bucket }));
-    await s3.send(
-      new PutBucketPolicyCommand({
-        Bucket: bucket,
-        Policy: JSON.stringify({
-          Version: "2012-10-17",
-          Statement: [
-            {
-              Effect: "Allow",
-              Principal: "*",
-              Action: "s3:GetObject",
-              Resource: `arn:aws:s3:::${bucket}/*`,
-            },
-          ],
-        }),
-      })
-    );
-  }
-}
+const bucket = env.AWS_S3_BUCKET ?? "ai-social-dev";
+const publicBase = env.AWS_S3_PUBLIC_URL ?? "http://localhost:9000/ai-social-dev";
 
 export async function uploadFile(
   file: File,
@@ -57,17 +23,12 @@ export async function uploadFile(
       ContentType: mimeType,
     })
   );
-  const publicUrl = process.env.MINIO_PUBLIC_URL ?? "http://localhost:9000";
-  // R2 public URLs map the domain directly to the bucket (no bucket name in path)
-  // MinIO/self-hosted S3 uses /{bucket}/{key} — detect by checking if endpoint is R2
-  const isR2 = (process.env.MINIO_ENDPOINT ?? "").includes("r2.cloudflarestorage.com");
-  return isR2 ? `${publicUrl}/${key}` : `${publicUrl}/${bucket}/${key}`;
+  return getPublicUrl(key);
 }
 
 export function getPublicUrl(key: string): string {
-  const publicUrl = process.env.MINIO_PUBLIC_URL ?? "http://localhost:9000";
-  const isR2 = (process.env.MINIO_ENDPOINT ?? "").includes("r2.cloudflarestorage.com");
-  return isR2 ? `${publicUrl}/${key}` : `${publicUrl}/${bucket}/${key}`;
+  const base = publicBase.endsWith("/") ? publicBase.slice(0, -1) : publicBase;
+  return `${base}/${key}`;
 }
 
 export async function getPresignedUploadUrl(
@@ -75,7 +36,6 @@ export async function getPresignedUploadUrl(
   mimeType: string,
   expiresInSeconds = 3600
 ): Promise<string> {
-  await ensureBucket();
   const command = new PutObjectCommand({
     Bucket: bucket,
     Key: key,

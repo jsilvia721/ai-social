@@ -1,25 +1,13 @@
+/**
+ * Scheduler stub — Phase 7 will rewrite this with Blotato publish,
+ * PUBLISHING atomic claim, retry logic, and SES alerts.
+ *
+ * The actual invocation runs as two AWS EventBridge-triggered Lambda functions:
+ *   src/cron/publish.ts  → every 1 minute
+ *   src/cron/metrics.ts  → every 1 hour
+ */
 import { prisma } from "@/lib/db";
-import { publishTweet } from "@/lib/platforms/twitter";
-import { publishInstagramPost } from "@/lib/platforms/instagram";
-import { publishFacebookPost } from "@/lib/platforms/facebook";
-import { publishTikTokVideo } from "@/lib/platforms/tiktok";
-import { publishYouTubeVideo } from "@/lib/platforms/youtube";
-import { ensureValidToken } from "@/lib/token";
-import {
-  fetchTwitterMetrics,
-  fetchFacebookMetrics,
-  fetchInstagramMetrics,
-  fetchTikTokMetrics,
-  fetchYouTubeMetrics,
-} from "@/lib/analytics/fetchers";
-import type { SocialAccount } from "@prisma/client";
-
-interface DuePost {
-  id: string;
-  content: string;
-  mediaUrls: string[];
-  socialAccount: SocialAccount;
-}
+import { publishPost } from "@/lib/blotato/publish";
 
 export async function runScheduler() {
   const now = new Date();
@@ -29,49 +17,28 @@ export async function runScheduler() {
       status: "SCHEDULED",
       scheduledAt: { lte: now },
     },
-    include: { socialAccount: true },
+    include: {
+      socialAccount: true,
+    },
   });
 
   const results = await Promise.allSettled(
-    (duePosts as DuePost[]).map(async (post) => {
-      const { socialAccount } = post;
-
+    duePosts.map(async (post) => {
       try {
-        const token = await ensureValidToken(socialAccount);
-        let platformPostId: string;
+        await prisma.post.update({
+          where: { id: post.id },
+          data: { status: "PUBLISHING" },
+        });
 
-        if (socialAccount.platform === "TWITTER") {
-          const result = await publishTweet(token, post.content, post.mediaUrls);
-          platformPostId = result.id;
-        } else if (socialAccount.platform === "INSTAGRAM") {
-          const result = await publishInstagramPost(
-            token,
-            socialAccount.platformId,
-            post.content,
-            post.mediaUrls
-          );
-          platformPostId = result.id;
-        } else if (socialAccount.platform === "FACEBOOK") {
-          const result = await publishFacebookPost(
-            token,
-            socialAccount.platformId,
-            post.content,
-            post.mediaUrls
-          );
-          platformPostId = result.id;
-        } else if (socialAccount.platform === "TIKTOK") {
-          const result = await publishTikTokVideo(token, post.content, post.mediaUrls);
-          platformPostId = result.id;
-        } else if (socialAccount.platform === "YOUTUBE") {
-          const result = await publishYouTubeVideo(token, post.content, post.mediaUrls);
-          platformPostId = result.id;
-        } else {
-          throw new Error(`Unsupported platform: ${socialAccount.platform}`);
-        }
+        const { blotatoPostId } = await publishPost(
+          post.socialAccount.blotatoAccountId ?? "",
+          post.content,
+          post.mediaUrls,
+        );
 
         await prisma.post.update({
           where: { id: post.id },
-          data: { status: "PUBLISHED", publishedAt: now, platformPostId },
+          data: { status: "PUBLISHED", publishedAt: now, blotatoPostId },
         });
 
         return { postId: post.id, success: true };
@@ -93,84 +60,6 @@ export async function runScheduler() {
 }
 
 export async function runMetricsRefresh() {
-  const staleThreshold = new Date(Date.now() - 50 * 60 * 1000); // 50 min ago
-
-  const posts = await prisma.post.findMany({
-    where: {
-      status: "PUBLISHED",
-      platformPostId: { not: null },
-      OR: [
-        { metricsUpdatedAt: null },
-        { metricsUpdatedAt: { lt: staleThreshold } },
-      ],
-    },
-    include: { socialAccount: true },
-  });
-
-  const results = await Promise.allSettled(
-    posts.map(async (post) => {
-      try {
-        const token = await ensureValidToken(post.socialAccount);
-        const { platform } = post.socialAccount;
-        const postId = post.platformPostId!;
-
-        let metrics;
-        if (platform === "TWITTER") {
-          metrics = await fetchTwitterMetrics(token, postId);
-        } else if (platform === "INSTAGRAM") {
-          metrics = await fetchInstagramMetrics(token, postId);
-        } else if (platform === "FACEBOOK") {
-          metrics = await fetchFacebookMetrics(token, postId);
-        } else if (platform === "TIKTOK") {
-          metrics = await fetchTikTokMetrics(token, postId);
-        } else if (platform === "YOUTUBE") {
-          metrics = await fetchYouTubeMetrics(token, postId);
-        } else {
-          throw new Error(`Unsupported platform for metrics: ${platform}`);
-        }
-
-        if (!metrics) return;
-
-        await prisma.post.update({
-          where: { id: post.id },
-          data: metrics,
-        });
-      } catch (err) {
-        console.error(`[metrics] failed for post ${post.id}:`, err);
-      }
-    })
-  );
-
-  const errors = results.filter((r) => r.status === "rejected").length;
-  if (errors > 0) {
-    console.error(`[metrics] ${errors} refresh(es) failed`);
-  }
-}
-
-let cronStarted = false;
-
-export function schedulePostPublisher() {
-  if (cronStarted) return;
-  cronStarted = true;
-
-  // Dynamically imported so node-cron is never bundled into the edge runtime
-  import("node-cron").then(({ default: cron }) => {
-    cron.schedule("* * * * *", async () => {
-      try {
-        await runScheduler();
-      } catch (err) {
-        console.error("[scheduler] error:", err);
-      }
-    });
-    console.log("[scheduler] Post publisher started — running every minute");
-
-    cron.schedule("0 * * * *", async () => {
-      try {
-        await runMetricsRefresh();
-      } catch (err) {
-        console.error("[metrics] error:", err);
-      }
-    });
-    console.log("[scheduler] Metrics refresher started — running every hour");
-  });
+  // Phase 7: fetch metrics via Blotato API and update post records.
+  return { processed: 0 };
 }

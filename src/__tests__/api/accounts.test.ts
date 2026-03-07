@@ -27,14 +27,15 @@ describe("GET /api/accounts", () => {
     expect(body.error).toBe("Unauthorized");
   });
 
-  it("returns the user's connected accounts", async () => {
+  it("returns the user's connected accounts across all their businesses", async () => {
     mockAuthenticated();
     const fakeAccounts = [
       {
         id: "account-1",
+        businessId: "biz-1",
         platform: "TWITTER",
         username: "testuser",
-        expiresAt: null,
+        blotatoAccountId: "blotato-123",
         createdAt: new Date("2025-01-01"),
       },
     ];
@@ -49,7 +50,7 @@ describe("GET /api/accounts", () => {
     expect(body[0].username).toBe("testuser");
   });
 
-  it("filters accounts by the current user's id", async () => {
+  it("filters accounts by business membership (not direct userId)", async () => {
     mockAuthenticated();
     prismaMock.socialAccount.findMany.mockResolvedValue([]);
 
@@ -57,7 +58,7 @@ describe("GET /api/accounts", () => {
 
     expect(prismaMock.socialAccount.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { userId: mockSession.user.id },
+        where: { business: { members: { some: { userId: mockSession.user.id } } } },
       })
     );
   });
@@ -65,7 +66,7 @@ describe("GET /api/accounts", () => {
   it("never returns accessToken or refreshToken fields", async () => {
     mockAuthenticated();
     prismaMock.socialAccount.findMany.mockResolvedValue([
-      { id: "acc-1", platform: "TWITTER", username: "user", expiresAt: null, createdAt: new Date() } as any,
+      { id: "acc-1", businessId: "biz-1", platform: "TWITTER", username: "user", blotatoAccountId: "b-1", createdAt: new Date() } as any,
     ]);
 
     const res = await GET();
@@ -95,24 +96,25 @@ describe("DELETE /api/accounts", () => {
     expect(body.error).toBe("Missing id");
   });
 
-  it("returns 404 when account belongs to a different user (IDOR prevention)", async () => {
+  it("returns 404 when account does not belong to user's businesses (IDOR prevention)", async () => {
     mockAuthenticated();
-    prismaMock.socialAccount.findFirst.mockResolvedValue(null); // not found for this user
+    prismaMock.socialAccount.findFirst.mockResolvedValue(null);
 
     const res = await DELETE(makeRequest("http://localhost/api/accounts?id=other-users-account"));
 
     expect(res.status).toBe(404);
-    // Must check ownership in findFirst — verify the query includes userId
     expect(prismaMock.socialAccount.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ userId: mockSession.user.id }),
+        where: expect.objectContaining({
+          business: { members: { some: { userId: mockSession.user.id } } },
+        }),
       })
     );
   });
 
   it("deletes the account and returns success when owned by current user", async () => {
     mockAuthenticated();
-    const account = { id: "account-1", userId: mockSession.user.id };
+    const account = { id: "account-1", businessId: "biz-1" };
     prismaMock.socialAccount.findFirst.mockResolvedValue(account as any);
     prismaMock.socialAccount.delete.mockResolvedValue(account as any);
 

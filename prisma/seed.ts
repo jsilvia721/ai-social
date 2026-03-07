@@ -26,32 +26,45 @@ async function main() {
 
   console.log(`Upserted user: ${user.id} (${user.email})`);
 
+  // ── Business ───────────────────────────────────────────────────────────────
+  const business = await prisma.business.upsert({
+    where: { id: "e2e-business-1" },
+    create: { id: "e2e-business-1", name: "E2E Test Business" },
+    update: { name: "E2E Test Business" },
+  });
+
+  // ── Business membership ────────────────────────────────────────────────────
+  await prisma.businessMember.upsert({
+    where: { businessId_userId: { businessId: business.id, userId: user.id } },
+    create: { businessId: business.id, userId: user.id, role: "OWNER" },
+    update: { role: "OWNER" },
+  });
+
+  console.log(`Upserted business: ${business.id} (${business.name})`);
+
   // ── Social accounts ────────────────────────────────────────────────────────
   const twitter = await prisma.socialAccount.upsert({
     where: { platform_platformId: { platform: "TWITTER", platformId: "e2e-twitter-123" } },
     create: {
-      userId: user.id,
+      businessId: business.id,
       platform: "TWITTER",
       platformId: "e2e-twitter-123",
       username: "e2etestuser",
-      accessToken: "e2e-twitter-access-token",
-      refreshToken: "e2e-twitter-refresh-token",
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      blotatoAccountId: "blotato-twitter-e2e",
     },
-    update: { userId: user.id, username: "e2etestuser" },
+    update: { username: "e2etestuser" },
   });
 
   const instagram = await prisma.socialAccount.upsert({
     where: { platform_platformId: { platform: "INSTAGRAM", platformId: "e2e-ig-456" } },
     create: {
-      userId: user.id,
+      businessId: business.id,
       platform: "INSTAGRAM",
       platformId: "e2e-ig-456",
       username: "e2etestuser_ig",
-      accessToken: "e2e-ig-access-token",
-      expiresAt: null,
+      blotatoAccountId: "blotato-ig-e2e",
     },
-    update: { userId: user.id, username: "e2etestuser_ig" },
+    update: { username: "e2etestuser_ig" },
   });
 
   console.log(`Upserted accounts: TWITTER(${twitter.id}), INSTAGRAM(${instagram.id})`);
@@ -65,7 +78,7 @@ async function main() {
     where: { id: "e2e-post-draft-1" },
     create: {
       id: "e2e-post-draft-1",
-      userId: user.id,
+      businessId: business.id,
       socialAccountId: twitter.id,
       content: "This is a draft post for E2E testing",
       status: "DRAFT",
@@ -79,7 +92,7 @@ async function main() {
     where: { id: "e2e-post-scheduled-1" },
     create: {
       id: "e2e-post-scheduled-1",
-      userId: user.id,
+      businessId: business.id,
       socialAccountId: twitter.id,
       content: "This is a scheduled post for E2E testing",
       status: "SCHEDULED",
@@ -94,13 +107,13 @@ async function main() {
     where: { id: "e2e-post-published-1" },
     create: {
       id: "e2e-post-published-1",
-      userId: user.id,
+      businessId: business.id,
       socialAccountId: instagram.id,
       content: "This is a published post for E2E testing",
       status: "PUBLISHED",
       scheduledAt: yesterday,
       publishedAt: yesterday,
-      platformPostId: "ig-post-abc123",
+      blotatoPostId: "blotato-post-abc123",
       mediaUrls: [],
     },
     update: { content: "This is a published post for E2E testing" },

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 
-// GET /api/accounts — list connected social accounts for the current user
+// GET /api/accounts — list all social accounts across businesses the user belongs to
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session) {
@@ -11,12 +11,13 @@ export async function GET() {
   }
 
   const accounts = await prisma.socialAccount.findMany({
-    where: { userId: session.user.id },
+    where: { business: { members: { some: { userId: session.user.id } } } },
     select: {
       id: true,
+      businessId: true,
       platform: true,
       username: true,
-      expiresAt: true,
+      blotatoAccountId: true,
       createdAt: true,
       // accessToken and refreshToken are intentionally omitted — never exposed to frontend
     },
@@ -40,9 +41,9 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  // Verify ownership before deleting (prevents IDOR)
+  // Verify membership before deleting (prevents IDOR)
   const account = await prisma.socialAccount.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, business: { members: { some: { userId: session.user.id } } } },
   });
 
   if (!account) {

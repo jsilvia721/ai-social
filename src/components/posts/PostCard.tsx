@@ -10,8 +10,11 @@ import type { PostStatus, Platform } from "@/types";
 const STATUS_CONFIG: Record<PostStatus, { label: string; icon: React.ElementType; className: string }> = {
   DRAFT: { label: "Draft", icon: FileText, className: "bg-zinc-700 text-zinc-300 border-zinc-600" },
   SCHEDULED: { label: "Scheduled", icon: Calendar, className: "bg-amber-900/50 text-amber-400 border-amber-800" },
+  PUBLISHING: { label: "Publishing", icon: Loader2, className: "bg-sky-900/50 text-sky-400 border-sky-800" },
   PUBLISHED: { label: "Published", icon: CheckCircle2, className: "bg-emerald-900/50 text-emerald-400 border-emerald-800" },
   FAILED: { label: "Failed", icon: XCircle, className: "bg-red-900/50 text-red-400 border-red-800" },
+  PENDING_REVIEW: { label: "Pending Review", icon: FileText, className: "bg-violet-900/50 text-violet-400 border-violet-800" },
+  RETRYING: { label: "Retrying", icon: RefreshCw, className: "bg-orange-900/50 text-orange-400 border-orange-800" },
 };
 
 const PLATFORM_COLOR: Record<Platform, string> = {

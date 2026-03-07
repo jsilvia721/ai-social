@@ -1,4 +1,5 @@
 import { BlotatoApiError, BlotatoRateLimitError, blotatoFetch } from "@/lib/blotato/client";
+import { assertSafeMediaUrl } from "@/lib/blotato/ssrf-guard";
 import { z } from "zod";
 
 const ResponseSchema = z.object({ id: z.string(), url: z.string() });
@@ -76,7 +77,7 @@ describe("blotatoFetch", () => {
       text: async () => "Service Unavailable",
     } as Response);
 
-    const err = await blotatoFetch("/posts", ResponseSchema).catch((e) => e as BlotatoApiError);
+    const err = (await blotatoFetch("/posts", ResponseSchema).catch((e: unknown) => e)) as BlotatoApiError;
     expect(err.status).toBe(503);
   });
 
@@ -88,7 +89,7 @@ describe("blotatoFetch", () => {
       text: async () => "Rate limited",
     } as Response);
 
-    const err = await blotatoFetch("/posts", ResponseSchema).catch((e) => e as BlotatoRateLimitError);
+    const err = (await blotatoFetch("/posts", ResponseSchema).catch((e: unknown) => e)) as BlotatoRateLimitError;
     expect(err).toBeInstanceOf(BlotatoRateLimitError);
     expect(err.status).toBe(429);
     expect(err.retryAfterMs).toBe(30_000);
@@ -102,7 +103,7 @@ describe("blotatoFetch", () => {
       text: async () => "Rate limited",
     } as Response);
 
-    const err = await blotatoFetch("/posts", ResponseSchema).catch((e) => e as BlotatoRateLimitError);
+    const err = (await blotatoFetch("/posts", ResponseSchema).catch((e: unknown) => e)) as BlotatoRateLimitError;
     expect(err.retryAfterMs).toBe(60_000);
   });
 
@@ -114,7 +115,7 @@ describe("blotatoFetch", () => {
       json: async () => ({ unexpected: "shape" }),
     } as Response);
 
-    const err = await blotatoFetch("/posts", ResponseSchema).catch((e) => e as BlotatoApiError);
+    const err = (await blotatoFetch("/posts", ResponseSchema).catch((e: unknown) => e)) as BlotatoApiError;
     expect(err).toBeInstanceOf(BlotatoApiError);
     expect(err.message).toContain("Unexpected response shape");
   });
@@ -129,7 +130,7 @@ describe("blotatoFetch", () => {
   it("throws BlotatoApiError with timeout status on request abort", async () => {
     fetchSpy.mockRejectedValue(Object.assign(new Error("aborted"), { name: "AbortError" }));
 
-    const err = await blotatoFetch("/posts", ResponseSchema).catch((e) => e as BlotatoApiError);
+    const err = (await blotatoFetch("/posts", ResponseSchema).catch((e: unknown) => e)) as BlotatoApiError;
     expect(err).toBeInstanceOf(BlotatoApiError);
     expect(err.status).toBe(408);
     expect(err.message).toContain("timed out");
@@ -152,8 +153,6 @@ describe("BlotatoApiError", () => {
 });
 
 describe("assertSafeMediaUrl (SSRF guard)", () => {
-  // Import here so the test file is the source of truth for the guard
-  const { assertSafeMediaUrl } = require("@/lib/blotato/ssrf-guard");
 
   it("allows URLs starting with the configured S3 prefix + slash", () => {
     expect(() =>

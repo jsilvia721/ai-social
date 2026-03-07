@@ -7,6 +7,9 @@ import { env } from "@/env";
  */
 export function assertSafeMediaUrl(url: string): void {
   const base = env.AWS_S3_PUBLIC_URL;
+  if (!base) {
+    throw new Error("SSRF guard: AWS_S3_PUBLIC_URL is not configured");
+  }
   const allowedPrefix = base.endsWith("/") ? base : `${base}/`;
   if (!url.startsWith(allowedPrefix)) {
     throw new Error(

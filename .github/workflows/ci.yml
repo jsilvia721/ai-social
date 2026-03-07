@@ -85,14 +85,11 @@ jobs:
       NEXTAUTH_SECRET: e2e-test-secret-at-least-32-chars-long
       GOOGLE_CLIENT_ID: e2e-google-client-id
       GOOGLE_CLIENT_SECRET: e2e-google-client-secret
-      TWITTER_CLIENT_ID: e2e-twitter-client-id
-      TWITTER_CLIENT_SECRET: e2e-twitter-client-secret
-      META_APP_ID: e2e-meta-app-id
-      META_APP_SECRET: e2e-meta-app-secret
       ANTHROPIC_API_KEY: e2e-anthropic-api-key
-      TIKTOK_CLIENT_ID: e2e-tiktok-client-id
-      TIKTOK_CLIENT_SECRET: e2e-tiktok-client-secret
-      TOKEN_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      BLOTATO_API_KEY: e2e-blotato-api-key
+      SES_FROM_EMAIL: noreply@example.com
+      AWS_S3_BUCKET: ai-social-e2e
+      AWS_S3_PUBLIC_URL: https://storage.example.com
       ALLOWED_EMAILS: test@example.com
       NODE_ENV: test
       PLAYWRIGHT_E2E: "true"
@@ -135,13 +132,6 @@ jobs:
           retention-days: 7
 
   # ── Deploy ─────────────────────────────────────────────────────────────────
-  # Deployment is handled by Railway's native GitHub integration (no tokens).
-  # Railway watches the `staging` and `main` branches directly via the GitHub App
-  # and auto-deploys on every push.
-  #
-  # Setup (one-time per service):
-  #   Railway dashboard → service → Settings → Source → Connect Repo
-  #   → select jsilvia721/ai-social → set Branch to `staging` (or `main`)
-  #   → enable Auto Deploy
-  #
-  # No secrets or tokens required — Railway uses its own GitHub App credentials.
+  # Deployment is handled by SST v3 Ion via GitHub Actions OIDC.
+  # Pushes to `staging` deploy to the staging SST stage; `main` deploys production.
+  # See docs/plans/ for the AWS migration plan and one-time setup steps.

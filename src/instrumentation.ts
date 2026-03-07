@@ -1,10 +1,4 @@
 export async function register() {
-  // Only run in Node.js runtime (not Edge) and never during tests
-  if (
-    process.env.NEXT_RUNTIME === "nodejs" &&
-    process.env.NODE_ENV !== "test"
-  ) {
-    const { schedulePostPublisher } = await import("@/lib/scheduler");
-    schedulePostPublisher();
-  }
+  // Scheduling is managed by AWS EventBridge (src/cron/publish.ts, src/cron/metrics.ts).
+  // No in-process scheduler needed.
 }

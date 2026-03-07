@@ -1,5 +1,6 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { assertSafeMediaUrl } from "@/lib/blotato/ssrf-guard";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -15,7 +16,8 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
 
   const where = {
-    userId: session.user.id,
+    // Scope to all businesses this user belongs to
+    business: { members: { some: { userId: session.user.id } } },
     ...(status ? { status: status as import("@prisma/client").PostStatus } : {}),
   };
 
@@ -47,7 +49,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   const post = await prisma.post.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, business: { members: { some: { userId: session.user.id } } } },
   });
 
   if (!post) {
@@ -65,25 +67,37 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { content, socialAccountId, scheduledAt, mediaUrls } = body;
+  const { content, socialAccountId, scheduledAt, mediaUrls, businessId } = body;
 
-  // Verify the social account belongs to the current user
+  if (!businessId) {
+    return NextResponse.json({ error: "businessId is required" }, { status: 400 });
+  }
+
+  // Verify social account belongs to this business and the user is a member
   const account = await prisma.socialAccount.findFirst({
-    where: { id: socialAccountId, userId: session.user.id },
+    where: {
+      id: socialAccountId,
+      businessId,
+      business: { members: { some: { userId: session.user.id } } },
+    },
   });
 
   if (!account) {
     return NextResponse.json({ error: "Social account not found" }, { status: 404 });
   }
 
+  if (mediaUrls?.length) {
+    mediaUrls.forEach(assertSafeMediaUrl);
+  }
+
   const post = await prisma.post.create({
     data: {
       content,
       socialAccountId,
+      businessId,
       scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
       mediaUrls: mediaUrls ?? [],
       status: scheduledAt ? "SCHEDULED" : "DRAFT",
-      userId: session.user.id,
     },
   });
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { ensureBucket, uploadFile } from "@/lib/storage";
+import { uploadFile } from "@/lib/storage";
 
 const ALLOWED_TYPES = new Set([
   "image/jpeg",
@@ -50,7 +50,6 @@ export async function POST(req: NextRequest) {
   const ext = EXT_MAP[file.type];
   const key = `uploads/${session.user.id}/${crypto.randomUUID()}.${ext}`;
 
-  await ensureBucket();
   const url = await uploadFile(file, key, file.type);
 
   return NextResponse.json({ url }, { status: 200 });
