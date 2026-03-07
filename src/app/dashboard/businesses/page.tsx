@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import Link from "next/link";
-import { Building2, Plus, Users } from "lucide-react";
+import { Building2, Plus, Sparkles, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ export default async function BusinessesPage() {
       business: {
         include: {
           _count: { select: { socialAccounts: true, posts: true } },
+          contentStrategy: true,
         },
       },
     },
@@ -73,6 +74,19 @@ export default async function BusinessesPage() {
                   <span>{business._count.socialAccounts} accounts</span>
                   <span>{business._count.posts} posts</span>
                 </div>
+                {!business.contentStrategy && (
+                  <Button
+                    asChild
+                    size="sm"
+                    className="w-full bg-violet-700/30 hover:bg-violet-700/50 text-violet-300 border border-violet-800"
+                    variant="outline"
+                  >
+                    <Link href={`/dashboard/businesses/${business.id}/onboard`}>
+                      <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                      Complete Setup
+                    </Link>
+                  </Button>
+                )}
                 <div className="flex gap-2">
                   <Button asChild size="sm" variant="outline" className="flex-1 border-zinc-600 text-zinc-300 hover:bg-zinc-700">
                     <Link href={`/dashboard/accounts`}>

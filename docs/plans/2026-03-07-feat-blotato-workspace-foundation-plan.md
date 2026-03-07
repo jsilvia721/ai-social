@@ -963,8 +963,8 @@ if (result.count === 0) {
 - [x] `BusinessMember` junction table with `role: OWNER | MEMBER`
 - [x] Active business stored in JWT session; `POST /api/businesses/switch` updates it
 - [x] `BusinessSelector` in Sidebar updates active business without full page reload
-- [ ] AI onboarding wizard collects 5-10 answers; Claude tool_use synthesizes into ContentStrategy
-- [ ] Onboarding endpoint is idempotent — returns existing ContentStrategy on re-submit
+- [x] AI onboarding wizard collects 5-10 answers; Claude tool_use synthesizes into ContentStrategy
+- [x] Onboarding endpoint is idempotent — returns existing ContentStrategy on re-submit
 - [x] Post composer workspace-scoped (filtered accounts, businessId on post create, server-side cross-ownership check)
 - [ ] Review window: configurable per workspace (default off); when enabled, posts create as `PENDING_REVIEW`
 - [ ] `PATCH /api/posts/[id]` handles approve (→ `SCHEDULED`) and reject (→ `DRAFT`) with atomic `PUBLISHING` claim

@@ -40,7 +40,7 @@ export default function NewBusinessPage() {
         body: JSON.stringify({ businessId: business.id }),
       });
 
-      router.push("/dashboard/accounts");
+      router.push(`/dashboard/businesses/${business.id}/onboard`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create workspace.");
