@@ -29,10 +29,24 @@ export async function GET(req: NextRequest) {
     update: {},
   });
 
+  // Resolve the user's active business (mirrors the jwt() callback in auth.ts)
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { activeBusinessId: true },
+  });
+  let activeBusinessId: string | null = dbUser?.activeBusinessId ?? null;
+  if (!activeBusinessId) {
+    const membership = await prisma.businessMember.findFirst({
+      where: { userId: user.id },
+      orderBy: { joinedAt: "asc" },
+    });
+    activeBusinessId = membership?.businessId ?? null;
+  }
+
   // Mint a JWT using the same secret and structure as NextAuth's JWT callback.
   // The JWT callback puts user.id into token.sub; the session callback reads it back.
   const token = await encode({
-    token: { sub: user.id, email: user.email, name: user.name },
+    token: { sub: user.id, email: user.email, name: user.name, activeBusinessId },
     secret: env.NEXTAUTH_SECRET,
     maxAge: 60 * 60 * 24, // 1 day
   });

@@ -7,10 +7,10 @@ test.describe("Accounts page (authenticated)", () => {
     await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
   });
 
-  test("all platform connect buttons are rendered", async ({ page }) => {
+  test("unconnected platform connect buttons are rendered", async ({ page }) => {
     await page.goto("/dashboard/accounts");
     // Twitter and Instagram are seeded/connected; Facebook, TikTok, YouTube are not.
-    // Unconnected platforms render an <a> link (role=link) with "Connect {Platform}".
+    // Unconnected platforms render a link: "Connect {Platform label}" via Blotato.
     await expect(page.getByRole("link", { name: /connect facebook/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /connect tiktok/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /connect youtube/i })).toBeVisible();
