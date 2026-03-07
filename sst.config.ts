@@ -33,7 +33,18 @@ export default $config({
     // ── S3 Bucket ──────────────────────────────────────────────────
     const bucket = new sst.aws.Bucket("Storage", {
       public: true,
-      cors: [{ allowedMethods: ["GET", "PUT", "POST"], allowedOrigins: ["*"] }],
+      cors: [
+        { allowedMethods: ["GET"], allowedOrigins: ["*"] },
+        {
+          allowedMethods: ["PUT", "POST"],
+          allowedOrigins: [
+            "https://d11oxnidmahp76.cloudfront.net",
+          ],
+        },
+      ],
+      transform: {
+        bucket: { forceDestroy: false },
+      },
     });
 
     // Explicitly map secrets to the env var names the app expects.
@@ -62,6 +73,11 @@ export default $config({
     new sst.aws.Nextjs("Web", {
       link: [bucket],
       environment,
+      transform: {
+        server: {
+          logging: { retention: "1 month" },
+        },
+      },
     });
 
     // ── Cron: Post Publisher (every 1 minute) ─────────────────────
@@ -71,6 +87,8 @@ export default $config({
         handler: "src/cron/publish.handler",
         environment,
         timeout: "55 seconds",
+        logging: { retention: "1 month" },
+        concurrency: 1,
       },
     });
 
@@ -81,6 +99,7 @@ export default $config({
         handler: "src/cron/metrics.handler",
         environment,
         timeout: "5 minutes",
+        logging: { retention: "1 month" },
       },
     });
   },
