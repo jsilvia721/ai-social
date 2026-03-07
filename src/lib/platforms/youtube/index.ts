@@ -2,6 +2,7 @@
 // Uses Google OAuth 2.0 (access_type=offline for refresh tokens)
 
 import { env } from "@/env";
+import { assertSafeMediaUrl } from "@/lib/platforms/ssrf-guard";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const YOUTUBE_UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos";
@@ -46,10 +47,7 @@ export async function publishYouTubeVideo(
   }
 
   // SSRF guard: only fetch from our own storage
-  const allowedStoragePrefix = env.AWS_S3_PUBLIC_URL ?? "http://localhost:9000";
-  if (!mediaUrls[0].startsWith(allowedStoragePrefix)) {
-    throw new Error("Invalid media URL: only internal storage URLs are permitted");
-  }
+  assertSafeMediaUrl(mediaUrls[0]);
 
   // Use the first line of content as the video title (max 100 chars)
   const title = content.split("\n")[0].slice(0, 100) || "Untitled";

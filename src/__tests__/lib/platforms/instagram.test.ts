@@ -18,6 +18,23 @@ describe("publishInstagramPost", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("throws when a media URL is not from internal storage (SSRF guard)", async () => {
+    await expect(
+      publishInstagramPost("token", "ig-user-id", "caption", ["https://evil.com/img.jpg"])
+    ).rejects.toThrow("SSRF guard");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("throws on SSRF guard when any URL in a multi-image post is not from internal storage", async () => {
+    await expect(
+      publishInstagramPost("token", "ig-user-id", "caption", [
+        "https://storage.example.com/img1.jpg",
+        "https://evil.com/img2.jpg",
+      ])
+    ).rejects.toThrow("SSRF guard");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   describe("single image post", () => {
     function setupSingleImageMocks(containerId = "container-123", postId = "ig-post-456") {
       fetchSpy
@@ -36,7 +53,7 @@ describe("publishInstagramPost", () => {
         "access-token",
         "ig-user-id",
         "Test caption",
-        ["https://example.com/img.jpg"]
+        ["https://storage.example.com/img.jpg"]
       );
 
       expect(result).toEqual({ id: "ig-post-456" });
@@ -50,13 +67,13 @@ describe("publishInstagramPost", () => {
         "access-token",
         "ig-user-id",
         "caption",
-        ["https://example.com/img.jpg"]
+        ["https://storage.example.com/img.jpg"]
       );
 
       const [containerUrl, containerOpts] = fetchSpy.mock.calls[0] as [string, RequestInit];
       expect(containerUrl).toContain("/ig-user-id/media");
       const body = JSON.parse(containerOpts.body as string);
-      expect(body.image_url).toBe("https://example.com/img.jpg");
+      expect(body.image_url).toBe("https://storage.example.com/img.jpg");
       expect(body.media_type).toBe("IMAGE");
       expect(body).not.toHaveProperty("is_carousel_item");
     });
@@ -70,7 +87,7 @@ describe("publishInstagramPost", () => {
         .mockResolvedValueOnce({ ok: true, json: async () => ({ status_code: "FINISHED" }) } as Response)
         .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "post-1" }) } as Response);
 
-      const result = await publishInstagramPost("token", "ig-id", "caption", ["https://img.com/a.jpg"]);
+      const result = await publishInstagramPost("token", "ig-id", "caption", ["https://storage.example.com/a.jpg"]);
 
       expect(result).toEqual({ id: "post-1" });
       // container create + 2 status checks + publish = 4 calls
@@ -83,7 +100,7 @@ describe("publishInstagramPost", () => {
         .mockResolvedValueOnce({ ok: true, json: async () => ({ status_code: "ERROR" }) } as Response);
 
       await expect(
-        publishInstagramPost("token", "ig-id", "caption", ["https://img.com/a.jpg"])
+        publishInstagramPost("token", "ig-id", "caption", ["https://storage.example.com/a.jpg"])
       ).rejects.toThrow("Instagram media container processing failed");
     });
 
@@ -94,7 +111,7 @@ describe("publishInstagramPost", () => {
       } as Response);
 
       await expect(
-        publishInstagramPost("bad-token", "ig-user-id", "caption", ["https://example.com/img.jpg"])
+        publishInstagramPost("bad-token", "ig-user-id", "caption", ["https://storage.example.com/img.jpg"])
       ).rejects.toThrow("Instagram container creation failed");
     });
 
@@ -108,7 +125,7 @@ describe("publishInstagramPost", () => {
         } as Response);
 
       await expect(
-        publishInstagramPost("access-token", "ig-user-id", "caption", ["https://example.com/img.jpg"])
+        publishInstagramPost("access-token", "ig-user-id", "caption", ["https://storage.example.com/img.jpg"])
       ).rejects.toThrow("Instagram publish failed");
     });
   });
@@ -135,7 +152,7 @@ describe("publishInstagramPost", () => {
         "access-token",
         "ig-user-id",
         "Carousel caption",
-        ["https://example.com/img1.jpg", "https://example.com/img2.jpg"]
+        ["https://storage.example.com/img1.jpg", "https://storage.example.com/img2.jpg"]
       );
 
       expect(result).toEqual({ id: "ig-post-carousel" });
@@ -156,7 +173,7 @@ describe("publishInstagramPost", () => {
         "token",
         "ig-id",
         "caption",
-        ["https://img.com/a.jpg", "https://img.com/b.jpg"]
+        ["https://storage.example.com/a.jpg", "https://storage.example.com/b.jpg"]
       );
 
       const childBody = JSON.parse(fetchSpy.mock.calls[0][1].body as string);
@@ -178,7 +195,7 @@ describe("publishInstagramPost", () => {
         "token",
         "ig-id",
         "My carousel",
-        ["https://img.com/a.jpg", "https://img.com/b.jpg"]
+        ["https://storage.example.com/a.jpg", "https://storage.example.com/b.jpg"]
       );
 
       // The carousel container create call is the 5th fetch call (index 4)
@@ -200,7 +217,7 @@ describe("publishInstagramPost", () => {
         } as Response);
 
       await expect(
-        publishInstagramPost("token", "ig-id", "caption", ["https://img.com/a.jpg", "https://img.com/b.jpg"])
+        publishInstagramPost("token", "ig-id", "caption", ["https://storage.example.com/a.jpg", "https://storage.example.com/b.jpg"])
       ).rejects.toThrow("Instagram carousel creation failed");
     });
   });

@@ -72,7 +72,7 @@ describe("publishYouTubeVideo", () => {
   it("throws when media URL is not from internal storage (SSRF guard)", async () => {
     await expect(
       publishYouTubeVideo("token", "desc", ["https://evil.com/video.mp4"])
-    ).rejects.toThrow("Invalid media URL");
+    ).rejects.toThrow("SSRF guard");
   });
 
   it("throws when video fetch from storage fails", async () => {

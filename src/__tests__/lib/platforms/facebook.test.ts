@@ -50,6 +50,23 @@ describe("publishFacebookPost", () => {
     });
   });
 
+  it("throws when a media URL is not from internal storage (SSRF guard)", async () => {
+    await expect(
+      publishFacebookPost("token", "page-id", "caption", ["https://evil.com/img.jpg"])
+    ).rejects.toThrow("SSRF guard");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("throws on SSRF guard when any URL in a multi-photo post is not from internal storage", async () => {
+    await expect(
+      publishFacebookPost("token", "page-id", "caption", [
+        "https://storage.example.com/img1.jpg",
+        "https://evil.com/img2.jpg",
+      ])
+    ).rejects.toThrow("SSRF guard");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   describe("single photo post", () => {
     it("posts to /photos with url and caption", async () => {
       fetchSpy.mockResolvedValue({
@@ -61,14 +78,14 @@ describe("publishFacebookPost", () => {
         "token",
         "page-id",
         "Look at this!",
-        ["https://example.com/img.jpg"]
+        ["https://storage.example.com/img.jpg"]
       );
 
       expect(result).toEqual({ id: "post-123" });
       const [url, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
       expect(url).toContain("/page-id/photos");
       const body = JSON.parse(options.body as string);
-      expect(body.url).toBe("https://example.com/img.jpg");
+      expect(body.url).toBe("https://storage.example.com/img.jpg");
       expect(body.caption).toBe("Look at this!");
     });
 
@@ -79,7 +96,7 @@ describe("publishFacebookPost", () => {
       } as Response);
 
       const result = await publishFacebookPost("token", "page-id", "caption", [
-        "https://example.com/img.jpg",
+        "https://storage.example.com/img.jpg",
       ]);
 
       expect(result).toEqual({ id: "photo-id-only" });
@@ -92,7 +109,7 @@ describe("publishFacebookPost", () => {
       } as Response);
 
       await expect(
-        publishFacebookPost("token", "page-id", "caption", ["https://example.com/img.jpg"])
+        publishFacebookPost("token", "page-id", "caption", ["https://storage.example.com/img.jpg"])
       ).rejects.toThrow("Facebook photo post failed");
     });
   });
@@ -111,7 +128,7 @@ describe("publishFacebookPost", () => {
         "token",
         "page-id",
         "Two photos!",
-        ["https://example.com/a.jpg", "https://example.com/b.jpg"]
+        ["https://storage.example.com/a.jpg", "https://storage.example.com/b.jpg"]
       );
 
       expect(result).toEqual({ id: "feed-post-1" });
@@ -125,8 +142,8 @@ describe("publishFacebookPost", () => {
         .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "feed-1" }) } as Response);
 
       await publishFacebookPost("token", "page-id", "caption", [
-        "https://example.com/a.jpg",
-        "https://example.com/b.jpg",
+        "https://storage.example.com/a.jpg",
+        "https://storage.example.com/b.jpg",
       ]);
 
       const photoBody = JSON.parse(fetchSpy.mock.calls[0][1].body as string);
@@ -141,8 +158,8 @@ describe("publishFacebookPost", () => {
         .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "feed-1" }) } as Response);
 
       await publishFacebookPost("token", "page-id", "Two photos!", [
-        "https://example.com/a.jpg",
-        "https://example.com/b.jpg",
+        "https://storage.example.com/a.jpg",
+        "https://storage.example.com/b.jpg",
       ]);
 
       const feedBody = JSON.parse(fetchSpy.mock.calls[2][1].body as string);
@@ -161,8 +178,8 @@ describe("publishFacebookPost", () => {
 
       await expect(
         publishFacebookPost("token", "page-id", "caption", [
-          "https://example.com/a.jpg",
-          "https://example.com/b.jpg",
+          "https://storage.example.com/a.jpg",
+          "https://storage.example.com/b.jpg",
         ])
       ).rejects.toThrow("Facebook photo upload failed");
     });
@@ -178,8 +195,8 @@ describe("publishFacebookPost", () => {
 
       await expect(
         publishFacebookPost("token", "page-id", "caption", [
-          "https://example.com/a.jpg",
-          "https://example.com/b.jpg",
+          "https://storage.example.com/a.jpg",
+          "https://storage.example.com/b.jpg",
         ])
       ).rejects.toThrow("Facebook publish failed");
     });

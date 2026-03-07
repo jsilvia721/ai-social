@@ -56,6 +56,13 @@ describe("publishTikTokVideo", () => {
     );
   });
 
+  it("throws when media URL is not from internal storage (SSRF guard)", async () => {
+    await expect(
+      publishTikTokVideo("token", "caption", ["https://evil.com/video.mp4"])
+    ).rejects.toThrow("SSRF guard");
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it("throws with clear message when API is not approved (scope error)", async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: false,
@@ -63,7 +70,7 @@ describe("publishTikTokVideo", () => {
     });
 
     await expect(
-      publishTikTokVideo("token", "caption", ["https://example.com/video.mp4"])
+      publishTikTokVideo("token", "caption", ["https://storage.example.com/video.mp4"])
     ).rejects.toThrow("TikTok Content Posting API access not yet approved");
   });
 
@@ -74,7 +81,7 @@ describe("publishTikTokVideo", () => {
     });
 
     await expect(
-      publishTikTokVideo("token", "caption", ["https://example.com/video.mp4"])
+      publishTikTokVideo("token", "caption", ["https://storage.example.com/video.mp4"])
     ).rejects.toThrow("TikTok Content Posting API access not yet approved");
   });
 
@@ -85,7 +92,7 @@ describe("publishTikTokVideo", () => {
     });
 
     await expect(
-      publishTikTokVideo("token", "caption", ["https://example.com/video.mp4"])
+      publishTikTokVideo("token", "caption", ["https://storage.example.com/video.mp4"])
     ).rejects.toThrow("TikTok publish init failed");
   });
 
@@ -96,7 +103,7 @@ describe("publishTikTokVideo", () => {
     });
 
     await expect(
-      publishTikTokVideo("token", "caption", ["https://example.com/video.mp4"])
+      publishTikTokVideo("token", "caption", ["https://storage.example.com/video.mp4"])
     ).rejects.toThrow("TikTok publish init did not return a publish_id");
   });
 
@@ -107,7 +114,7 @@ describe("publishTikTokVideo", () => {
     });
 
     const result = await publishTikTokVideo("token", "caption", [
-      "https://example.com/video.mp4",
+      "https://storage.example.com/video.mp4",
     ]);
 
     expect(result.id).toBe("pub-123");

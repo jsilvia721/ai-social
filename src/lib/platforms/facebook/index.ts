@@ -1,6 +1,8 @@
 // Facebook Graph API client
 // Uses Page Access Token (obtained via Meta OAuth flow)
 
+import { assertSafeMediaUrl } from "@/lib/platforms/ssrf-guard";
+
 const GRAPH_URL = "https://graph.facebook.com/v19.0";
 
 export async function publishFacebookPost(
@@ -9,6 +11,11 @@ export async function publishFacebookPost(
   content: string,
   mediaUrls: string[] = []
 ): Promise<{ id: string }> {
+  // SSRF guard: validate all URLs originate from our own S3 storage
+  for (const url of mediaUrls) {
+    assertSafeMediaUrl(url);
+  }
+
   if (mediaUrls.length === 1) {
     // Single photo — /photos endpoint publishes and creates the feed post in one step
     const res = await fetch(`${GRAPH_URL}/${pageId}/photos`, {

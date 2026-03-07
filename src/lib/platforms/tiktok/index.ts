@@ -10,6 +10,7 @@
 // is stored as the post's platform ID so status can be checked later if needed.
 
 import { env } from "@/env";
+import { assertSafeMediaUrl } from "@/lib/platforms/ssrf-guard";
 
 const TIKTOK_POST_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/";
 const TIKTOK_REFRESH_URL = "https://open.tiktokapis.com/v2/oauth/token/";
@@ -54,6 +55,9 @@ export async function publishTikTokVideo(
       "TikTok requires a video file. Attach a video before scheduling."
     );
   }
+
+  // SSRF guard: validate the URL originates from our own S3 storage
+  assertSafeMediaUrl(mediaUrls[0]);
 
   // Initiate publish via PULL_FROM_URL (TikTok fetches from our S3 URL)
   const res = await fetch(TIKTOK_POST_URL, {

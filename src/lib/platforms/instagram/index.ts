@@ -1,6 +1,8 @@
 // Instagram Graph API client
 // Uses Page Access Token (obtained via Meta OAuth flow)
 
+import { assertSafeMediaUrl } from "@/lib/platforms/ssrf-guard";
+
 const GRAPH_URL = "https://graph.facebook.com/v19.0";
 
 async function waitForContainer(
@@ -62,6 +64,11 @@ export async function publishInstagramPost(
     throw new Error(
       "Instagram requires at least one image URL. Attach an image before scheduling."
     );
+  }
+
+  // SSRF guard: validate all URLs originate from our own S3 storage
+  for (const url of mediaUrls) {
+    assertSafeMediaUrl(url);
   }
 
   let containerId: string;
