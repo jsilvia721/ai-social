@@ -37,7 +37,11 @@ export default $config({
           allowedMethods: ["PUT", "POST"],
           allowedOrigins: [
             "https://d11oxnidmahp76.cloudfront.net",
+            "https://*.cloudfront.net",
+            "http://localhost:3000",
           ],
+          allowedHeaders: ["Content-Type", "Content-Length"],
+          exposeHeaders: ["ETag"],
         },
       ],
       transform: {

@@ -32,12 +32,14 @@ export function getPublicUrl(key: string): string {
 export async function getPresignedUploadUrl(
   key: string,
   mimeType: string,
+  contentLength?: number,
   expiresInSeconds = 3600
 ): Promise<string> {
   const command = new PutObjectCommand({
     Bucket: BUCKET,
     Key: key,
     ContentType: mimeType,
+    ...(contentLength !== undefined && { ContentLength: contentLength }),
   });
   return getSignedUrl(s3, command, { expiresIn: expiresInSeconds });
 }
