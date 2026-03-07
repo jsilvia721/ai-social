@@ -88,10 +88,10 @@ jobs:
       ANTHROPIC_API_KEY: e2e-anthropic-api-key
       BLOTATO_API_KEY: e2e-blotato-api-key
       SES_FROM_EMAIL: noreply@example.com
-      AWS_S3_BUCKET: ai-social-e2e
-      AWS_S3_PUBLIC_URL: https://storage.example.com
       ALLOWED_EMAILS: test@example.com
       NODE_ENV: test
+      AWS_S3_BUCKET: e2e-test-bucket
+      AWS_S3_PUBLIC_URL: http://localhost:9000/e2e-test-bucket
       PLAYWRIGHT_E2E: "true"
 
     steps:
@@ -132,6 +132,61 @@ jobs:
           retention-days: 7
 
   # ── Deploy ─────────────────────────────────────────────────────────────────
-  # Deployment is handled by SST v3 Ion via GitHub Actions OIDC.
-  # Pushes to `staging` deploy to the staging SST stage; `main` deploys production.
-  # See docs/plans/ for the AWS migration plan and one-time setup steps.
+  deploy:
+    name: Deploy
+    needs: [e2e]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+    concurrency:
+      group: deploy-${{ github.ref }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Set stage
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "STAGE=production" >> $GITHUB_ENV
+          else
+            echo "STAGE=staging" >> $GITHUB_ENV
+          fi
+
+      - name: Echo migration target
+        run: |
+          echo "Running migrations against: $(echo $DATABASE_URL | sed 's/:[^:@]*@/@/')"
+
+      - name: Run DB migrations (production)
+        if: github.ref == 'refs/heads/main'
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Run DB migrations (staging)
+        if: github.ref == 'refs/heads/staging'
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Deploy with SST
+        run: npx sst deploy --stage $STAGE

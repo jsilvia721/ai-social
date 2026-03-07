@@ -52,18 +52,9 @@ next-env.d.ts
 !/e2e/.auth/.gitkeep
 .open-next/
 
-# SST build artifacts
-.sst/artifacts/
-.sst/log/
-.sst/platform/
-.sst/outputs.json
-.sst/esbuild.json
-
 # Playwright artifacts
 playwright-report/
 test-results/
 
-# SST state files
-.sst/provider-lock.json
-.sst/stage
+# SST
 .sst/
