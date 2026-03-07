@@ -57,8 +57,7 @@ export async function GET(req: NextRequest) {
   });
 
   if (!tokenRes.ok) {
-    const body = await tokenRes.text();
-    console.error("[youtube/callback] token exchange failed:", tokenRes.status, body);
+    console.error("[youtube/callback] token exchange failed:", tokenRes.status);
     return NextResponse.redirect(
       new URL("/dashboard/accounts?error=youtube_token_failed", req.url)
     );
@@ -80,8 +79,7 @@ export async function GET(req: NextRequest) {
   );
 
   if (!channelRes.ok) {
-    const body = await channelRes.text();
-    console.error("[youtube/callback] channel fetch failed:", channelRes.status, body);
+    console.error("[youtube/callback] channel fetch failed:", channelRes.status);
     return NextResponse.redirect(
       new URL("/dashboard/accounts?error=youtube_channel_failed", req.url)
     );

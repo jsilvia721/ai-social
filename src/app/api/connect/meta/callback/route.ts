@@ -51,8 +51,7 @@ export async function GET(req: NextRequest) {
   });
 
   if (!shortTokenRes.ok) {
-    const body = await shortTokenRes.text();
-    console.error("[meta/callback] short token exchange failed:", shortTokenRes.status, body);
+    console.error("[meta/callback] short token exchange failed:", shortTokenRes.status);
     return NextResponse.redirect(
       new URL("/dashboard/accounts?error=meta_token_failed", req.url)
     );
@@ -71,8 +70,7 @@ export async function GET(req: NextRequest) {
   );
 
   if (!longTokenRes.ok) {
-    const body = await longTokenRes.text();
-    console.error("[meta/callback] long token exchange failed:", longTokenRes.status, body);
+    console.error("[meta/callback] long token exchange failed:", longTokenRes.status);
     return NextResponse.redirect(
       new URL("/dashboard/accounts?error=meta_long_token_failed", req.url)
     );
@@ -88,15 +86,14 @@ export async function GET(req: NextRequest) {
   );
 
   if (!pagesRes.ok) {
-    const body = await pagesRes.text();
-    console.error("[meta/callback] pages fetch failed:", pagesRes.status, body);
+    console.error("[meta/callback] pages fetch failed:", pagesRes.status);
     return NextResponse.redirect(
       new URL("/dashboard/accounts?error=meta_pages_failed", req.url)
     );
   }
 
   const pagesJson = await pagesRes.json();
-  console.log("[meta/callback] pages response:", JSON.stringify(pagesJson));
+  console.log("[meta/callback] pages found:", pagesJson.data?.length ?? 0);
   const { data: pages } = pagesJson;
 
   if (!pages || pages.length === 0) {

@@ -75,8 +75,7 @@ export async function GET(req: NextRequest) {
   });
 
   if (!tokenRes.ok) {
-    const body = await tokenRes.text();
-    console.error("[tiktok/callback] token exchange failed:", tokenRes.status, body);
+    console.error("[tiktok/callback] token exchange failed:", tokenRes.status);
     return NextResponse.redirect(
       new URL("/dashboard/accounts?error=tiktok_token_failed", req.url)
     );
