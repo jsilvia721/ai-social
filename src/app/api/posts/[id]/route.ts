@@ -29,6 +29,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json();
   const { content, scheduledAt, mediaUrls } = body;
 
+  if (scheduledAt !== undefined && scheduledAt !== null) {
+    const scheduledDate = new Date(scheduledAt);
+    if (isNaN(scheduledDate.getTime())) {
+      return NextResponse.json({ error: "Invalid scheduledAt date" }, { status: 400 });
+    }
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+    if (scheduledDate < twoMinutesAgo) {
+      return NextResponse.json({ error: "Cannot schedule a post in the past" }, { status: 400 });
+    }
+  }
+
   if (mediaUrls?.length) {
     mediaUrls.forEach(assertSafeMediaUrl);
   }

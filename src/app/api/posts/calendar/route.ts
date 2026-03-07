@@ -10,15 +10,30 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const year = parseInt(searchParams.get("year") ?? "", 10);
-  const month = parseInt(searchParams.get("month") ?? "", 10); // 0-indexed
+  const startDateParam = searchParams.get("startDate");
+  const endDateParam = searchParams.get("endDate");
 
-  if (isNaN(year) || isNaN(month) || month < 0 || month > 11) {
-    return NextResponse.json({ error: "Invalid year or month" }, { status: 400 });
+  let start: Date;
+  let end: Date;
+
+  if (startDateParam && endDateParam) {
+    start = new Date(startDateParam);
+    end = new Date(endDateParam);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return NextResponse.json({ error: "Invalid startDate or endDate" }, { status: 400 });
+    }
+    if (start >= end) {
+      return NextResponse.json({ error: "startDate must be before endDate" }, { status: 400 });
+    }
+  } else {
+    const year = parseInt(searchParams.get("year") ?? "", 10);
+    const month = parseInt(searchParams.get("month") ?? "", 10); // 0-indexed
+    if (isNaN(year) || isNaN(month) || month < 0 || month > 11) {
+      return NextResponse.json({ error: "Invalid year or month" }, { status: 400 });
+    }
+    start = new Date(Date.UTC(year, month, 1));
+    end = new Date(Date.UTC(year, month + 1, 1));
   }
-
-  const start = new Date(Date.UTC(year, month, 1));
-  const end = new Date(Date.UTC(year, month + 1, 1));
 
   const posts = await prisma.post.findMany({
     where: {

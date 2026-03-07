@@ -76,6 +76,30 @@ describe("GET /api/posts/calendar", () => {
     expect(call.where.scheduledAt.lt).toEqual(new Date(Date.UTC(2026, 3, 1)));  // Apr 1 UTC
   });
 
+  it("supports startDate/endDate query params", async () => {
+    mockAuthenticated();
+    prismaMock.post.findMany.mockResolvedValue([]);
+
+    const res = await GET(makeRequest({ startDate: "2026-03-09T00:00:00Z", endDate: "2026-03-16T00:00:00Z" }));
+    expect(res.status).toBe(200);
+
+    const call = prismaMock.post.findMany.mock.calls[0]?.[0] as { where: { scheduledAt: { gte: Date; lt: Date } } };
+    expect(call.where.scheduledAt.gte).toEqual(new Date("2026-03-09T00:00:00Z"));
+    expect(call.where.scheduledAt.lt).toEqual(new Date("2026-03-16T00:00:00Z"));
+  });
+
+  it("returns 400 for invalid startDate/endDate", async () => {
+    mockAuthenticated();
+    const res = await GET(makeRequest({ startDate: "bad", endDate: "worse" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when startDate >= endDate", async () => {
+    mockAuthenticated();
+    const res = await GET(makeRequest({ startDate: "2026-03-16T00:00:00Z", endDate: "2026-03-09T00:00:00Z" }));
+    expect(res.status).toBe(400);
+  });
+
   it("handles month=11 (December) without overflow", async () => {
     mockAuthenticated();
     prismaMock.post.findMany.mockResolvedValue([]);

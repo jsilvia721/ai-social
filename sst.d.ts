@@ -34,6 +34,9 @@ declare namespace sst {
           cors?: Array<{
             allowedMethods?: string[];
             allowedOrigins?: string[];
+            allowedHeaders?: string[];
+            exposeHeaders?: string[];
+            maxAge?: number;
           }>;
           transform?: Record<string, unknown>;
           [key: string]: unknown;
