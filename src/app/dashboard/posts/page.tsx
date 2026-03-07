@@ -92,6 +92,39 @@ export default function PostsPage() {
     setCalMonth(month);
   }
 
+  async function handleReschedule(postId: string, newDate: Date): Promise<boolean> {
+    // Optimistic update
+    const original = calPosts.find((p) => p.id === postId);
+    if (!original) return false;
+
+    const newScheduledAt = newDate.toISOString();
+    setCalPosts((prev) =>
+      prev.map((p) => (p.id === postId ? { ...p, scheduledAt: newScheduledAt } : p))
+    );
+
+    try {
+      const res = await fetch(`/api/posts/${postId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduledAt: newScheduledAt }),
+      });
+      if (!res.ok) {
+        // Rollback
+        setCalPosts((prev) =>
+          prev.map((p) => (p.id === postId ? { ...p, scheduledAt: original.scheduledAt } : p))
+        );
+        return false;
+      }
+      return true;
+    } catch {
+      // Rollback on network error
+      setCalPosts((prev) =>
+        prev.map((p) => (p.id === postId ? { ...p, scheduledAt: original.scheduledAt } : p))
+      );
+      return false;
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -147,6 +180,7 @@ export default function PostsPage() {
               year={calYear}
               month={calMonth}
               onNavigate={handleCalendarNavigate}
+              onReschedule={handleReschedule}
             />
           )}
         </div>
