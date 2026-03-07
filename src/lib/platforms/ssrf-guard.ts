@@ -8,7 +8,8 @@ import { env } from "@/env";
  * such as AWS instance metadata (http://169.254.169.254/...).
  */
 export function assertSafeMediaUrl(url: string): void {
-  const allowedPrefix = env.AWS_S3_PUBLIC_URL;
+  const base = env.AWS_S3_PUBLIC_URL;
+  const allowedPrefix = base.endsWith("/") ? base : `${base}/`;
   if (!url.startsWith(allowedPrefix)) {
     throw new Error(
       `SSRF guard: mediaUrl must be an S3 URL starting with ${allowedPrefix}. Got: ${url}`

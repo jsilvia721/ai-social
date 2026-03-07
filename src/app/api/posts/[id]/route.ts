@@ -1,5 +1,6 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { assertSafeMediaUrl } from "@/lib/platforms/ssrf-guard";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -27,6 +28,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const body = await req.json();
   const { content, scheduledAt, mediaUrls } = body;
+
+  if (mediaUrls?.length) {
+    mediaUrls.forEach(assertSafeMediaUrl);
+  }
 
   const updated = await prisma.post.update({
     where: { id: post.id },

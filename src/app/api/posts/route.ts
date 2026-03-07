@@ -1,5 +1,6 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { assertSafeMediaUrl } from "@/lib/platforms/ssrf-guard";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -74,6 +75,10 @@ export async function POST(req: NextRequest) {
 
   if (!account) {
     return NextResponse.json({ error: "Social account not found" }, { status: 404 });
+  }
+
+  if (mediaUrls?.length) {
+    mediaUrls.forEach(assertSafeMediaUrl);
   }
 
   const post = await prisma.post.create({
