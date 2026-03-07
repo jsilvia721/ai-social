@@ -67,9 +67,12 @@ describe("publishTweet", () => {
   }); // end "without media"
 
   describe("with mediaUrls", () => {
+    const S3_IMG = "https://storage.example.com/img.jpg";
+    const S3_BAD = "https://storage.example.com/bad.jpg";
+
     function makeFetchMock(mediaIdString = "mid-1", tweetId = "tweet-123") {
       return jest.fn().mockImplementation(async (url: string) => {
-        if (url === "https://example.com/img.jpg") {
+        if (url === S3_IMG) {
           return {
             ok: true,
             arrayBuffer: async () => new ArrayBuffer(8),
@@ -87,7 +90,7 @@ describe("publishTweet", () => {
     it("fetches the file, uploads to Twitter, and includes media_ids in the tweet body", async () => {
       fetchSpy.mockImplementation(makeFetchMock());
 
-      const result = await publishTweet("token", "Hello!", ["https://example.com/img.jpg"]);
+      const result = await publishTweet("token", "Hello!", [S3_IMG]);
 
       expect(result.id).toBe("tweet-123");
       const tweetCall = fetchSpy.mock.calls.find(([url]: [string]) =>
@@ -100,7 +103,7 @@ describe("publishTweet", () => {
     it("uploads to the Twitter v1.1 media endpoint with the access token", async () => {
       fetchSpy.mockImplementation(makeFetchMock());
 
-      await publishTweet("my-token", "Hello!", ["https://example.com/img.jpg"]);
+      await publishTweet("my-token", "Hello!", [S3_IMG]);
 
       const uploadCall = fetchSpy.mock.calls.find(([url]: [string]) =>
         url.includes("upload.twitter.com")
@@ -123,24 +126,30 @@ describe("publishTweet", () => {
       expect(body).not.toHaveProperty("media");
     });
 
+    it("rejects non-S3 media URLs before fetching", async () => {
+      await expect(
+        publishTweet("token", "Hello!", ["https://evil.com/img.jpg"])
+      ).rejects.toThrow("SSRF guard");
+    });
+
     it("throws when the media file cannot be fetched", async () => {
       fetchSpy.mockResolvedValue({ ok: false, arrayBuffer: async () => new ArrayBuffer(0), headers: new Headers() });
 
       await expect(
-        publishTweet("token", "Hello!", ["https://example.com/bad.jpg"])
+        publishTweet("token", "Hello!", [S3_BAD])
       ).rejects.toThrow("Failed to fetch media from");
     });
 
     it("throws when the Twitter media upload fails", async () => {
       fetchSpy.mockImplementation(async (url: string) => {
-        if (url === "https://example.com/img.jpg") {
+        if (url === S3_IMG) {
           return { ok: true, arrayBuffer: async () => new ArrayBuffer(8), headers: new Headers({ "content-type": "image/jpeg" }) };
         }
         return { ok: false, json: async () => ({ error: "media_upload_failed" }) };
       });
 
       await expect(
-        publishTweet("token", "Hello!", ["https://example.com/img.jpg"])
+        publishTweet("token", "Hello!", [S3_IMG])
       ).rejects.toThrow("Twitter media upload failed");
     });
   });

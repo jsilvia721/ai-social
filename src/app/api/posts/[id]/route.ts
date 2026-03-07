@@ -1,5 +1,6 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { assertSafeMediaUrl } from "@/lib/platforms/ssrf-guard";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -37,6 +38,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (scheduledDate < twoMinutesAgo) {
       return NextResponse.json({ error: "Cannot schedule a post in the past" }, { status: 400 });
     }
+  }
+
+  if (mediaUrls?.length) {
+    mediaUrls.forEach(assertSafeMediaUrl);
   }
 
   const updated = await prisma.post.update({
