@@ -5,11 +5,8 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 // Locally, credentials come from ~/.aws/credentials or env vars.
 const s3 = new S3Client({ region: "us-east-1" });
 
-const BUCKET = process.env.AWS_S3_BUCKET ?? "ai-social";
-const PUBLIC_URL = (process.env.AWS_S3_PUBLIC_URL ?? "").replace(/\/$/, "");
-
-// No-op: bucket is provisioned by SST at deploy time.
-export async function ensureBucket(): Promise<void> {}
+const BUCKET = process.env.AWS_S3_BUCKET!;
+const PUBLIC_URL = process.env.AWS_S3_PUBLIC_URL!.replace(/\/$/, "");
 
 export async function uploadFile(
   file: File,

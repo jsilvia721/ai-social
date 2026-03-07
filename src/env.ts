@@ -15,8 +15,8 @@ const serverSchema = z.object({
   TIKTOK_CLIENT_SECRET: z.string().min(1),
   TOKEN_ENCRYPTION_KEY: z.string().length(64), // 32-byte AES-256 key as 64 hex chars
   ALLOWED_EMAILS: z.string().min(1),
-  AWS_S3_BUCKET: z.string().min(1).optional(),
-  AWS_S3_PUBLIC_URL: z.string().url().optional(),
+  AWS_S3_BUCKET: z.string().min(1),
+  AWS_S3_PUBLIC_URL: z.string().url(),
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),

@@ -1,7 +1,6 @@
 import { mockAuthenticated, mockUnauthenticated, mockSession } from "@/__tests__/mocks/auth";
 
 jest.mock("@/lib/storage", () => ({
-  ensureBucket: jest.fn().mockResolvedValue(undefined),
   getPresignedUploadUrl: jest.fn(),
   getPublicUrl: jest.fn(),
 }));
