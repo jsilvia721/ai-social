@@ -134,29 +134,45 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
-  # ── Deploy to Production ───────────────────────────────────────────────────
-  # Uses a Railway deploy hook (permanent URL, no token expiry).
-  # Setup: Railway dashboard → your service → Settings → Deploy Hooks → create hook
-  # for the "production" environment → copy URL → save as RAILWAY_DEPLOY_HOOK_PRODUCTION
-  # GitHub secret.  Railway will pull and build from the `main` branch automatically.
-  deploy-production:
-    name: Deploy → Production
-    needs: [lint, test, e2e]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  # ── Deploy ─────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy
+    needs: [e2e]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
-      - name: Trigger Railway deploy (production)
-        run: curl -fsSL -X POST "${{ secrets.RAILWAY_DEPLOY_HOOK_PRODUCTION }}"
+      - uses: actions/checkout@v4
 
-  # ── Deploy to Staging ──────────────────────────────────────────────────────
-  # Same pattern — hook URL saved as RAILWAY_DEPLOY_HOOK_STAGING.
-  deploy-staging:
-    name: Deploy → Staging
-    needs: [lint, test, e2e]
-    if: github.ref == 'refs/heads/staging' && github.event_name == 'push'
-    runs-on: ubuntu-latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
 
-    steps:
-      - name: Trigger Railway deploy (staging)
-        run: curl -fsSL -X POST "${{ secrets.RAILWAY_DEPLOY_HOOK_STAGING }}"
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Set stage
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "STAGE=production" >> $GITHUB_ENV
+          else
+            echo "STAGE=staging" >> $GITHUB_ENV
+          fi
+
+      - name: Run DB migrations
+        env:
+          DATABASE_URL: ${{ github.ref == 'refs/heads/main' && secrets.PROD_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Deploy with SST
+        run: npx sst deploy --stage $STAGE
