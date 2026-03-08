@@ -61,8 +61,19 @@ describe("POST /api/businesses", () => {
     expect(body.error).toContain("name");
   });
 
+  it("returns 401 when user does not exist in DB (stale JWT)", async () => {
+    mockAuthenticated();
+    prismaMock.user.findUnique.mockResolvedValue(null);
+
+    const res = await POST(makeRequest("POST", { name: "New Corp" }));
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toMatch(/sign out/i);
+  });
+
   it("creates a business with the user as OWNER", async () => {
     mockAuthenticated();
+    prismaMock.user.findUnique.mockResolvedValue({ id: mockSession.user.id } as any);
     const created = { id: "biz-new", name: "New Corp", createdAt: new Date(), updatedAt: new Date() };
     prismaMock.business.create.mockResolvedValue(created as any);
 
