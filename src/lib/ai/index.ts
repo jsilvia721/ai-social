@@ -173,6 +173,136 @@ export async function extractContentStrategy(
   return ContentStrategyInputSchema.parse(toolUse.input);
 }
 
+// ── Performance Analysis (M3 Optimizer) ─────────────────────────────────────
+
+export interface PerformancePost {
+  id: string;
+  platform: string;
+  format: string | null;
+  topicPillar: string | null;
+  tone: string | null;
+  engagementRate: number;
+  metricsLikes: number;
+  metricsComments: number;
+  metricsShares: number;
+  metricsSaves: number;
+}
+
+interface PerformanceInput {
+  posts: PerformancePost[];
+  strategy: {
+    industry: string;
+    targetAudience: string;
+    contentPillars: string[];
+    brandVoice: string;
+  };
+  currentFormatMix: Record<string, number>;
+}
+
+const strategyUpdateTool: Anthropic.Tool = {
+  name: "update_strategy",
+  description: "Analyze performance and suggest strategy updates based on post data",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      patterns: {
+        type: "array",
+        items: { type: "string" },
+        description: "3-5 key performance patterns observed",
+        maxItems: 5,
+      },
+      formatMixChanges: {
+        type: "object",
+        description: "Suggested format mix adjustments (deltas, e.g. { 'VIDEO': 0.1, 'TEXT': -0.1 })",
+        additionalProperties: { type: "number" },
+      },
+      cadenceChanges: {
+        type: "object",
+        description: "Suggested posting frequency changes per platform (deltas, e.g. { 'TWITTER': 1 })",
+        additionalProperties: { type: "integer" },
+      },
+      topicInsights: {
+        type: "array",
+        items: { type: "string" },
+        description: "Which content pillars to lean into or pull back from",
+      },
+      digest: {
+        type: "string",
+        description: "Plain-language weekly summary for the partner (2-3 paragraphs, max 1000 chars)",
+        maxLength: 2000,
+      },
+    },
+    required: ["patterns", "digest"],
+  },
+};
+
+function buildPerformancePrompt(input: PerformanceInput): string {
+  const postSummaries = input.posts
+    .sort((a, b) => b.engagementRate - a.engagementRate)
+    .map(
+      (p, i) =>
+        `${i + 1}. [${p.platform}] format=${p.format ?? "unknown"} topic=${p.topicPillar ?? "untagged"} tone=${p.tone ?? "unset"} | likes=${p.metricsLikes} comments=${p.metricsComments} shares=${p.metricsShares} saves=${p.metricsSaves} | score=${p.engagementRate.toFixed(2)}`
+    )
+    .join("\n");
+
+  const mixEntries = Object.entries(input.currentFormatMix)
+    .map(([k, v]) => `${k}: ${(v * 100).toFixed(0)}%`)
+    .join(", ");
+
+  return `You are a social media strategist analyzing performance data for a ${input.strategy.industry} business.
+
+Target audience: ${input.strategy.targetAudience}
+Content pillars: ${input.strategy.contentPillars.join(", ")}
+Brand voice: ${input.strategy.brandVoice}
+
+Current format mix: ${mixEntries || "No data yet"}
+
+Here are the last 30 days of published posts ranked by engagement score:
+
+${postSummaries}
+
+Analyze the performance data and call update_strategy with:
+1. patterns: 3-5 specific, data-backed observations (not generic advice)
+2. formatMixChanges: suggested shifts in format distribution (max +/-0.2 each)
+3. cadenceChanges: suggested posting frequency changes per platform (max +/-2)
+4. topicInsights: which content pillars to emphasize or de-emphasize
+5. digest: a plain-language summary for the business owner explaining what you found and what you're changing
+
+Be specific and reference actual data. If there isn't enough data for confident recommendations, say so.`;
+}
+
+export async function analyzePerformance(
+  input: PerformanceInput
+): Promise<{
+  patterns: string[];
+  formatMixChanges?: Record<string, number>;
+  cadenceChanges?: Record<string, number>;
+  topicInsights?: string[];
+  digest: string;
+}> {
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 2048,
+    tools: [strategyUpdateTool],
+    tool_choice: { type: "tool", name: "update_strategy" },
+    messages: [{ role: "user", content: buildPerformancePrompt(input) }],
+  });
+
+  const toolUse = response.content.find((b) => b.type === "tool_use");
+  if (!toolUse || toolUse.type !== "tool_use") {
+    throw new Error("Claude did not call update_strategy");
+  }
+
+  // Return raw — caller is responsible for Zod validation + guardrails
+  return toolUse.input as {
+    patterns: string[];
+    formatMixChanges?: Record<string, number>;
+    cadenceChanges?: Record<string, number>;
+    topicInsights?: string[];
+    digest: string;
+  };
+}
+
 export async function suggestOptimalTimes(
   platform: Platform,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars

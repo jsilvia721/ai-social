@@ -70,6 +70,7 @@ model Business {
   contentStrategy   ContentStrategy?
   researchSummaries ResearchSummary[]
   contentBriefs     ContentBrief[]
+  strategyDigests   StrategyDigest[]
 }
 
 model BusinessMember {
@@ -96,6 +97,9 @@ model ContentStrategy {
   reviewWindowHours   Int      @default(24)
   postingCadence      Json?    // e.g., { "TWITTER": 5, "INSTAGRAM": 3 } — posts per platform per week
   researchSources     Json?    // e.g., { rssFeeds: ["https://..."], subreddits: ["r/..."] }
+  formatMix           Json?    // e.g., { "TEXT": 0.2, "IMAGE": 0.3, "VIDEO": 0.5 } — target format distribution
+  optimalTimeWindows  Json?    // e.g., { "TWITTER": ["09:00-11:00", "17:00-19:00"] }
+  lastOptimizedAt     DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -137,6 +141,8 @@ model Post {
   blotatoPostId         String?
   errorMessage          String?
   briefId               String?
+  topicPillar           String?   // which content pillar this maps to
+  tone                  String?   // "educational" | "entertaining" | "promotional" | "community"
   metricsLikes          Int?
   metricsComments       Int?
   metricsShares         Int?
@@ -231,4 +237,20 @@ enum BriefStatus {
   FULFILLED
   EXPIRED
   CANCELLED
+}
+
+// ── Strategy Optimizer (M3) ─────────────────────────────────────────────────
+
+model StrategyDigest {
+  id         String   @id @default(cuid())
+  businessId String
+  weekOf     DateTime
+  summary    String   @db.Text // plain-language digest for partner
+  patterns   Json     // { topPerformers: [...], insights: [...] }
+  changes    Json     // { formatMix: {...}, cadence: {...}, ... }
+  createdAt  DateTime @default(now())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, weekOf])
+  @@index([businessId, createdAt])
 }

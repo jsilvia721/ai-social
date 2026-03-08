@@ -139,5 +139,17 @@ export default $config({
         logging: { retention: "1 month" },
       },
     });
+
+    // ── Cron: Strategy Optimizer (Sunday 02:00 UTC) ─────────────
+    new sst.aws.Cron("StrategyOptimizer", {
+      schedule: "cron(0 2 ? * SUN *)",
+      job: {
+        handler: "src/cron/optimize.handler",
+        environment,
+        timeout: "5 minutes",
+        logging: { retention: "1 month" },
+        concurrency: 1,
+      },
+    });
   },
 });

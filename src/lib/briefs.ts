@@ -131,7 +131,8 @@ export async function runBriefGeneration(
         cadencePerPlatform[platform] = cadenceConfig[platform] ?? DEFAULT_CADENCE_PER_PLATFORM;
       }
 
-      // 5. Call Claude to generate briefs
+      // 5. Call Claude to generate briefs (pass learned format mix if available)
+      const formatMix = strategy.formatMix as Record<string, number> | null;
       const result = await generateBriefs(
         strategy.industry,
         strategy.targetAudience,
@@ -140,7 +141,8 @@ export async function runBriefGeneration(
         connectedPlatforms,
         cadencePerPlatform,
         researchThemes,
-        recentPostTopics
+        recentPostTopics,
+        formatMix,
       );
 
       // 6. Store ContentBrief records
