@@ -58,3 +58,6 @@ test-results/
 
 # SST
 .sst/
+
+# Git worktrees (parallel Claude Code sessions)
+.worktrees/
