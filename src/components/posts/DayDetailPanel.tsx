@@ -69,7 +69,7 @@ export function DayDetailPanel({ date, posts, onClose }: DayDetailPanelProps) {
     <div
       ref={panelRef}
       tabIndex={-1}
-      className="absolute right-0 top-0 bottom-0 w-80 bg-zinc-900 border-l border-zinc-700 shadow-xl z-10 flex flex-col outline-none"
+      className="absolute right-0 top-0 bottom-0 w-full sm:w-80 bg-zinc-900 border-l border-zinc-700 shadow-xl z-10 flex flex-col outline-none"
       role="dialog"
       aria-label={`Posts for ${dateLabel}`}
     >

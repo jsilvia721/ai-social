@@ -86,11 +86,11 @@ export default function BriefsPage() {
   const pendingCount = briefs.filter((b) => b.status === "PENDING").length;
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-col md:flex-row h-full">
       {/* Queue list */}
       <div className="flex-1 overflow-y-auto">
-        <div className="px-6 py-6">
-          <div className="flex items-center justify-between mb-6">
+        <div className="py-2 md:px-6 md:py-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
             <div>
               <h1 className="text-2xl font-bold text-zinc-50">Content Queue</h1>
               <p className="text-sm text-zinc-400 mt-1">

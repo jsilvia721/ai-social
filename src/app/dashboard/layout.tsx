@@ -45,8 +45,8 @@ export default async function DashboardLayout({
         activeBusinessId={session.user.activeBusinessId}
         showDevTools={showDevTools}
       />
-      <main className="ml-60 min-h-screen">
-        <div className="p-8">{children}</div>
+      <main className="min-h-screen pt-14 md:pt-0 md:ml-60">
+        <div className="p-4 md:p-8">{children}</div>
       </main>
     </div>
   );

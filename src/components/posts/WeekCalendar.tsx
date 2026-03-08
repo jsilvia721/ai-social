@@ -287,7 +287,7 @@ export function WeekCalendar({ posts, weekStart, onNavigate, onReschedule }: Wee
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="relative rounded-lg border border-zinc-700 bg-zinc-800/50 overflow-hidden">
+      <div className="relative rounded-lg border border-zinc-700 bg-zinc-800/50 overflow-x-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
           <Button
@@ -314,7 +314,7 @@ export function WeekCalendar({ posts, weekStart, onNavigate, onReschedule }: Wee
         </div>
 
         {/* Day headers */}
-        <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-zinc-700">
+        <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-zinc-700" style={{ minWidth: "600px" }}>
           <div className="py-2 text-center text-xs font-medium text-zinc-500" />
           {days.map((day, i) => {
             const dayKey = `${day.getUTCFullYear()}-${day.getUTCMonth()}-${day.getUTCDate()}`;
@@ -341,7 +341,7 @@ export function WeekCalendar({ posts, weekStart, onNavigate, onReschedule }: Wee
 
         {/* Time grid */}
         <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: `${8 * HOUR_HEIGHT}px` }}>
-          <div className="grid grid-cols-[60px_repeat(7,1fr)]">
+          <div className="grid grid-cols-[60px_repeat(7,1fr)]" style={{ minWidth: "600px" }}>
             {hours.map((hour) => (
               <div key={`row-${hour}`} className="contents">
                 {/* Hour label */}

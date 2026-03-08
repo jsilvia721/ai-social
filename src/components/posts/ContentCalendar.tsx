@@ -103,7 +103,6 @@ function DroppableDay({
   day,
   year,
   month,
-  cellKey,
   dayPosts,
   isToday,
   isSelected,
@@ -113,7 +112,6 @@ function DroppableDay({
   day: number;
   year: number;
   month: number;
-  cellKey: string;
   dayPosts: CalendarPost[];
   isToday: boolean;
   isSelected: boolean;
@@ -277,7 +275,7 @@ export function ContentCalendar({ posts, year, month, onNavigate, onReschedule }
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="relative rounded-lg border border-zinc-700 bg-zinc-800/50 overflow-hidden">
+      <div className="relative rounded-lg border border-zinc-700 bg-zinc-800/50 overflow-x-auto">
         {/* Undo toast */}
         {undoMessage && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 bg-red-900/90 text-red-200 text-sm px-4 py-2 rounded-lg shadow-lg">
@@ -311,7 +309,7 @@ export function ContentCalendar({ posts, year, month, onNavigate, onReschedule }
         </div>
 
         {/* Day headers */}
-        <div className="grid grid-cols-7 border-b border-zinc-700">
+        <div className="grid grid-cols-7 border-b border-zinc-700" style={{ minWidth: "500px" }}>
           {DAY_NAMES.map((d) => (
             <div key={d} className="py-2 text-center text-xs font-medium text-zinc-500">
               {d}
@@ -320,7 +318,7 @@ export function ContentCalendar({ posts, year, month, onNavigate, onReschedule }
         </div>
 
         {/* Calendar grid */}
-        <div className="grid grid-cols-7">
+        <div className="grid grid-cols-7" style={{ minWidth: "500px" }}>
           {cells.map((day, idx) => {
             if (day === null) {
               return <div key={`empty-${idx}`} className="min-h-[80px] border-b border-r border-zinc-700/50 bg-zinc-900/30" />;
@@ -338,7 +336,6 @@ export function ContentCalendar({ posts, year, month, onNavigate, onReschedule }
                 day={day}
                 year={year}
                 month={month}
-                cellKey={cellKey}
                 dayPosts={dayPosts}
                 isToday={isToday}
                 isSelected={isSelected}

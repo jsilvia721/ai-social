@@ -139,103 +139,112 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
   const canRetry = post.status === "FAILED" && !!onRetry;
 
   return (
-    <div className="flex items-start gap-4 rounded-lg border border-zinc-700 bg-zinc-800 p-4">
-      {/* Platform icon */}
-      <div className={`mt-0.5 shrink-0 ${platformColor}`}>
-        <PlatformIcon className="h-5 w-5" />
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0 space-y-2">
-        <p className="text-sm text-zinc-200 line-clamp-2">{post.content}</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`text-xs font-medium ${platformColor}`}>
-            @{post.socialAccount.username}
-          </span>
-          {post.scheduledAt && (
-            <span className="text-xs text-zinc-500">
-              · {new Date(post.scheduledAt).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-          )}
+    <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4">
+      <div className="flex items-start gap-3 sm:gap-4">
+        {/* Platform icon */}
+        <div className={`mt-0.5 shrink-0 ${platformColor}`}>
+          <PlatformIcon className="h-5 w-5" />
         </div>
-        {post.status === "FAILED" && post.errorMessage && (
-          <p className="text-xs text-red-400 truncate" title={post.errorMessage}>
-            {post.errorMessage}
-          </p>
-        )}
-        {post.status === "PUBLISHED" && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-zinc-700/50">
-            <MetricPill icon={Heart}          label="Likes"       value={fmt(post.metricsLikes)} />
-            <MetricPill icon={MessageCircle}  label="Comments"    value={fmt(post.metricsComments)} />
-            <MetricPill icon={Repeat2}        label="Shares"      value={fmt(post.metricsShares)} />
-            <MetricPill icon={Eye}            label="Impressions" value={fmt(post.metricsImpressions)} />
-            {post.metricsReach != null && (
-              <MetricPill icon={TrendingUp} label="Reach" value={fmt(post.metricsReach)} />
-            )}
-            {post.metricsSaves != null && (
-              <MetricPill icon={Bookmark} label="Saves" value={fmt(post.metricsSaves)} />
+
+        {/* Content */}
+        <div className="flex-1 min-w-0 space-y-2">
+          <p className="text-sm text-zinc-200 line-clamp-2">{post.content}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`text-xs font-medium ${platformColor}`}>
+              @{post.socialAccount.username}
+            </span>
+            {post.scheduledAt && (
+              <span className="text-xs text-zinc-500">
+                · {new Date(post.scheduledAt).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
             )}
           </div>
-        )}
+          {post.status === "FAILED" && post.errorMessage && (
+            <p className="text-xs text-red-400 truncate" title={post.errorMessage}>
+              {post.errorMessage}
+            </p>
+          )}
+          {post.status === "PUBLISHED" && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-zinc-700/50">
+              <MetricPill icon={Heart}          label="Likes"       value={fmt(post.metricsLikes)} />
+              <MetricPill icon={MessageCircle}  label="Comments"    value={fmt(post.metricsComments)} />
+              <MetricPill icon={Repeat2}        label="Shares"      value={fmt(post.metricsShares)} />
+              <MetricPill icon={Eye}            label="Impressions" value={fmt(post.metricsImpressions)} />
+              {post.metricsReach != null && (
+                <MetricPill icon={TrendingUp} label="Reach" value={fmt(post.metricsReach)} />
+              )}
+              {post.metricsSaves != null && (
+                <MetricPill icon={Bookmark} label="Saves" value={fmt(post.metricsSaves)} />
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Status badge - always visible */}
+        <Badge variant="outline" className={`gap-1 shrink-0 ${statusConfig.className}`}>
+          <StatusIcon className="h-3 w-3" />
+          <span className="hidden sm:inline">{statusConfig.label}</span>
+        </Badge>
       </div>
 
-      {/* Status + actions */}
-      <div className="flex items-center gap-2 shrink-0">
-        <Badge variant="outline" className={`gap-1 ${statusConfig.className}`}>
+      {/* Actions - below content on mobile, inline on desktop */}
+      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-zinc-700/50 sm:mt-0 sm:pt-0 sm:border-t-0 sm:justify-end">
+        <Badge variant="outline" className={`gap-1 sm:hidden ${statusConfig.className}`}>
           <StatusIcon className="h-3 w-3" />
           {statusConfig.label}
         </Badge>
+        <div className="flex items-center gap-1 ml-auto">
+          {canEdit && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-zinc-600 hover:text-violet-400 hover:bg-violet-950/50"
+              aria-label="Edit post"
+              asChild
+            >
+              <Link href={`/dashboard/posts/${post.id}/edit`}>
+                <Pencil className="h-4 w-4" />
+              </Link>
+            </Button>
+          )}
 
-        {canEdit && (
+          {canRetry && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-zinc-600 hover:text-amber-400 hover:bg-amber-950/50"
+              onClick={handleRetry}
+              disabled={isRetrying}
+              aria-label="Retry post"
+            >
+              {isRetrying ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+            </Button>
+          )}
+
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-zinc-600 hover:text-violet-400 hover:bg-violet-950/50"
-            aria-label="Edit post"
-            asChild
+            className="h-8 w-8 text-zinc-600 hover:text-red-400 hover:bg-red-950/50"
+            onClick={handleDelete}
+            disabled={isDeleting}
+            aria-label="Delete post"
           >
-            <Link href={`/dashboard/posts/${post.id}/edit`}>
-              <Pencil className="h-4 w-4" />
-            </Link>
-          </Button>
-        )}
-
-        {canRetry && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-zinc-600 hover:text-amber-400 hover:bg-amber-950/50"
-            onClick={handleRetry}
-            disabled={isRetrying}
-            aria-label="Retry post"
-          >
-            {isRetrying ? (
+            {isDeleting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="h-4 w-4" />
+              <Trash2 className="h-4 w-4" />
             )}
           </Button>
-        )}
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-zinc-600 hover:text-red-400 hover:bg-red-950/50"
-          onClick={handleDelete}
-          disabled={isDeleting}
-          aria-label="Delete post"
-        >
-          {isDeleting ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Trash2 className="h-4 w-4" />
-          )}
-        </Button>
+        </div>
       </div>
     </div>
   );
