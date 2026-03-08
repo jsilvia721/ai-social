@@ -26,7 +26,8 @@ export default $config({
       tiktokClientSecret:  new sst.Secret("TiktokClientSecret"),
       tokenEncryptionKey:  new sst.Secret("TokenEncryptionKey"),
       allowedEmails:       new sst.Secret("AllowedEmails"),
-      blotatoApiKey:       new sst.Secret("BlotatoApiKey"),
+      // Blotato: only need the real secret in production (staging uses mock mode)
+      blotatoApiKey:       $app.stage === "production" ? new sst.Secret("BlotatoApiKey") : null,
       // SES_FROM_EMAIL: optional — only needed in production for failure alerts
       sesFromEmail:        $app.stage === "production" ? new sst.Secret("SesFromEmail") : null,
     };
@@ -72,9 +73,9 @@ export default $config({
       TIKTOK_CLIENT_SECRET:  secrets.tiktokClientSecret.value,
       TOKEN_ENCRYPTION_KEY:  secrets.tokenEncryptionKey.value,
       ALLOWED_EMAILS:        secrets.allowedEmails.value,
-      BLOTATO_API_KEY:       secrets.blotatoApiKey.value,
       // Mock Blotato OAuth in non-production so a real API key isn't required
       BLOTATO_MOCK:          $app.stage !== "production" ? "true" : "false",
+      ...(secrets.blotatoApiKey ? { BLOTATO_API_KEY: secrets.blotatoApiKey.value } : { BLOTATO_API_KEY: "mock" }),
       // SES failure alerts: only wired up in production
       ...(secrets.sesFromEmail ? { SES_FROM_EMAIL: secrets.sesFromEmail.value } : {}),
     };
