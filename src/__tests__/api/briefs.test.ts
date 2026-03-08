@@ -24,33 +24,19 @@ function makeGetRequest(params?: Record<string, string>) {
 describe("GET /api/briefs", () => {
   it("returns 401 when not authenticated", async () => {
     mockUnauthenticated();
-    const res = await GET(makeGetRequest({ businessId: "biz-1" }));
+    const res = await GET(makeGetRequest());
     expect(res.status).toBe(401);
   });
 
-  it("returns 400 when businessId is missing", async () => {
+  it("returns briefs scoped to user memberships", async () => {
     mockAuthenticated();
-    const res = await GET(makeGetRequest());
-    expect(res.status).toBe(400);
-  });
-
-  it("returns 403 when user is not a member", async () => {
-    mockAuthenticated();
-    prismaMock.businessMember.findUnique.mockResolvedValue(null);
-    const res = await GET(makeGetRequest({ businessId: "biz-1" }));
-    expect(res.status).toBe(403);
-  });
-
-  it("returns briefs for a valid member", async () => {
-    mockAuthenticated();
-    prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
 
     const fakeBriefs = [
       { id: "cb-1", topic: "AI Trends", status: "PENDING", platform: "TWITTER" },
     ];
     prismaMock.contentBrief.findMany.mockResolvedValue(fakeBriefs as any);
 
-    const res = await GET(makeGetRequest({ businessId: "biz-1" }));
+    const res = await GET(makeGetRequest());
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toHaveLength(1);
@@ -59,10 +45,9 @@ describe("GET /api/briefs", () => {
 
   it("filters by status", async () => {
     mockAuthenticated();
-    prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
     prismaMock.contentBrief.findMany.mockResolvedValue([]);
 
-    await GET(makeGetRequest({ businessId: "biz-1", status: "FULFILLED" }));
+    await GET(makeGetRequest({ status: "FULFILLED" }));
 
     expect(prismaMock.contentBrief.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -71,12 +56,24 @@ describe("GET /api/briefs", () => {
     );
   });
 
-  it("orders by sortOrder then scheduledFor", async () => {
+  it("filters by businessId when provided", async () => {
     mockAuthenticated();
-    prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
     prismaMock.contentBrief.findMany.mockResolvedValue([]);
 
     await GET(makeGetRequest({ businessId: "biz-1" }));
+
+    expect(prismaMock.contentBrief.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ businessId: "biz-1" }),
+      })
+    );
+  });
+
+  it("orders by sortOrder then scheduledFor", async () => {
+    mockAuthenticated();
+    prismaMock.contentBrief.findMany.mockResolvedValue([]);
+
+    await GET(makeGetRequest());
 
     expect(prismaMock.contentBrief.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
