@@ -16,9 +16,11 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10) || 50));
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
 
+  const isAdmin = session.user.isAdmin ?? false;
+
   const where = {
-    // Always scope to businesses this user belongs to (auth guard)
-    business: { members: { some: { userId: session.user.id } } },
+    // Admins bypass membership check; non-admins scoped to their businesses
+    ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
     // Narrow to active workspace when provided
     ...(businessId ? { businessId } : {}),
     ...(status ? { status: status as import("@prisma/client").PostStatus } : {}),
@@ -51,8 +53,13 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
+  const isAdmin = session.user.isAdmin ?? false;
+
   const post = await prisma.post.findFirst({
-    where: { id, business: { members: { some: { userId: session.user.id } } } },
+    where: {
+      id,
+      ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
+    },
   });
 
   if (!post) {
@@ -76,12 +83,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "businessId is required" }, { status: 400 });
   }
 
-  // Verify social account belongs to this business and the user is a member
+  // Verify social account belongs to this business (and user is a member if not admin)
+  const isAdmin = session.user.isAdmin ?? false;
   const account = await prisma.socialAccount.findFirst({
     where: {
       id: socialAccountId,
       businessId,
-      business: { members: { some: { userId: session.user.id } } },
+      ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
     },
   });
 

@@ -1,5 +1,5 @@
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
-import { mockAuthenticated, mockUnauthenticated, mockSession } from "@/__tests__/mocks/auth";
+import { mockAuthenticated, mockAuthenticatedAsAdmin, mockUnauthenticated, mockSession } from "@/__tests__/mocks/auth";
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("next-auth/next");
@@ -128,6 +128,21 @@ describe("GET /api/posts", () => {
     expect(prismaMock.post.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.not.objectContaining({ businessId: expect.anything() }),
+      })
+    );
+  });
+
+  it("admin bypasses membership filter", async () => {
+    mockAuthenticatedAsAdmin();
+    prismaMock.$transaction.mockResolvedValue([[], 0] as any);
+
+    await GET(makeGetRequest());
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({
+          business: expect.anything(),
+        }),
       })
     );
   });

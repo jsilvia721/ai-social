@@ -1,5 +1,5 @@
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
-import { mockAuthenticated, mockUnauthenticated, mockSession } from "@/__tests__/mocks/auth";
+import { mockAuthenticated, mockAuthenticatedAsAdmin, mockUnauthenticated, mockSession, mockAdminSession } from "@/__tests__/mocks/auth";
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("next-auth/next");
@@ -66,6 +66,22 @@ describe("POST /api/businesses/switch", () => {
     expect(prismaMock.user.update).toHaveBeenCalledWith({
       where: { id: mockSession.user.id },
       data: { activeBusinessId: "biz-1" },
+    });
+  });
+
+  it("admin can switch to any business without being a member", async () => {
+    mockAuthenticatedAsAdmin();
+    prismaMock.user.update.mockResolvedValue({ id: mockAdminSession.user.id } as any);
+
+    const res = await POST(makeRequest({ businessId: "biz-other" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.activeBusinessId).toBe("biz-other");
+    // Admin skips the membership check — businessMember.findFirst should NOT be called
+    expect(prismaMock.businessMember.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.user.update).toHaveBeenCalledWith({
+      where: { id: mockAdminSession.user.id },
+      data: { activeBusinessId: "biz-other" },
     });
   });
 });

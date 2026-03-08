@@ -10,6 +10,7 @@ const serverSchema = z.object({
   BLOTATO_API_KEY: z.string().min(1),
   SES_FROM_EMAIL: z.string().email().optional(),
   ALLOWED_EMAILS: z.string().min(1),
+  ADMIN_EMAILS: z.string().optional(), // comma-separated list of admin emails
   // S3: optional in schema, injected by SST in deployed environments
   AWS_S3_BUCKET: z.string().optional(),
   AWS_S3_PUBLIC_URL: z.string().url().optional(),

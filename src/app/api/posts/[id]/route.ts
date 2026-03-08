@@ -14,8 +14,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
+  const isAdmin = session.user.isAdmin ?? false;
+
   const post = await prisma.post.findFirst({
-    where: { id, business: { members: { some: { userId: session.user.id } } } },
+    where: {
+      id,
+      ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
+    },
   });
 
   if (!post) {

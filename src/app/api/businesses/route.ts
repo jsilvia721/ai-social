@@ -9,8 +9,11 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const isAdmin = session.user.isAdmin ?? false;
+
   const businesses = await prisma.business.findMany({
-    where: { members: { some: { userId: session.user.id } } },
+    where: isAdmin ? undefined : { members: { some: { userId: session.user.id } } },
+    take: 200,
     include: { members: { where: { userId: session.user.id }, select: { role: true } } },
     orderBy: { createdAt: "asc" },
   });

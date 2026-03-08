@@ -1,5 +1,5 @@
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
-import { mockAuthenticated, mockUnauthenticated, mockSession } from "@/__tests__/mocks/auth";
+import { mockAuthenticated, mockAuthenticatedAsAdmin, mockUnauthenticated, mockSession } from "@/__tests__/mocks/auth";
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("next-auth/next");
@@ -42,6 +42,23 @@ describe("GET /api/businesses", () => {
       expect.objectContaining({
         where: { members: { some: { userId: mockSession.user.id } } },
       })
+    );
+  });
+
+  it("admin receives all businesses without membership filter", async () => {
+    mockAuthenticatedAsAdmin();
+    prismaMock.business.findMany.mockResolvedValue([
+      { id: "biz-1", name: "Business A", createdAt: new Date(), updatedAt: new Date() },
+      { id: "biz-2", name: "Business B", createdAt: new Date(), updatedAt: new Date() },
+    ] as any);
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveLength(2);
+    // Admin bypasses membership filter — `where` should be undefined (no members filter)
+    expect(prismaMock.business.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: undefined })
     );
   });
 });
