@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const startDateParam = searchParams.get("startDate");
   const endDateParam = searchParams.get("endDate");
+  const businessId = searchParams.get("businessId");
 
   let start: Date;
   let end: Date;
@@ -38,6 +39,7 @@ export async function GET(req: NextRequest) {
   const posts = await prisma.post.findMany({
     where: {
       business: { members: { some: { userId: session.user.id } } },
+      ...(businessId ? { businessId } : {}),
       scheduledAt: { gte: start, lt: end },
     },
     include: { socialAccount: { select: { platform: true, username: true } } },

@@ -25,8 +25,12 @@ export default async function AnalyticsPage() {
   if (!session) redirect("/auth/signin");
 
   const userId = session.user.id;
+  const activeBusinessId = (session.user as { id: string; activeBusinessId?: string | null }).activeBusinessId;
 
-  const memberFilter = { business: { members: { some: { userId } } } };
+  const memberFilter = {
+    business: { members: { some: { userId } } },
+    ...(activeBusinessId ? { businessId: activeBusinessId } : {}),
+  };
 
   const posts = await prisma.post.findMany({
     where: { ...memberFilter, status: "PUBLISHED" },
@@ -78,7 +82,7 @@ export default async function AnalyticsPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-zinc-50">Analytics</h1>
-        <p className="text-zinc-400 mt-1">Engagement metrics across all published posts.</p>
+        <p className="text-zinc-400 mt-1">Engagement metrics for this workspace&apos;s published posts.</p>
       </div>
 
       {/* Summary stat cards */}

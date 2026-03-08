@@ -37,7 +37,11 @@ export default async function DashboardPage() {
   if (!session) redirect("/auth/signin");
 
   const userId = session.user.id;
-  const memberFilter = { business: { members: { some: { userId } } } };
+  const activeBusinessId = (session.user as { id: string; activeBusinessId?: string | null }).activeBusinessId;
+  const memberFilter = {
+    business: { members: { some: { userId } } },
+    ...(activeBusinessId ? { businessId: activeBusinessId } : {}),
+  };
 
   const [totalPosts, scheduledCount, publishedCount, connectedAccounts, recentPosts, totalLikesAgg, totalImpressionsAgg] =
     await Promise.all([

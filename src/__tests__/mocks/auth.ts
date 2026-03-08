@@ -5,6 +5,7 @@ export const mockSession = {
     id: "user-test-id",
     email: "test@example.com",
     name: "Test User",
+    activeBusinessId: "biz-1",
   },
   expires: new Date(Date.now() + 86400 * 1000).toISOString(),
 };
