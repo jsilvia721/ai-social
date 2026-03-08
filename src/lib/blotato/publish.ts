@@ -1,12 +1,16 @@
 import { blotatoFetch } from "./client";
 import { assertSafeMediaUrl } from "./ssrf-guard";
 import { BlotatoPublishResultSchema } from "./types";
+import { shouldMockExternalApis } from "@/lib/mocks/config";
+import { mockPublishPost } from "@/lib/mocks/blotato";
 
 export async function publishPost(
   blotatoAccountId: string,
   content: string,
   mediaUrls: string[] = [],
 ): Promise<{ blotatoPostId: string }> {
+  if (shouldMockExternalApis()) return mockPublishPost();
+
   // Validate all media URLs before sending to Blotato
   for (const url of mediaUrls) {
     assertSafeMediaUrl(url);

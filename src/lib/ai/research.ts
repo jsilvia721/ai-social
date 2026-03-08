@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { shouldMockExternalApis } from "@/lib/mocks/config";
+import { mockSynthesizeResearch } from "@/lib/mocks/ai";
 
 const client = new Anthropic();
 
@@ -72,6 +74,9 @@ export async function synthesizeResearch(
   contentPillars: string[],
   researchItems: string
 ): Promise<ResearchSynthesis> {
+  if (shouldMockExternalApis()) {
+    return mockSynthesizeResearch();
+  }
   const response = await client.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 4096,

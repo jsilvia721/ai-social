@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { shouldMockExternalApis } from "@/lib/mocks/config";
+import { mockGenerateBriefs } from "@/lib/mocks/ai";
 
 const client = new Anthropic();
 
@@ -98,6 +100,9 @@ export async function generateBriefs(
   recentPostTopics: string[],
   formatMix?: Record<string, number> | null,
 ): Promise<BriefGenerationResult> {
+  if (shouldMockExternalApis()) {
+    return mockGenerateBriefs(connectedPlatforms, cadencePerPlatform);
+  }
   const totalBriefs = Object.entries(cadencePerPlatform)
     .filter(([platform]) => connectedPlatforms.includes(platform))
     .reduce((sum, [, count]) => sum + count, 0);

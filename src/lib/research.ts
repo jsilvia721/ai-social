@@ -10,6 +10,12 @@ import Parser from "rss-parser";
 import { prisma } from "@/lib/db";
 import { env } from "@/env";
 import { synthesizeResearch } from "@/lib/ai/research";
+import { shouldMockExternalApis } from "@/lib/mocks/config";
+import {
+  mockFetchRssFeeds,
+  mockFetchRedditSubreddits,
+  mockFetchGoogleTrends,
+} from "@/lib/mocks/research";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -244,23 +250,30 @@ export async function runResearchPipeline(
 
       // Fetch from all configured sources
       const allItems: ResearchItem[] = [];
+      const useMocks = shouldMockExternalApis();
 
       // RSS feeds
       if (sources.rssFeeds?.length) {
-        const rssItems = await fetchRssFeeds(sources.rssFeeds);
+        const rssItems = useMocks
+          ? mockFetchRssFeeds()
+          : await fetchRssFeeds(sources.rssFeeds);
         allItems.push(...rssItems);
         if (rssItems.length > 0) sourcesUsed.push("rss");
       }
 
       // Reddit
       if (sources.subreddits?.length) {
-        const redditItems = await fetchRedditSubreddits(sources.subreddits);
+        const redditItems = useMocks
+          ? mockFetchRedditSubreddits()
+          : await fetchRedditSubreddits(sources.subreddits);
         allItems.push(...redditItems);
         if (redditItems.length > 0) sourcesUsed.push("reddit");
       }
 
       // Google Trends
-      const trendItems = await fetchGoogleTrends(strategy.industry);
+      const trendItems = useMocks
+        ? mockFetchGoogleTrends()
+        : await fetchGoogleTrends(strategy.industry);
       allItems.push(...trendItems);
       if (trendItems.length > 0) sourcesUsed.push("google_trends");
 

@@ -2,6 +2,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam } from "@anthropic-ai/sdk/resources/messages";
 import { z } from "zod";
 import type { Platform } from "@/types";
+import { shouldMockExternalApis } from "@/lib/mocks/config";
+import {
+  mockGeneratePostContent,
+  mockExtractContentStrategy,
+  mockAnalyzePerformance,
+} from "@/lib/mocks/ai";
 
 const client = new Anthropic();
 
@@ -10,6 +16,9 @@ export async function generatePostContent(
   platform: Platform,
   tone?: string
 ): Promise<string> {
+  if (shouldMockExternalApis()) {
+    return mockGeneratePostContent(topic, platform);
+  }
   const platformGuide: Record<Platform, string> = {
     TWITTER: "Keep it under 280 characters. Use hashtags sparingly.",
     INSTAGRAM: "Can be longer. Use emojis and 3-5 relevant hashtags.",
@@ -151,6 +160,9 @@ function buildOnboardingPrompt(answers: Record<string, string>): string {
 export async function extractContentStrategy(
   wizardAnswers: Record<string, string>
 ): Promise<ContentStrategyInput> {
+  if (shouldMockExternalApis()) {
+    return mockExtractContentStrategy(wizardAnswers);
+  }
   const response = await client.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 2048,
@@ -280,6 +292,9 @@ export async function analyzePerformance(
   topicInsights?: string[];
   digest: string;
 }> {
+  if (shouldMockExternalApis()) {
+    return mockAnalyzePerformance();
+  }
   const response = await client.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 2048,
