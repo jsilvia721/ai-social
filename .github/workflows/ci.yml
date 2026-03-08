@@ -61,7 +61,6 @@ jobs:
   # ── E2E Tests ──────────────────────────────────────────────────────────────
   e2e:
     name: E2E Tests (Playwright)
-    needs: [test]
     runs-on: ubuntu-latest
 
     services:
@@ -134,7 +133,7 @@ jobs:
   # ── Deploy ─────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy
-    needs: [e2e]
+    needs: [lint, test, e2e]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
     concurrency:
       group: deploy-${{ github.ref }}
