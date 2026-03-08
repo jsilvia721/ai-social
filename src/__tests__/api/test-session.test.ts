@@ -53,6 +53,7 @@ describe("GET /api/test/session", () => {
         name: "Test User",
         emailVerified: null,
         image: null,
+        isAdmin: false,
         activeBusinessId: null,
         createdAt: new Date(),
         updatedAt: new Date(),

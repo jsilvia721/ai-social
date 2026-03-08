@@ -18,16 +18,25 @@ export const authOptions: AuthOptions = {
   callbacks: {
     async signIn({ user }) {
       const allowed = env.ALLOWED_EMAILS.split(",").map((e) => e.trim().toLowerCase());
-      return allowed.includes((user.email ?? "").toLowerCase());
+      if (!allowed.includes((user.email ?? "").toLowerCase())) return false;
+      // Promote to admin if email is in ADMIN_EMAILS (idempotent upsert)
+      if (env.ADMIN_EMAILS && user.id) {
+        const adminEmails = env.ADMIN_EMAILS.split(",").map((e) => e.trim().toLowerCase());
+        if (adminEmails.includes((user.email ?? "").toLowerCase())) {
+          await prisma.user.update({ where: { id: user.id }, data: { isAdmin: true } });
+        }
+      }
+      return true;
     },
     async jwt({ token, user, trigger, session }) {
       if (user) {
         token.sub = user.id;
-        // On sign-in: resolve the user's active business
+        // On sign-in: resolve the user's active business and admin status
         const dbUser = await prisma.user.findUnique({
           where: { id: user.id },
-          select: { activeBusinessId: true },
+          select: { activeBusinessId: true, isAdmin: true },
         });
+        token.isAdmin = dbUser?.isAdmin ?? false;
         if (dbUser?.activeBusinessId) {
           token.activeBusinessId = dbUser.activeBusinessId;
         } else {
@@ -45,11 +54,12 @@ export const authOptions: AuthOptions = {
         if (!exists) {
           const byEmail = await prisma.user.findUnique({
             where: { email: token.email as string },
-            select: { id: true, activeBusinessId: true },
+            select: { id: true, activeBusinessId: true, isAdmin: true },
           });
           if (byEmail) {
             token.sub = byEmail.id;
             token.activeBusinessId = byEmail.activeBusinessId ?? null;
+            token.isAdmin = byEmail.isAdmin ?? false;
           }
         }
       }
@@ -62,8 +72,10 @@ export const authOptions: AuthOptions = {
     async session({ session, token }) {
       if (token?.sub && session.user) {
         session.user.id = token.sub;
-        (session.user as { id: string; activeBusinessId?: string | null }).activeBusinessId =
+        (session.user as { id: string; isAdmin?: boolean; activeBusinessId?: string | null }).activeBusinessId =
           (token.activeBusinessId as string | null) ?? null;
+        (session.user as { id: string; isAdmin?: boolean; activeBusinessId?: string | null }).isAdmin =
+          (token.isAdmin as boolean) ?? false;
       }
       return session;
     },

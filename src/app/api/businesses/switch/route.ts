@@ -14,11 +14,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "businessId is required" }, { status: 400 });
   }
 
-  const membership = await prisma.businessMember.findFirst({
-    where: { userId: session.user.id, businessId: body.businessId },
-  });
-  if (!membership) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+
+  if (!isAdmin) {
+    const membership = await prisma.businessMember.findFirst({
+      where: { userId: session.user.id, businessId: body.businessId },
+    });
+    if (!membership) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   await prisma.user.update({

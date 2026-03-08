@@ -14,12 +14,15 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const { id: businessId } = await params;
 
-  // Verify user is a member of this business
-  const member = await prisma.businessMember.findFirst({
-    where: { businessId, userId: session.user.id },
-  });
-  if (!member) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Verify user is a member of this business (admins bypass membership check)
+  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  if (!isAdmin) {
+    const member = await prisma.businessMember.findFirst({
+      where: { businessId, userId: session.user.id },
+    });
+    if (!member) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
   }
 
   // Idempotent: return existing strategy without calling Claude

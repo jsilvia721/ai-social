@@ -13,8 +13,13 @@ export async function POST(_req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
+  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+
   const post = await prisma.post.findFirst({
-    where: { id, business: { members: { some: { userId: session.user.id } } } },
+    where: {
+      id,
+      ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
+    },
   });
 
   if (!post) {

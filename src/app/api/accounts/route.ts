@@ -12,13 +12,12 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const businessId = searchParams.get("businessId");
+  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
 
+  const memberFilter = isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } };
   const where = businessId
-    ? {
-        businessId,
-        business: { members: { some: { userId: session.user.id } } },
-      }
-    : { business: { members: { some: { userId: session.user.id } } } };
+    ? { businessId, ...memberFilter }
+    : memberFilter;
 
   const accounts = await prisma.socialAccount.findMany({
     where,
@@ -51,9 +50,13 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  // Verify membership before deleting (prevents IDOR)
+  // Verify access before deleting (prevents IDOR; admins bypass membership check)
+  const isAdminDel = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
   const account = await prisma.socialAccount.findFirst({
-    where: { id, business: { members: { some: { userId: session.user.id } } } },
+    where: {
+      id,
+      ...(isAdminDel ? {} : { business: { members: { some: { userId: session.user.id } } } }),
+    },
   });
 
   if (!account) {

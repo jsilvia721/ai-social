@@ -37,9 +37,9 @@ export default async function DashboardPage() {
   if (!session) redirect("/auth/signin");
 
   const userId = session.user.id;
-  const activeBusinessId = (session.user as { id: string; activeBusinessId?: string | null }).activeBusinessId;
+  const { activeBusinessId, isAdmin } = session.user as { id: string; isAdmin?: boolean; activeBusinessId?: string | null };
   const memberFilter = {
-    business: { members: { some: { userId } } },
+    ...(isAdmin ? {} : { business: { members: { some: { userId } } } }),
     ...(activeBusinessId ? { businessId: activeBusinessId } : {}),
   };
 

@@ -36,9 +36,11 @@ export async function GET(req: NextRequest) {
     end = new Date(Date.UTC(year, month + 1, 1));
   }
 
+  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+
   const posts = await prisma.post.findMany({
     where: {
-      business: { members: { some: { userId: session.user.id } } },
+      ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
       ...(businessId ? { businessId } : {}),
       scheduledAt: { gte: start, lt: end },
     },
