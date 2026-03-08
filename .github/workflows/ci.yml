@@ -179,8 +179,9 @@ jobs:
         if: github.ref == 'refs/heads/main'
         env:
           DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK: "1"
         run: |
-          # Use direct connection (not pooler) for migrations — advisory locks require it
+          # Use direct connection (not pooler) for migrations
           export DATABASE_URL="${DATABASE_URL//-pooler./\.}"
           npx prisma migrate deploy
 
@@ -188,8 +189,9 @@ jobs:
         if: github.ref == 'refs/heads/staging'
         env:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK: "1"
         run: |
-          # Use direct connection (not pooler) for migrations — advisory locks require it
+          # Use direct connection (not pooler) for migrations
           export DATABASE_URL="${DATABASE_URL//-pooler./\.}"
           npx prisma migrate deploy
 
