@@ -14,6 +14,10 @@ const serverSchema = z.object({
   // S3: optional in schema, injected by SST in deployed environments
   AWS_S3_BUCKET: z.string().optional(),
   AWS_S3_PUBLIC_URL: z.string().url().optional(),
+  // M2 Content Intelligence: optional research sources
+  SERPAPI_KEY: z.string().optional(),
+  REDDIT_CLIENT_ID: z.string().optional(),
+  REDDIT_CLIENT_SECRET: z.string().optional(),
   NODE_ENV: z
     .enum(["development", "production", "test"])
     .default("development"),

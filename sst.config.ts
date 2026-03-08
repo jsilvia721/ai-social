@@ -117,5 +117,27 @@ export default $config({
         logging: { retention: "1 month" },
       },
     });
+
+    // ── Cron: Research Pipeline (every 4 hours) ─────────────────
+    new sst.aws.Cron("ResearchPipeline", {
+      schedule: "cron(0 */4 * * ? *)",
+      job: {
+        handler: "src/cron/research.handler",
+        environment,
+        timeout: "5 minutes",
+        logging: { retention: "1 month" },
+      },
+    });
+
+    // ── Cron: Brief Generator (Sunday 23:00 UTC) ────────────────
+    new sst.aws.Cron("BriefGenerator", {
+      schedule: "cron(0 23 ? * SUN *)",
+      job: {
+        handler: "src/cron/briefs.handler",
+        environment,
+        timeout: "5 minutes",
+        logging: { retention: "1 month" },
+      },
+    });
   },
 });
