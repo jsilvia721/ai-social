@@ -6,6 +6,7 @@ import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, B
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useState, useTransition } from "react";
+import { useSession } from "next-auth/react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,6 +65,7 @@ interface SidebarProps {
 export function Sidebar({ user, businesses = [], activeBusinessId }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const { update } = useSession();
   const [, startTransition] = useTransition();
   const [localActiveId, setLocalActiveId] = useState(activeBusinessId);
 
@@ -86,6 +88,7 @@ export function Sidebar({ user, businesses = [], activeBusinessId }: SidebarProp
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ businessId }),
       });
+      await update({ activeBusinessId: businessId });
       startTransition(() => {
         router.refresh();
       });

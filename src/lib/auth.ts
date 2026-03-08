@@ -38,6 +38,20 @@ export const authOptions: AuthOptions = {
           });
           token.activeBusinessId = membership?.businessId ?? null;
         }
+      } else if (token.sub && token.email) {
+        // Token refresh: verify the stored user ID still exists (guards against DB resets in dev).
+        // If stale, look up by email and self-heal the token so the user doesn't need to sign out.
+        const exists = await prisma.user.findUnique({ where: { id: token.sub }, select: { id: true } });
+        if (!exists) {
+          const byEmail = await prisma.user.findUnique({
+            where: { email: token.email as string },
+            select: { id: true, activeBusinessId: true },
+          });
+          if (byEmail) {
+            token.sub = byEmail.id;
+            token.activeBusinessId = byEmail.activeBusinessId ?? null;
+          }
+        }
       }
       // Client can trigger a session update via update({ activeBusinessId })
       if (trigger === "update" && typeof session?.activeBusinessId === "string") {

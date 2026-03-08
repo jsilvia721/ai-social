@@ -29,18 +29,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
-  // Verify user exists in DB (guards against stale JWTs after DB resets)
-  const userExists = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { id: true },
-  });
-  if (!userExists) {
-    return NextResponse.json(
-      { error: "Session expired. Please sign out and sign back in." },
-      { status: 401 }
-    );
-  }
-
   const business = await prisma.business.create({
     data: {
       name: body.name,

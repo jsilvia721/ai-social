@@ -134,6 +134,10 @@ const CONTENT_STRATEGY_FEW_SHOT: MessageParam[] = [
       },
     ],
   },
+  {
+    role: "user",
+    content: [{ type: "tool_result", tool_use_id: "ex_01", content: "Strategy saved." }],
+  },
 ];
 
 function buildOnboardingPrompt(answers: Record<string, string>): string {

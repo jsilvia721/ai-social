@@ -23,6 +23,7 @@ function makeRequest(params: Record<string, string> = {}) {
 beforeEach(() => {
   resetPrismaMock();
   jest.clearAllMocks();
+  delete process.env.BLOTATO_MOCK;
 });
 
 describe("GET /api/connect/blotato", () => {
@@ -78,6 +79,28 @@ describe("GET /api/connect/blotato", () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("https://app.blotato.com/connect/oauth");
+  });
+
+  it("mock mode: creates a fake account and redirects to accounts page", async () => {
+    process.env.BLOTATO_MOCK = "true";
+    mockAuthenticated();
+    prismaMock.businessMember.findFirst.mockResolvedValue({ id: "mem-1" } as any);
+    prismaMock.socialAccount.upsert.mockResolvedValue({} as any);
+
+    const res = await GET(makeRequest({ platform: "TWITTER", businessId: "biz-1" }));
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("/dashboard/accounts?success=true");
+    expect(prismaMock.socialAccount.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          platform: "TWITTER",
+          businessId: "biz-1",
+          username: "mockuser_twitter",
+        }),
+      })
+    );
+    expect(mockGetConnectUrl).not.toHaveBeenCalled();
   });
 
   it("calls getConnectUrl with encoded state containing userId and businessId", async () => {

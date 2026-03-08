@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, Building2 } from "lucide-react";
 
 export default function NewBusinessPage() {
   const router = useRouter();
+  const { update } = useSession();
   const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,15 +35,16 @@ export default function NewBusinessPage() {
 
       const business = await res.json();
 
-      // Switch to the new workspace
+      // Switch to the new workspace and refresh the session JWT so
+      // activeBusinessId is available immediately on subsequent pages.
       await fetch("/api/businesses/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ businessId: business.id }),
       });
+      await update({ activeBusinessId: business.id });
 
       router.push(`/dashboard/businesses/${business.id}/onboard`);
-      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create workspace.");
       setIsSubmitting(false);
