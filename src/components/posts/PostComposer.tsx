@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X, Film } from "lucide-react";
+import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X, Film, Copy } from "lucide-react";
 import type { Platform } from "@/types";
 
 const CHAR_LIMITS: Partial<Record<Platform, number>> = {
@@ -78,6 +78,8 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isRepurposing, setIsRepurposing] = useState(false);
+  const repurposeInFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [mediaUrls, setMediaUrls] = useState<string[]>(editPost?.mediaUrls ?? []);
   const [isUploading, setIsUploading] = useState(false);
@@ -124,6 +126,30 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
       setError("Failed to generate content. Please try again.");
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  async function handleRepurpose() {
+    if (repurposeInFlight.current || !content.trim()) return;
+    repurposeInFlight.current = true;
+    setIsRepurposing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/posts/repurpose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceContent: content.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Repurposing failed");
+      }
+      const { repurposeGroupId } = await res.json();
+      router.push(`/dashboard/posts/repurpose/${repurposeGroupId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Repurposing failed.");
+      setIsRepurposing(false);
+      repurposeInFlight.current = false;
     }
   }
 
@@ -510,6 +536,37 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
           </div>
         </CardContent>
       </Card>
+
+      {/* Repurpose to all platforms */}
+      {!isEditMode && content.trim() && (
+        <Card className="bg-zinc-900 border-zinc-700">
+          <CardContent className="pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Copy className="h-4 w-4 text-violet-400" />
+                <span className="text-sm font-medium text-zinc-300">Repurpose</span>
+              </div>
+              <Button
+                type="button"
+                onClick={handleRepurpose}
+                disabled={isRepurposing || !content.trim()}
+                className="bg-violet-600 hover:bg-violet-700 text-white"
+                size="sm"
+              >
+                {isRepurposing ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Copy className="h-4 w-4 mr-2" />
+                )}
+                {isRepurposing ? "Creating variants…" : "Repurpose to all platforms"}
+              </Button>
+            </div>
+            <p className="text-xs text-zinc-500">
+              Generate platform-native variants of your content for all connected accounts.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Schedule toggle */}
       <div className="space-y-3">
