@@ -119,7 +119,10 @@ export default function OnboardPage() {
           throw new Error(body.error ?? "Something went wrong");
         }
         setDone(true);
-        setTimeout(() => router.push("/dashboard/accounts"), 2000);
+        setTimeout(() => {
+          router.refresh();
+          router.push("/dashboard/accounts");
+        }, 2000);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
         setIsSubmitting(false);
