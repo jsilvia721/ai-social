@@ -135,7 +135,7 @@ export default async function AnalyticsPage() {
           <Card className="bg-zinc-800 border-zinc-700">
             <div className="divide-y divide-zinc-700">
               {topPosts.map((post) => (
-                <div key={post.id} className="flex items-center gap-4 px-6 py-4">
+                <div key={post.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4 sm:px-6 sm:py-4">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-zinc-200 truncate">{post.content}</p>
                     <p className={`text-xs mt-1 ${PLATFORM_COLOR[post.socialAccount.platform as Platform]}`}>

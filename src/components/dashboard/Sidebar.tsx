@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList } from "lucide-react";
+import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList, Menu, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect, useRef, createContext, useContext } from "react";
 import { useSession } from "next-auth/react";
 import {
   DropdownMenu,
@@ -15,6 +15,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+// Context to allow other components to control mobile sidebar
+const MobileSidebarContext = createContext<{
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
+}>({ isOpen: false, setIsOpen: () => {} });
+
+export function useMobileSidebar() {
+  return useContext(MobileSidebarContext);
+}
 
 const NAV_LINKS = [
   { icon: LayoutDashboard, label: "Overview", href: "/dashboard" },
@@ -69,8 +79,19 @@ export function Sidebar({ user, businesses = [], activeBusinessId }: SidebarProp
   const { update } = useSession();
   const [, startTransition] = useTransition();
   const [localActiveId, setLocalActiveId] = useState(activeBusinessId);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const activeBusiness = businesses.find((b) => b.id === localActiveId) ?? businesses[0];
+
+  // Close mobile sidebar on route change
+  const pathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (pathnameRef.current !== pathname) {
+      pathnameRef.current = pathname;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMobileOpen(false);
+    }
+  }, [pathname]);
 
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard";
@@ -98,14 +119,22 @@ export function Sidebar({ user, businesses = [], activeBusinessId }: SidebarProp
     }
   }
 
-  return (
-    <aside className="fixed inset-y-0 left-0 z-40 flex w-60 flex-col bg-zinc-900 border-r border-zinc-800">
+  const sidebarContent = (
+    <>
       {/* Logo */}
       <div className="flex h-16 items-center gap-2.5 px-5 border-b border-zinc-800">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600">
           <Sparkles className="h-4 w-4 text-white" />
         </div>
         <span className="font-semibold text-zinc-50 text-lg">AI Social</span>
+        {/* Close button - mobile only */}
+        <button
+          onClick={() => setMobileOpen(false)}
+          className="ml-auto md:hidden text-zinc-400 hover:text-zinc-200"
+          aria-label="Close sidebar"
+        >
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
       {/* Business selector */}
@@ -221,6 +250,42 @@ export function Sidebar({ user, businesses = [], activeBusinessId }: SidebarProp
           </div>
         </div>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <MobileSidebarContext.Provider value={{ isOpen: mobileOpen, setIsOpen: setMobileOpen }}>
+      {/* Mobile header bar */}
+      <div className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center gap-3 border-b border-zinc-800 bg-zinc-900 px-4 md:hidden">
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="text-zinc-400 hover:text-zinc-200"
+          aria-label="Open sidebar"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-600">
+          <Sparkles className="h-3.5 w-3.5 text-white" />
+        </div>
+        <span className="font-semibold text-zinc-50">AI Social</span>
+      </div>
+
+      {/* Mobile backdrop + sidebar */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 md:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-60 flex-col bg-zinc-900 border-r border-zinc-800 transition-transform duration-200 ease-in-out md:translate-x-0 md:z-40",
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        {sidebarContent}
+      </aside>
+    </MobileSidebarContext.Provider>
   );
 }

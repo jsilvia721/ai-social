@@ -203,7 +203,7 @@ export function FulfillmentPanel({
   }, [onClose]);
 
   return (
-    <div className="w-[480px] shrink-0 border-l border-zinc-800 bg-zinc-900 overflow-y-auto">
+    <div className="fixed inset-0 z-40 bg-zinc-900 overflow-y-auto md:static md:z-auto md:w-[480px] md:shrink-0 md:border-l md:border-zinc-800">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-zinc-900 border-b border-zinc-800 px-6 py-4">
         <div className="flex items-center justify-between">
