@@ -28,6 +28,20 @@ jobs:
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/test
 
+      - name: Check Prisma schema has matching migration
+        run: |
+          # If schema.prisma changed vs base branch, a new migration must also be present
+          BASE_REF="${GITHUB_BASE_REF:-main}"
+          git fetch origin "$BASE_REF" --depth=1 2>/dev/null || true
+          CHANGED=$(git diff --name-only "origin/$BASE_REF"...HEAD 2>/dev/null || git diff --name-only HEAD~1)
+          if echo "$CHANGED" | grep -q "prisma/schema.prisma"; then
+            if ! echo "$CHANGED" | grep -q "prisma/migrations/"; then
+              echo "::error::prisma/schema.prisma was modified but no new migration was added. Run: npx prisma migrate dev --name <name>"
+              exit 1
+            fi
+          fi
+          echo "Schema/migration check passed"
+
       - name: Lint
         run: npm run lint
 
