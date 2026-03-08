@@ -16,8 +16,7 @@ npm run ci:check      # Lint + typecheck + coverage (mirrors CI exactly)
 # Run a single test file
 npx jest src/__tests__/api/posts.test.ts
 
-# Prisma (always run generate after schema changes)
-npx prisma generate
+# Prisma (always run migrate dev after schema changes — not just generate)
 npx prisma migrate dev --name <name>
 
 # Local dev database (Docker)
@@ -49,6 +48,13 @@ docker compose up -d db
 - **Run E2E tests locally before pushing** — catches selector/UI issues without waiting for CI
 - **Verification before done** — never mark complete without proving it works (tests pass, no regressions)
 - **If stuck, re-plan** — don't keep pushing when something goes sideways
+- **Every `schema.prisma` change MUST have a migration** — run `npx prisma migrate dev --name <name>`, never just `npx prisma generate`. CI enforces this with `prisma migrate diff --exit-code`.
+
+### Branching & Worktrees
+- **Always branch from `staging`** — run `git fetch origin staging` then branch from `origin/staging`. PRs target `staging`, not `main`.
+- **Worktree creation** — use `git worktree add .claude/worktrees/<name> -b <branch> origin/staging` to create worktrees with the correct base in one step.
+- **Never stash across bases** — do not `git stash` on one branch and pop on a branch with a different base. This causes merge conflicts. Instead, commit WIP on the current branch, create a new branch from the correct base, and cherry-pick or re-apply changes.
+- **Verify before PR** — run `git merge-base --is-ancestor origin/staging HEAD` to confirm your branch descends from staging before pushing.
 
 ### Core Principles
 - **Simplicity first** — make every change as simple as possible, minimal code impact
@@ -63,7 +69,7 @@ Every API route: `getServerSession(authOptions)` -> reject if no session -> scop
 Middleware (`src/middleware.ts`) protects all routes via `withAuth`, exempting `/api/auth/*`, `/auth/signin`, `/api/test/*`, and static assets. Access restricted to `ALLOWED_EMAILS` env var.
 
 ### Database (Prisma 7 + dual adapter)
-`src/lib/db.ts` selects adapter by connection string: `neon.tech` -> `@prisma/adapter-neon` (Lambda); otherwise `@prisma/adapter-pg` (local/CI). No `url` field in schema.prisma — URL set in `prisma.config.ts` and at runtime via `DATABASE_URL`. Always run `npx prisma generate` after schema changes.
+`src/lib/db.ts` selects adapter by connection string: `neon.tech` -> `@prisma/adapter-neon` (Lambda); otherwise `@prisma/adapter-pg` (local/CI). No `url` field in schema.prisma — URL set in `prisma.config.ts` and at runtime via `DATABASE_URL`. After schema changes, run `npx prisma migrate dev --name <name>` (creates migration + regenerates client).
 
 ### Scheduler
 Two EventBridge Lambda crons (not in-process):

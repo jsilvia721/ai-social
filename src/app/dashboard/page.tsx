@@ -106,7 +106,7 @@ export default async function DashboardPage() {
                 const status = STATUS_BADGE[post.status as PostStatus];
                 const platformColor = PLATFORM_COLOR[post.socialAccount.platform] ?? "text-zinc-400";
                 return (
-                  <div key={post.id} className="flex items-center gap-4 px-6 py-4">
+                  <div key={post.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4 sm:px-6 sm:py-4">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-zinc-200 truncate">{post.content}</p>
                       <p className={`text-xs mt-1 ${platformColor}`}>

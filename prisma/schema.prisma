@@ -141,6 +141,7 @@ model Post {
   blotatoPostId         String?
   errorMessage          String?
   briefId               String?
+  repurposeGroupId      String?   // cuid linking variant posts from a single repurpose operation
   topicPillar           String?   // which content pillar this maps to
   tone                  String?   // "educational" | "entertaining" | "promotional" | "community"
   metricsLikes          Int?
@@ -159,6 +160,7 @@ model Post {
   @@index([status, scheduledAt])
   @@index([status, retryAt])
   @@index([status, metricsUpdatedAt])
+  @@index([repurposeGroupId])
 }
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
