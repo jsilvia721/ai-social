@@ -47,6 +47,7 @@ docker compose up -d db
 - **Run `npm run ci:check` before every push** — lint + typecheck + coverage (mirrors CI)
 - **Run E2E tests locally before pushing** — catches selector/UI issues without waiting for CI
 - **Verification before done** — never mark complete without proving it works (tests pass, no regressions)
+- **Always branch from `origin/staging`** — run `git fetch origin` first, then `git checkout -b <branch> origin/staging` or `git worktree add ... origin/staging`. Never branch from the current HEAD or another feature branch. Before creating a PR, run `git fetch origin && git merge origin/staging` to surface conflicts locally.
 - **If stuck, re-plan** — don't keep pushing when something goes sideways
 - **Every `schema.prisma` change MUST have a migration** — run `npx prisma migrate dev --name <name>`, never just `npx prisma generate`. CI enforces this with `prisma migrate diff --exit-code`.
 

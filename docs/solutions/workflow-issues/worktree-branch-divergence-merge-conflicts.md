@@ -1,14 +1,16 @@
 ---
-title: "Git worktree branch switching causes stash pop conflicts when source branch diverges from staging"
+title: "Worktree branch divergence causing PR merge conflicts"
 date: "2026-03-08"
 category: "workflow"
-severity: "low"
-component: "git-worktree-workflow"
+severity: "high"
+component: "git-branching"
 symptoms:
+  - "Merge conflicts on PR when target branch (staging) has diverged"
   - "Merge conflicts when running git stash pop after branching from staging"
   - "Manual conflict resolution needed after switching branch base in worktree"
   - "Unrelated changes from source branch leak into new feature branch"
   - "Files missing imports or components present only on source branch"
+  - "PR shows many more commits than expected (carrying parent branch history)"
 tags:
   - "git"
   - "worktree"
@@ -16,6 +18,8 @@ tags:
   - "branch-management"
   - "developer-workflow"
   - "staging"
+  - "merge-conflicts"
+  - "pr-workflow"
 related_issues: []
 ---
 
@@ -23,20 +27,40 @@ related_issues: []
 
 ## Symptom
 
-When working in a git worktree on branch A (e.g., `fix/missing-m3-migration`) and creating a new branch from `staging` to open a PR, running `git stash pop` produces merge conflicts because the source branch has diverged from staging.
+There are two manifestations of this problem:
 
-Example conflict: `Sidebar.tsx` on branch A contains `showDevTools`, `LogOut`, `signOut` imports and props, while `staging` does not have these additions. The stash diff references context lines that don't exist on staging.
+### 1. PR merge conflicts (most common)
+
+A feature branch is created from another feature branch (or from an outdated local ref) instead of from `origin/staging`. When the PR is opened against staging, GitHub reports merge conflicts because staging has diverged.
+
+Example (PR #22): `feat/mock-external-apis` was branched from `feat/sign-out`. The Sidebar.tsx file had conflicting import lines between the two branches and staging. An earlier attempt to rebase onto `origin/main` failed entirely because many files modified on the branch didn't exist on main (blotato/, briefs.ts, research.ts, etc.).
+
+### 2. Stash pop conflicts
+
+When working in a git worktree on branch A and creating a new branch from `staging`, running `git stash pop` produces merge conflicts because the source branch has diverged from staging.
 
 ## Root Cause
 
-Merge conflicts arise when uncommitted or stashed changes from one branch are applied onto a different branch that has diverged. The two branches have different file states, so `git stash pop` produces conflicts that require manual resolution.
+New branches get created from the currently checked-out branch rather than explicitly from the PR target base (`origin/staging`). This happens when:
 
-`git stash` records changes relative to the branch HEAD where they were created. When the target branch has different surrounding code, the context lines don't match and conflicts result. Stash is **not** a portable clipboard between diverged branches.
+- Working in a worktree that's on a feature branch and running `git checkout -b feat/new` without specifying a start point
+- Using `git worktree add` without an explicit base ref
+- Branching from a stale local `staging` that hasn't been fetched recently
 
-## What Went Wrong (Anti-Pattern)
+The branch carries forward all unmerged commits from the parent feature branch, creating divergence with the actual target base.
+
+For stash conflicts specifically: `git stash` records changes relative to the branch HEAD where they were created. When the target branch has different surrounding code, the context lines don't match.
+
+## What Went Wrong (Anti-Patterns)
 
 ```bash
-# ANTI-PATTERN: Stashing across diverged branches
+# ANTI-PATTERN 1: Branching from current HEAD (which is a feature branch)
+# You're on feat/sign-out and create a new branch
+git checkout -b feat/new-feature        # branches from feat/sign-out, NOT staging
+git push -u origin feat/new-feature
+gh pr create --base staging             # CONFLICT — carries feat/sign-out's commits
+
+# ANTI-PATTERN 2: Stashing across diverged branches
 git stash                              # on fix/missing-m3-migration
 git checkout -b feat/new staging       # staging has different file state
 git stash pop                          # CONFLICT — staging lacks code that
@@ -87,8 +111,28 @@ git merge-base --is-ancestor origin/staging HEAD && echo "OK: based on staging" 
 4. Verify the base — `git log --oneline -3` should show staging's latest commits
 5. Never carry uncommitted changes between branches with different bases
 
+## Pre-PR Checklist
+
+Before pushing or creating a PR, always reconcile with the target base:
+
+```bash
+git fetch origin
+git merge origin/staging
+# Or: git rebase origin/staging
+
+# Resolve any conflicts locally
+npm run ci:check   # verify everything still works
+git push
+```
+
+This catches conflicts locally where they're easy to resolve, instead of discovering them on the PR page.
+
 ## Best Practices
 
 - **Worktree creation**: Always specify base branch — `git worktree add .claude/worktrees/my-task -b fix/my-task origin/staging`
-- **Keeping current**: If a worktree lives for hours, run `git fetch origin staging && git rebase origin/staging` before pushing
+- **Keeping current**: If a worktree lives for hours, run `git fetch origin && git rebase origin/staging` before pushing
 - **Cleanup**: After PR merge, remove stale worktrees — `git worktree remove .claude/worktrees/my-task`
+- **Recovery**: If you branched from the wrong base, rebase onto the correct one:
+  ```bash
+  git rebase --onto origin/staging <wrong-base-commit> <your-branch>
+  ```
