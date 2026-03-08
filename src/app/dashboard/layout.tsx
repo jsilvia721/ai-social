@@ -33,12 +33,17 @@ export default async function DashboardLayout({
     businesses = memberships.map((m) => m.business);
   }
 
+  const showDevTools =
+    process.env.BLOTATO_MOCK === "true" ||
+    process.env.NODE_ENV === "development";
+
   return (
     <div className="min-h-screen bg-zinc-950">
       <Sidebar
         user={session.user}
         businesses={businesses}
         activeBusinessId={session.user.activeBusinessId}
+        showDevTools={showDevTools}
       />
       <main className="min-h-screen pt-14 md:pt-0 md:ml-60">
         <div className="p-4 md:p-8">{children}</div>
