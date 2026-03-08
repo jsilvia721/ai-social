@@ -14,4 +14,6 @@ process.env.ALLOWED_EMAILS = "test@example.com";
 process.env.AWS_S3_BUCKET = "test-bucket";
 process.env.AWS_S3_PUBLIC_URL = "https://storage.example.com";
 process.env.PLAYWRIGHT_E2E = "true";
+// Disable external API mocking in tests — tests have their own mocks/spies
+process.env.MOCK_EXTERNAL_APIS = "false";
 (process.env as any).NODE_ENV = "test";

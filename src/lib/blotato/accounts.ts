@@ -5,12 +5,19 @@ import {
   BlotatoConnectUrlSchema,
   type BlotatoAccount,
 } from "./types";
+import { shouldMockExternalApis } from "@/lib/mocks/config";
+import {
+  mockGetConnectUrl,
+  mockListAccounts,
+  mockGetAccount,
+} from "@/lib/mocks/blotato";
 
 export async function getConnectUrl(
   platform: string,
   callbackUrl: string,
   state: string,
 ): Promise<{ url: string }> {
+  if (shouldMockExternalApis()) return mockGetConnectUrl(platform);
   return blotatoFetch(
     "/connect/url",
     BlotatoConnectUrlSchema,
@@ -22,9 +29,11 @@ export async function getConnectUrl(
 }
 
 export async function listAccounts(): Promise<BlotatoAccount[]> {
+  if (shouldMockExternalApis()) return mockListAccounts();
   return blotatoFetch("/accounts", z.array(BlotatoAccountSchema));
 }
 
 export async function getAccount(id: string): Promise<BlotatoAccount> {
+  if (shouldMockExternalApis()) return mockGetAccount(id);
   return blotatoFetch(`/accounts/${id}`, BlotatoAccountSchema);
 }
