@@ -95,7 +95,8 @@ export async function generateBriefs(
   connectedPlatforms: string[],
   cadencePerPlatform: Record<string, number>,
   researchThemes: string,
-  recentPostTopics: string[]
+  recentPostTopics: string[],
+  formatMix?: Record<string, number> | null,
 ): Promise<BriefGenerationResult> {
   const totalBriefs = Object.entries(cadencePerPlatform)
     .filter(([platform]) => connectedPlatforms.includes(platform))
@@ -123,6 +124,9 @@ export async function generateBriefs(
           `Connected Platforms: ${connectedPlatforms.join(", ")}\n` +
           `Briefs needed: ${totalBriefs} total (${Object.entries(cadencePerPlatform).filter(([p]) => connectedPlatforms.includes(p)).map(([p, n]) => `${p}: ${n}`).join(", ")})\n\n` +
           `Recent Research Themes:\n${researchThemes}\n\n` +
+          (formatMix && Object.keys(formatMix).length > 0
+            ? `Target format distribution (learned from performance data — weight your format choices accordingly):\n${Object.entries(formatMix).map(([f, pct]) => `  ${f}: ${(pct * 100).toFixed(0)}%`).join("\n")}\n\n`
+            : "") +
           (recentPostTopics.length > 0
             ? `Recent post topics (avoid repeating):\n${recentPostTopics.join("\n")}\n`
             : ""),

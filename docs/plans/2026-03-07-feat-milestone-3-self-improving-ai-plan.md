@@ -1,76 +1,44 @@
 ---
-title: "Self-Improving AI: Thompson Sampling + Claude Meta-Optimizer"
+title: "Self-Improving AI: Performance Learning + Claude Optimizer"
 type: feat
 status: active
 date: 2026-03-07
 origin: docs/brainstorms/2026-03-07-autonomous-ai-social-media-manager-brainstorm.md
 ---
 
-# Self-Improving AI: Thompson Sampling + Claude Meta-Optimizer
-
-## Enhancement Summary
-
-**Deepened on:** 2026-03-07
-**Sections enhanced:** All 6 phases + architecture + data model
-**Research agents used:** TypeScript Reviewer, Performance Oracle, Security Sentinel, Architecture Strategist, Data Integrity Guardian, Simplicity Reviewer, Pattern Recognition Specialist, Best Practices Researcher, Framework Docs Researcher, Data Migration Expert
-
-### Key Improvements
-1. **Drastically simplified scope** -- Start with 1 dimension (format only), defer transfer learning, adaptive baselines, and analytics endpoints to future iterations
-2. **Drop jStat dependency** -- Use `@stdlib/random-base-beta` (typed, tiny, maintained) or inline Marsaglia-Tsang implementation (~20 lines)
-3. **Replace JSON blobs with proper relations** -- `armSelections` becomes a join table; `armId` becomes a proper FK with `onDelete: SetNull`
-4. **Add Zod validation for all JSON fields** -- Match existing `src/env.ts` pattern
-5. **Separate pure math from DB calls** -- `src/lib/bandit/engine.ts` (pure) + `src/lib/bandit/selection.ts` (Prisma)
-6. **Fix race condition** -- Observation cron must verify metrics have been fetched (not stale) before computing reward
-7. **Per-platform observation windows** -- Based on real half-life research: Twitter 52min, Instagram 18h, YouTube 10.6 days
-
-### Critical Findings from Review Agents
-- **Business/ContentStrategy model is a prerequisite** -- The current `staging` branch already has these models (M1/Blotato work), so this is satisfied. Plan must not ship before M1 merges.
-- **Business membership auth must exist before analytics endpoints** -- Use `assertBusinessMembership(session, businessId)` helper
-- **Transfer learning leaks cross-business intelligence** -- Deferred entirely; use only industry aggregate priors
-- **Claude meta-optimizer output must be Zod-validated** -- Prevent hallucinated strategy values from corrupting ContentStrategy
-
----
+# Self-Improving AI: Performance Learning + Claude Optimizer
 
 ## Overview
 
-Milestone 3 adds a closed-loop optimization engine that makes the platform measurably smarter over time. Every published post becomes a data point: after a platform-specific observation window, engagement metrics feed into a Discounted Thompson Sampling bandit that learns which content format performs best per workspace. A weekly Claude Meta-Optimizer reasons over performance patterns, updates workspace `ContentStrategy`, and generates a plain-language digest for the partner.
+Milestone 3 closes the feedback loop: every published post becomes a learning signal. The platform tracks what works (format, topic, tone), and a weekly Claude analysis identifies patterns and updates the workspace's `ContentStrategy`. The partner gets a plain-language weekly digest of what the AI learned and changed.
 
-**Exit criteria (from brainstorm):** After 4 weeks, demonstrable strategy shifts based on performance data -- measurable improvement in engagement rates per workspace.
+**Why not Thompson Sampling?** Research into industry practices revealed that **no major social media tool** (Buffer, Hootsuite, Sprout Social, Later, Jasper) uses multi-armed bandits for organic content optimization. MABs require hundreds of observations per arm to converge — at 3-5 posts/week, that's 30 weeks to 4 years of data. Each post is unique content with massive confounders (topic, timing, platform algorithm changes), violating the MAB assumption of repeated identical trials. Instead, industry leaders use: (1) AI-powered pattern recognition over historical data, (2) simple content scoring, and (3) human-guided experimentation. That's what we build here.
 
-## Problem Statement / Motivation
+**What actually moves the needle** (Buffer 2026, 52M+ posts analyzed):
+- Posting consistency: 450% more engagement per post for regular posters
+- Replying to comments: 21-42% engagement lift depending on platform
+- Right format per platform: simple lookup, not algorithmic optimization
+- Quality content informed by what worked before
 
-Currently, content strategy is static. The AI generates posts based on the initial `ContentStrategy` set during onboarding (M1) but never adjusts based on what actually works. This means:
+**Exit criteria (from brainstorm):** After 4 weeks, demonstrable strategy shifts based on performance data — measurable improvement in engagement rates per workspace.
+
+## Problem Statement
+
+Currently, content strategy is static. The AI generates posts based on the initial `ContentStrategy` set during onboarding but never adjusts based on what actually works. This means:
 - No learning from high/low performers
-- No format optimization (the platform doesn't know if video outperforms images for a workspace)
-- No cadence tuning (posting frequency stays at defaults)
+- No insight into which formats, topics, or tones work best per workspace
+- No cadence tuning
 - The partner has no data-driven weekly summary of what's working
-
-Thompson Sampling is the right algorithm because: it's naturally robust to delayed feedback (observation window), self-tunes exploration vs exploitation, requires no parameter tuning, and outperforms UCB (which over-commits before delayed feedback arrives) and epsilon-greedy (which wastes scarce posts on random exploration). (see brainstorm: resolved questions)
-
-### Research Insights: Algorithm Choice
-
-**Bernoulli vs continuous rewards:** The plan uses Bernoulli updates (`alpha += reward, beta += 1 - reward`) with sigmoid-squashed rewards in [0,1]. This is mathematically valid -- the Beta-Bernoulli model works with any reward in [0,1], not just binary outcomes. The sigmoid squash maps the composite engagement score to a probability-like value, which the Beta distribution models correctly. (Source: Russo et al. "A Tutorial on Thompson Sampling" 2018)
-
-**Discounted TS gamma value:** The plan proposed gamma=0.95/week. Research shows this is **too aggressive**. At 2 posts/day, gamma=0.95 gives an effective window of only ~20 observations. **Use gamma=0.998 per observation** (effective window ~500 observations / ~8 months), which balances learning from history with adapting to trend shifts. Apply decay per observation, not per week. (Source: Qi 2023, "Non-stationary Bandits with Discounted Thompson Sampling")
 
 ## Proposed Solution
 
-Three interconnected components:
+Two components, not four:
 
-1. **Bandit Engine** (`src/lib/bandit/engine.ts`) -- Pure TypeScript functions. Beta sampling, reward computation, posterior updates. Zero dependencies or DB calls.
+1. **Post Tagging + Performance Tracking** — Each published post gets metadata tags (format, topic pillar, tone). After a platform-specific observation window, engagement metrics are snapshotted. This is the raw data.
 
-2. **Bandit Selection** (`src/lib/bandit/selection.ts`) -- Prisma-calling orchestrator. Fetches arms, delegates to engine, persists updates.
+2. **Claude Weekly Optimizer** (`src/cron/optimize.ts`) — Weekly cron where Claude analyzes 30 days of tagged performance data, identifies patterns ("your tutorial videos get 3x more comments than product posts"), updates `ContentStrategy`, and generates a plain-language digest.
 
-3. **Observation Pipeline** (`src/cron/observe.ts`) -- EventBridge cron that matures posts past their observation window, computes reward scores, and updates arm posteriors.
-
-4. **Claude Meta-Optimizer** (`src/lib/ai/index.ts` addition) -- Weekly function where Claude analyzes 30 days of performance data + current posteriors, identifies patterns, and updates `ContentStrategy`. Called from `src/cron/meta-optimize.ts` thin handler.
-
-### Research Insight: Module Separation (Architecture Strategist)
-
-The existing codebase establishes clear separation: `src/lib/crypto.ts` is pure functions, `src/lib/scheduler.ts` is the orchestrator. The bandit engine MUST follow this pattern:
-- `src/lib/bandit/engine.ts` -- Pure functions: `sampleBeta()`, `computeReward()`, `updatePosteriors()`, `decayPosteriors()`
-- `src/lib/bandit/selection.ts` -- DB-calling orchestrator: `selectArmsForPost()`, `processObservation()`
-- Claude analysis function goes in `src/lib/ai/index.ts` alongside existing `generatePostContent()` -- do NOT create a new Anthropic client
+No bandit engine. No Beta distributions. No arm posteriors. Just structured data collection and AI pattern recognition — which is what every successful tool in this space actually does.
 
 ## Technical Approach
 
@@ -80,36 +48,99 @@ The existing codebase establishes clear separation: `src/lib/crypto.ts` is pure 
 Post published (scheduler.ts)
     |
     v
-PostObservation created (status: PENDING, matureAt: publishedAt + platform observation window)
+Post already has: format (from ContentBrief.recommendedFormat), content pillar tags, platform
     |
-    v  [observe.ts cron, every hour]
-Check: is matureAt <= now AND post.metricsUpdatedAt > post.publishedAt?
-  Yes -> compute reward -> update ContentArm posteriors -> mark MATURED
-  No metrics yet -> skip (retry next hour)
+    v  [metrics.ts cron, every hour — already exists]
+Engagement metrics collected as usual
     |
-    v  [meta-optimize.ts cron, weekly Sunday 2am UTC]
-Claude analyzes 30-day performance + posteriors -> updates ContentStrategy -> generates digest
+    v  [optimize.ts cron, weekly Sunday 2am UTC]
+Claude analyzes 30 days of published posts with metrics:
+  - Groups by format, topic pillar, platform
+  - Identifies top/bottom performers and patterns
+  - Suggests ContentStrategy adjustments (format mix, cadence, topics)
+  - Generates plain-language digest for partner
     |
-    v  [brief generation reads updated strategy + arm posteriors]
-Next week's briefs use improved strategy
+    v
+ContentStrategy updated within guardrails -> StrategyDigest saved
+    |
+    v
+Next week's brief generation reads updated strategy
+```
+
+### What Already Exists (No Changes Needed)
+
+- **Post metrics fields**: `metricsLikes`, `metricsComments`, `metricsShares`, `metricsSaves`, `metricsImpressions`, `metricsReach`, `metricsUpdatedAt` — all on Post model
+- **Metrics cron** (`src/cron/metrics.ts`): hourly, refreshes metrics for up to 50 PUBLISHED posts
+- **ContentBrief.recommendedFormat**: already tracks format per brief (TEXT, IMAGE, CAROUSEL, VIDEO)
+- **ContentStrategy.contentPillars**: already stores topic categories
+- **ContentStrategy.postingCadence**: already stores per-platform posting frequency
+
+### Data Model Changes
+
+Minimal schema additions — we leverage what exists.
+
+```prisma
+// --- New model ---
+
+model StrategyDigest {
+  id          String   @id @default(cuid())
+  businessId  String
+  weekOf      DateTime
+  summary     String   @db.Text    // plain-language digest for partner
+  patterns    Json                  // { topPerformers: [...], insights: [...] }
+  changes     Json                  // { formatMix: {...}, cadence: {...}, ... }
+  createdAt   DateTime @default(now())
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, weekOf])   // prevent duplicate digests per week
+  @@index([businessId, createdAt])
+}
+```
+
+**Post model additions:**
+```prisma
+model Post {
+  // ... existing fields
+  topicPillar  String?   // which content pillar this maps to (from ContentStrategy.contentPillars)
+  tone         String?   // "educational" | "entertaining" | "promotional" | "community" | etc.
+}
+```
+
+**ContentStrategy additions:**
+```prisma
+model ContentStrategy {
+  // ... existing fields
+  formatMix          Json?      // { "TEXT": 0.2, "IMAGE": 0.3, "VIDEO": 0.5 } — target mix
+  optimalTimeWindows Json?      // { "TWITTER": ["09:00-11:00"], ... }
+  lastOptimizedAt    DateTime?
+}
+```
+
+**Business model addition:**
+```prisma
+model Business {
+  // ... existing fields
+  strategyDigests StrategyDigest[]
+}
 ```
 
 ### Research Insight: Observation Windows by Platform
 
-Real engagement half-life data (Graffius 2026, analysis of 5.6M+ posts):
+Real engagement half-life data (Graffius 2026, 5.6M+ posts):
 
-| Platform | Half-Life | Recommended Observation Window |
-|----------|-----------|-------------------------------|
-| Twitter/X | 52 minutes | 24 hours (captures ~99% of engagement) |
-| Facebook | 86 minutes | 24 hours |
-| Instagram | 18.3 hours | 72 hours |
-| TikTok | ~0 (algorithmic resurface) | 72 hours (TikTok can resurface content) |
-| YouTube | 10.6 days | 7 days (168 hours) |
+| Platform | Half-Life | Metrics "Done" After |
+|----------|-----------|---------------------|
+| Twitter/X | 52 minutes | ~24 hours |
+| Facebook | 86 minutes | ~24 hours |
+| Instagram | 18.3 hours | ~72 hours |
+| TikTok | ~0 (algorithmic resurface) | ~72 hours |
+| YouTube | 10.6 days | ~7 days |
 
-**Implementation:** Store observation window per platform as a constant, not hardcoded 72h for all.
+The existing metrics cron already refreshes hourly. For the weekly optimizer, we simply filter to posts where sufficient time has passed since publish. No separate observation pipeline needed.
 
 ```typescript
-const OBSERVATION_HOURS: Record<Platform, number> = {
+// src/lib/optimizer/constants.ts
+export const METRICS_MATURE_HOURS: Record<Platform, number> = {
   TWITTER: 24,
   FACEBOOK: 24,
   INSTAGRAM: 72,
@@ -118,609 +149,359 @@ const OBSERVATION_HOURS: Record<Platform, number> = {
 };
 ```
 
-### Data Model Changes
-
-**Prerequisite:** The Business/ContentStrategy/BusinessMember models from M1 (Blotato workspace) must be merged first. The current `staging` branch already has these. This migration MUST NOT be applied against the pre-M1 schema.
-
-```prisma
-// --- New enum ---
-
-enum ArmDimension {
-  FORMAT
-}
-// Start with FORMAT only. Add TOPIC, TONE, CTA, LENGTH when data proves need.
-// Using an enum (not string) matches existing codebase convention (Platform, PostStatus).
-
-enum ObservationStatus {
-  PENDING
-  MATURED
-}
-// Simplified: no FAILED state. If metrics missing, just skip and retry next hour.
-
-// --- New models ---
-
-model ContentArm {
-  id          String       @id @default(cuid())
-  businessId  String
-  dimension   ArmDimension
-  value       String       // e.g. "text", "image", "video_talking_head"
-  platform    Platform
-  alpha       Float        @default(1.0)
-  beta        Float        @default(1.0)
-  totalPulls  Int          @default(0)
-  lastDecayAt DateTime     @default(now())
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  business    Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  posts       Post[]
-
-  @@unique([businessId, dimension, value, platform])
-  @@index([businessId, platform])
-}
-
-model PostObservation {
-  id           String            @id @default(cuid())
-  postId       String            @unique
-  businessId   String
-  status       ObservationStatus @default(PENDING)
-  matureAt     DateTime
-  reward       Float?
-  rawMetrics   Json?             // snapshot of metrics at observation time
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  post         Post              @relation(fields: [postId], references: [id], onDelete: Cascade)
-  business     Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  armLinks     PostObservationArm[]
-
-  @@index([status, matureAt])
-  @@index([businessId, createdAt])
-}
-
-// Join table replacing armSelections Json blob (Data Integrity Guardian recommendation)
-model PostObservationArm {
-  id            String          @id @default(cuid())
-  observationId String
-  contentArmId  String
-  dimension     ArmDimension
-  observation   PostObservation @relation(fields: [observationId], references: [id], onDelete: Cascade)
-  contentArm    ContentArm      @relation(fields: [contentArmId], references: [id], onDelete: Cascade)
-
-  @@unique([observationId, dimension])
-  @@index([contentArmId])
-}
-
-model StrategyDigest {
-  id          String   @id @default(cuid())
-  businessId  String
-  weekOf      DateTime
-  summary     String   @db.Text
-  changes     Json
-  createdAt   DateTime @default(now())
-  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-
-  @@unique([businessId, weekOf])  // Prevent duplicate digests per week
-}
-```
-
-**Post model additions:**
-```prisma
-model Post {
-  // ... existing fields
-  format       String?           // "text" | "image" | "video_talking_head" | etc.
-  armId        String?           // FK to primary arm selected
-  arm          ContentArm?       @relation(fields: [armId], references: [id], onDelete: SetNull)
-  observation  PostObservation?
-
-  @@index([armId])  // Needed for "all posts using arm X" queries
-}
-```
-
-**ContentStrategy additions:**
-```prisma
-model ContentStrategy {
-  // ... existing fields
-  postingCadence     Json?      // { TWITTER: 4, INSTAGRAM: 7, ... } posts/week
-  formatMix          Json?      // { "text": 0.2, "image": 0.3, "video_talking_head": 0.5 }
-  optimalTimeWindows Json?      // { TWITTER: ["09:00-11:00", "17:00-19:00"], ... }
-  lastOptimizedAt    DateTime?
-}
-```
-
-**Business model additions:**
-```prisma
-model Business {
-  // ... existing fields
-  contentArms     ContentArm[]
-  observations    PostObservation[]
-  strategyDigests StrategyDigest[]
-}
-```
-
-### Research Insight: JSON Field Validation (TypeScript Reviewer)
-
-All JSON fields MUST have Zod schemas for runtime validation. The project already uses Zod (`src/env.ts`). Never cast with `as SomeType`.
-
-```typescript
-// src/lib/bandit/schemas.ts
-import { z } from 'zod';
-
-export const RawMetricsSchema = z.object({
-  likes: z.number().int().nonnull(),
-  comments: z.number().int().nonnull(),
-  shares: z.number().int().nonnull(),
-  saves: z.number().int().nonnull(),
-  impressions: z.number().int().nullable(),
-  reach: z.number().int().nullable(),
-});
-
-export const StrategyChangesSchema = z.object({
-  formatMix: z.record(z.string(), z.number()).optional(),
-  postingCadence: z.record(z.string(), z.number()).optional(),
-  optimalTimeWindows: z.record(z.string(), z.array(z.string())).optional(),
-  newArms: z.array(z.object({ dimension: z.string(), value: z.string(), platform: z.string() })).optional(),
-});
-
-export const FormatMixSchema = z.record(z.string(), z.number());
-export const PostingCadenceSchema = z.record(z.string(), z.number());
-
-export type RawMetrics = z.infer<typeof RawMetricsSchema>;
-export type StrategyChanges = z.infer<typeof StrategyChangesSchema>;
-```
-
-### Research Insight: Branded Types for Reward (TypeScript Reviewer)
-
-```typescript
-type Reward = number & { readonly __brand: 'Reward' };
-
-function asReward(value: number): Reward {
-  return Math.max(0, Math.min(1, value)) as Reward;
-}
-```
-
-This prevents accidentally passing raw engagement counts where a [0,1] reward is expected. Zero runtime cost.
-
-### ERD
+### ERD (Additions Only)
 
 ```mermaid
 erDiagram
-    Business ||--o{ ContentArm : "has arms"
-    Business ||--o{ PostObservation : "has observations"
     Business ||--o{ StrategyDigest : "has digests"
     Business ||--|| ContentStrategy : "has strategy"
     Business ||--o{ Post : "has posts"
-    Post ||--o| PostObservation : "observed by"
-    Post }o--o| ContentArm : "selected arm"
-    PostObservation ||--o{ PostObservationArm : "arm links"
-    PostObservationArm }o--|| ContentArm : "references"
-
-    ContentArm {
-        string id PK
-        string businessId FK
-        enum dimension
-        string value
-        enum platform
-        float alpha
-        float beta
-        int totalPulls
-        datetime lastDecayAt
-    }
-
-    PostObservation {
-        string id PK
-        string postId FK
-        string businessId FK
-        enum status
-        datetime matureAt
-        float reward
-        json rawMetrics
-    }
-
-    PostObservationArm {
-        string id PK
-        string observationId FK
-        string contentArmId FK
-        enum dimension
-    }
+    Post }o--o| ContentBrief : "from brief"
 
     StrategyDigest {
         string id PK
         string businessId FK
         datetime weekOf
         text summary
+        json patterns
         json changes
+    }
+
+    Post {
+        string topicPillar "NEW nullable"
+        string tone "NEW nullable"
+    }
+
+    ContentStrategy {
+        json formatMix "NEW nullable"
+        json optimalTimeWindows "NEW nullable"
+        datetime lastOptimizedAt "NEW nullable"
     }
 ```
 
 ### Implementation Phases
 
-#### Phase 1: Bandit Engine + Schema (Core)
-
-**`src/lib/bandit/engine.ts`** -- Pure Thompson Sampling functions (zero dependencies)
-
-- [ ] `sampleBeta(alpha: number, beta: number): number` -- Beta distribution sample. Use `@stdlib/random-base-beta` or inline Marsaglia-Tsang (~20 lines). Do NOT use jStat (unmaintained since 2022, no TS types, 50KB).
-- [ ] `computeReward(metrics: RawMetrics, platform: Platform): Reward` -- Weighted composite: `likes*1 + comments*3 + shares*5 + saves*4`, divide by platform baseline, sigmoid-squash to [0,1], return as branded `Reward` type
-- [ ] `updatePosteriors(alpha: number, beta: number, reward: Reward): { alpha: number; beta: number }` -- Bernoulli update: `alpha += reward, beta += (1 - reward)`. Pure function, returns new values.
-- [ ] `decayPosteriors(alpha: number, beta: number, gamma: number, observationsSinceDecay: number): { alpha: number; beta: number }` -- Multiply by `gamma^n`, floor at 1.0. Pure function.
-- [ ] `PLATFORM_BASELINES` -- Static per-platform engagement baselines (hardcoded constants, no adaptive baseline yet)
-- [ ] `OBSERVATION_HOURS` -- Per-platform observation windows based on half-life research
-
-### Research Insight: Beta Sampling Without jStat
-
-**jStat is unmaintained** (last update Nov 2022), has no TypeScript types, and is 50KB minified for a single function call. Three better options:
-
-1. **`@stdlib/random-base-beta`** (recommended) -- Individual npm package, TypeScript types, actively maintained. Usage: `import beta from '@stdlib/random-base-beta'; const sample = beta(alpha, betaParam);`
-
-2. **Inline implementation** (~20 lines) -- Beta(a,b) = Gamma(a) / (Gamma(a) + Gamma(b)). Gamma sampling via Marsaglia-Tsang method:
-
-```typescript
-function sampleGamma(shape: number): number {
-  if (shape < 1) return sampleGamma(shape + 1) * Math.pow(Math.random(), 1 / shape);
-  const d = shape - 1/3, c = 1 / Math.sqrt(9 * d);
-  while (true) {
-    let x: number, v: number;
-    do { x = randn(); v = 1 + c * x; } while (v <= 0);
-    v = v * v * v;
-    const u = Math.random();
-    if (u < 1 - 0.0331 * x * x * x * x) return d * v;
-    if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
-  }
-}
-
-function sampleBeta(alpha: number, beta: number): number {
-  const x = sampleGamma(alpha);
-  const y = sampleGamma(beta);
-  return x / (x + y);
-}
-```
-
-3. **`jstat-esm`** -- ES module version with tree-shaking (~18KB gzipped). Fallback if stdlib doesn't work.
-
-**`src/lib/bandit/selection.ts`** -- DB-calling orchestrator
-
-- [ ] `selectArmForPost(businessId: string, platform: Platform): Promise<ContentArm>` -- Fetch all FORMAT arms for business+platform, apply lazy decay, sample each, return winner. Single dimension for now.
-- [ ] `recordArmSelection(postId: string, observationId: string, armId: string, dimension: ArmDimension): Promise<void>` -- Create PostObservationArm join record
-
-**`src/lib/bandit/schemas.ts`** -- Zod schemas for JSON fields
-
-- [ ] `RawMetricsSchema`, `StrategyChangesSchema`, `FormatMixSchema` (as shown above)
+#### Phase 1: Schema + Post Tagging
 
 **Prisma migration:**
-- [ ] Create `ArmDimension` enum (FORMAT only)
-- [ ] Create `ObservationStatus` enum (PENDING, MATURED)
-- [ ] Create `ContentArm` model with proper FK to Business
-- [ ] Create `PostObservation` model with FK to Post and Business
-- [ ] Create `PostObservationArm` join table with FKs
-- [ ] Create `StrategyDigest` model with `@@unique([businessId, weekOf])`
-- [ ] Add `format`, `armId` (FK to ContentArm, onDelete: SetNull) to `Post`
-- [ ] Add `@@index([armId])` to Post
-- [ ] Add JSON fields to `ContentStrategy` (postingCadence, formatMix, optimalTimeWindows, lastOptimizedAt)
-- [ ] Add relations to `Business`
+- [x] Add `topicPillar` (String?) and `tone` (String?) to `Post`
+- [x] Add `formatMix` (Json?), `optimalTimeWindows` (Json?), `lastOptimizedAt` (DateTime?) to `ContentStrategy`
+- [x] Create `StrategyDigest` model with `@@unique([businessId, weekOf])`
+- [x] Add `strategyDigests` relation to `Business`
 
-**Tests (`src/__tests__/lib/bandit/engine.test.ts`):**
-- [ ] `sampleBeta` returns values in [0, 1]
-- [ ] `sampleBeta` with high alpha returns higher values than low alpha (statistical test over N samples)
-- [ ] `computeReward` returns ~0.5 for baseline engagement, >0.5 for above-baseline
-- [ ] `computeReward` normalizes differently per platform (Twitter baseline vs YouTube baseline)
-- [ ] `computeReward` returns value in [0, 1] for any input (including zeros, huge numbers, NaN protection)
-- [ ] `updatePosteriors` correctly increments: alpha += reward, beta += (1 - reward)
-- [ ] `decayPosteriors` multiplies by gamma^n, floors at 1.0
-- [ ] `decayPosteriors` with 0 observations returns unchanged values
+**Zod schemas (`src/lib/optimizer/schemas.ts`):**
+- [x] `FormatMixSchema` — `z.record(z.nativeEnum(BriefFormat), z.number().min(0).max(1))`
+- [x] `TimeWindowsSchema` — `z.record(z.nativeEnum(Platform), z.array(z.string()))`
+- [x] `PatternsSchema` — validated shape for StrategyDigest.patterns
+- [x] `ChangesSchema` — validated shape for StrategyDigest.changes
 
-#### Phase 2: Observation Pipeline
+**Post tagging in brief fulfillment:**
+- [x] When a ContentBrief is fulfilled and creates a Post, copy `recommendedFormat` -> determine `topicPillar` from brief topic (match to `ContentStrategy.contentPillars`)
+- [ ] Set `tone` based on brief content guidance or default to "mixed" (deferred — tone tagging requires more complex NLP)
+- [x] For manually created posts (no brief), leave tags nullable — optimizer handles sparse data
 
-**`src/cron/observe.ts`** -- Thin EventBridge Lambda handler (follows existing pattern)
+**Tests (`src/__tests__/lib/optimizer/schemas.test.ts`):**
+- [x] FormatMixSchema validates correct shapes, rejects invalid
+- [x] ChangesSchema validates guardrail bounds
+- [x] PatternsSchema validates expected structure
 
-- [ ] Export single `handler` async function
-- [ ] Delegate to `runObservationProcessing()` in `src/lib/bandit/selection.ts`
-- [ ] No business logic, no Prisma imports in the cron file itself
+#### Phase 2: Performance Analysis Engine
 
-**`src/lib/bandit/selection.ts` -- `runObservationProcessing()`:**
+**`src/lib/optimizer/analyze.ts`** — Pure functions, no DB calls
 
-- [ ] Batch query: fetch up to 50 PENDING observations where `matureAt <= now()`, JOIN with Post metrics in a single query (avoid N+1)
+- [x] `groupPostsByDimension(posts, dimension: 'format' | 'topicPillar' | 'tone' | 'platform')` — Groups posts and computes per-group engagement stats (avg likes, comments, shares, saves, engagement rate)
+- [x] `computeEngagementRate(post)` — Weighted composite: `likes*1 + comments*3 + shares*5 + saves*4`, normalized by platform baseline. Returns a simple number, not a branded type.
+- [x] `identifyTopPerformers(posts, n: number)` — Returns top N posts by engagement rate with their tags
+- [x] `identifyBottomPerformers(posts, n: number)` — Returns bottom N
+- [x] `computeFormatMix(posts)` — Current actual format distribution vs. target
+- [x] `isMetricsMature(post, now: Date)` — Check if enough time has passed per platform for metrics to be meaningful
 
-### Research Insight: Batch Query Pattern (Performance Oracle)
-
-The observation cron MUST NOT fetch posts and arms individually per observation. Use Prisma's `include` for batch fetching:
-
+**Platform baselines** (static constants, updated manually as we get real data):
 ```typescript
-const observations = await prisma.postObservation.findMany({
-  where: { status: 'PENDING', matureAt: { lte: now } },
-  take: 50,
-  orderBy: { matureAt: 'asc' },
-  include: {
-    post: { select: { metricsLikes: true, metricsComments: true, metricsShares: true,
-                       metricsSaves: true, metricsUpdatedAt: true, publishedAt: true } },
-    armLinks: { include: { contentArm: true } },
-  },
-});
-
-// Batch-fetch all arms for affected businesses (one query, not N)
-const businessIds = [...new Set(observations.map(o => o.businessId))];
-const allArms = await prisma.contentArm.findMany({
-  where: { businessId: { in: businessIds } },
-});
+// Baseline engagement per post for normalization
+const PLATFORM_BASELINES: Record<Platform, { likes: number; comments: number; shares: number; saves: number }> = {
+  TWITTER:   { likes: 50,  comments: 10, shares: 15,  saves: 5 },
+  INSTAGRAM: { likes: 200, comments: 30, shares: 20,  saves: 40 },
+  FACEBOOK:  { likes: 100, comments: 20, shares: 25,  saves: 10 },
+  TIKTOK:    { likes: 500, comments: 50, shares: 100, saves: 80 },
+  YOUTUBE:   { likes: 100, comments: 30, shares: 10,  saves: 20 },
+};
 ```
 
-This reduces the query count from ~150 (N+1 pattern) to 2 regardless of batch size.
+**Tests (`src/__tests__/lib/optimizer/analyze.test.ts`):**
+- [x] `groupPostsByDimension` groups correctly, computes averages
+- [x] `computeEngagementRate` returns higher scores for above-baseline engagement
+- [x] `computeEngagementRate` handles zero/null metrics gracefully
+- [x] `identifyTopPerformers` returns correct top N by score
+- [x] `computeFormatMix` returns percentage distribution
+- [x] `isMetricsMature` respects per-platform windows
 
-- [ ] **Race condition guard:** Skip observations where `post.metricsUpdatedAt` is null or older than `post.publishedAt`. This means the metrics cron hasn't fetched post-publish metrics yet. The observation stays PENDING and will be picked up next hour.
-- [ ] For each valid observation: compute reward via `computeReward()`, update arm posteriors via `updatePosteriors()`, apply decay if stale
-- [ ] Update arms atomically: use Prisma `updateMany` or individual updates within a transaction
-- [ ] Mark observation as `MATURED` with reward + rawMetrics snapshot (validated by `RawMetricsSchema`)
-- [ ] Idempotency: atomic `WHERE status = 'PENDING'` ensures no double-processing
+#### Phase 3: Claude Weekly Optimizer
 
-**`src/lib/scheduler.ts` integration:**
-- [ ] After successful publish: create `PostObservation` with `matureAt = publishedAt + OBSERVATION_HOURS[platform] * 3600000`
-- [ ] Create `PostObservationArm` join records for each dimension's selected arm
+**`src/lib/ai/index.ts` — Add `analyzePerformance()` function:**
 
-**SST config (`sst.config.ts`):**
-- [ ] Add EventBridge cron for observe.ts (`rate(1 hour)`)
-- [ ] Lambda handler: `src/cron/observe.handler`
-- [ ] Concurrency: 1 (matches existing cron pattern)
-
-**Tests (`src/__tests__/lib/bandit/selection.test.ts`):**
-- [ ] Processes only PENDING observations past matureAt
-- [ ] Skips observations where metricsUpdatedAt < publishedAt (no fresh metrics)
-- [ ] Updates arm posteriors correctly (alpha/beta changed)
-- [ ] Applies decay when lastDecayAt is stale
-- [ ] Idempotent: MATURED observations not re-processed
-- [ ] Caps at 50 per run
-- [ ] Batch-fetches posts and arms (mock Prisma to verify query count)
-
-#### Phase 3: Arm Seeding + Selection Integration
-
-**Wire bandit into content brief generation:**
-
-- [ ] When generating a content brief, call `selectArmForPost(businessId, platform)` to pick format
-- [ ] Set `Post.format` and `Post.armId` on post creation
-- [ ] Exploration: if `totalPulls` sum for all arms < 30, use `Math.random() < 0.4` to randomly select instead of TS
-
-**Seed initial arms on workspace creation:**
-- [ ] When `ContentStrategy` is created (onboarding), auto-create default `ContentArm` records per platform
-- [ ] Default FORMAT arms: `text`, `image`, `video` (keep it simple -- 3 arms, not 6 video subtypes)
-- [ ] Use uniform priors: alpha=1, beta=1 (uninformative). Industry priors are premature with zero data about what works for your users.
-- [ ] Platform-specific: skip `video` arm for platforms that don't support it
-
-### Research Insight: Cold Start Simplification (Simplicity Reviewer)
-
-Industry-specific priors (`getIndustryPriors`) are **inventing data you don't have**. With zero businesses and zero empirical evidence about what priors work, uninformative Beta(1,1) priors are the honest choice. They let the bandit learn from real data without baked-in assumptions. Add industry priors later when you have data from 10+ businesses to derive them empirically.
-
-**Tests:**
-- [ ] Arm selection returns a ContentArm of dimension FORMAT
-- [ ] Exploration mode (< 30 total pulls) uses random 40% of the time
-- [ ] Default arms created per platform (3 format arms each)
-- [ ] No video arm for platforms without video support
-
-#### Phase 4: Claude Meta-Optimizer
-
-**`src/lib/ai/index.ts` -- Add `analyzeStrategyPerformance()` function:**
-
-- [ ] Follows existing pattern: pure function, accepts data, returns typed result, no DB access
-- [ ] Uses existing module-scope `client` singleton (do NOT create new Anthropic client)
-- [ ] Uses same model `"claude-sonnet-4-6"`
-
-**`src/cron/meta-optimize.ts`** -- Thin EventBridge Lambda handler (weekly, Sunday 2am UTC)
-
-- [ ] Export single `handler` async function
-- [ ] Delegate to `runMetaOptimization()` in a lib file
-
-**`src/lib/bandit/optimizer.ts` -- `runMetaOptimization()`:**
-
-- [ ] For each active business with >10 MATURED observations in last 30 days:
-  - Fetch last 30 days of matured observations with rewards
-  - Fetch current arm posteriors (with win rates)
-  - Fetch current ContentStrategy
-  - Call `analyzeStrategyPerformance()` in `src/lib/ai/index.ts`
-  - Validate response with `StrategyChangesSchema.parse()` (Zod)
-  - Apply changes within guardrails
-  - Create `StrategyDigest` record
-- [ ] Skip businesses with insufficient data (<10 observations)
-
-### Research Insight: Claude Structured Output (Framework Docs Researcher)
-
-Use `tool_use` for reliable JSON parsing. Define the response schema as a tool:
+- [x] Uses existing module-scope `client` singleton (do NOT create new Anthropic client)
+- [x] Uses same model `"claude-sonnet-4-6"`
+- [x] Accepts: posts with metrics + tags, current ContentStrategy, current format mix
+- [x] Returns: structured response with patterns, suggested changes, plain-language digest
+- [x] Uses `tool_use` for reliable structured output (matches existing pattern)
 
 ```typescript
-const response = await client.messages.create({
-  model: "claude-sonnet-4-6",
-  max_tokens: 2048,
-  tools: [{
-    name: "update_strategy",
-    description: "Update content strategy based on performance analysis",
-    input_schema: {
-      type: "object",
-      properties: {
-        patterns: { type: "array", items: { type: "string" }, maxItems: 5 },
-        formatMixChanges: {
-          type: "object",
-          additionalProperties: { type: "number", minimum: -0.2, maximum: 0.2 }
+// Added to src/lib/ai/index.ts
+export async function analyzePerformance(input: {
+  posts: PerformancePost[];       // last 30 days, with tags and metrics
+  strategy: ContentStrategyData;  // current strategy
+  currentFormatMix: Record<string, number>; // actual distribution
+  platform: Platform;
+}): Promise<PerformanceAnalysis> {
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 2048,
+    tools: [{
+      name: "update_strategy",
+      description: "Analyze performance and suggest strategy updates",
+      input_schema: {
+        type: "object",
+        properties: {
+          patterns: {
+            type: "array",
+            items: { type: "string" },
+            description: "3-5 key performance patterns observed",
+            maxItems: 5,
+          },
+          formatMixChanges: {
+            type: "object",
+            description: "Suggested format mix adjustments (deltas, e.g. { 'VIDEO': 0.1, 'TEXT': -0.1 })",
+            additionalProperties: { type: "number", minimum: -0.2, maximum: 0.2 },
+          },
+          cadenceChanges: {
+            type: "object",
+            description: "Suggested posting frequency changes per platform (deltas, e.g. { 'TWITTER': 1 })",
+            additionalProperties: { type: "integer", minimum: -2, maximum: 2 },
+          },
+          topicInsights: {
+            type: "array",
+            items: { type: "string" },
+            description: "Which content pillars to lean into or pull back from",
+          },
+          digest: {
+            type: "string",
+            description: "Plain-language weekly summary for the partner (2-3 paragraphs)",
+            maxLength: 1000,
+          },
         },
-        cadenceChanges: {
-          type: "object",
-          additionalProperties: { type: "integer", minimum: -2, maximum: 2 }
-        },
-        digest: { type: "string", maxLength: 500 },
+        required: ["patterns", "digest"],
       },
-      required: ["patterns", "digest"],
-    },
-  }],
-  tool_choice: { type: "tool", name: "update_strategy" },
-  messages: [{ role: "user", content: prompt }],
-});
-```
+    }],
+    tool_choice: { type: "tool", name: "update_strategy" },
+    messages: [{ role: "user", content: buildPerformancePrompt(input) }],
+  });
 
-### Research Insight: Validate Claude Output (Security Sentinel)
-
-Claude's response MUST be validated before persisting. Even with `tool_use`, the model can return unexpected values. Apply the Zod schema AND enforce guardrails:
-
-```typescript
-const toolResult = extractToolUseResult(response);
-const parsed = StrategyChangesSchema.parse(toolResult); // Zod validation
-
-// Guardrails: cap format mix changes
-if (parsed.formatMix) {
-  for (const [key, delta] of Object.entries(parsed.formatMix)) {
-    parsed.formatMix[key] = Math.max(-0.2, Math.min(0.2, delta));
-  }
+  const toolResult = extractToolUseResult(response);
+  return PerformanceAnalysisSchema.parse(toolResult); // Zod validation
 }
 ```
 
+**`src/lib/optimizer/run.ts` — `runWeeklyOptimization()`:**
+
+- [x] For each active business with >10 PUBLISHED posts with mature metrics in last 30 days:
+  - Fetch posts with metrics, format (via ContentBrief), topicPillar, tone
+  - Compute performance stats via `analyze.ts` functions
+  - Call `analyzePerformance()` in `src/lib/ai/index.ts`
+  - Validate response with Zod
+  - Apply changes within guardrails
+  - Update ContentStrategy
+  - Create StrategyDigest record
+- [x] Skip businesses with insufficient data (<10 mature posts)
+
+**`src/cron/optimize.ts`** — Thin EventBridge Lambda handler
+
+- [x] Export single `handler` async function
+- [x] Delegate to `runWeeklyOptimization()` — no business logic in cron file
+- [x] Follows existing cron pattern (`publish.ts`, `metrics.ts`)
+
 **Guardrails:**
-- [ ] Cap format mix changes at +/- 20% per week
-- [ ] Cap cadence changes at +/- 2 posts/week per platform
-- [ ] Require minimum 10 observations before any strategy changes
-- [ ] Log all changes in StrategyDigest.changes JSON for auditability
+- [x] Cap format mix changes at +/- 20% per week
+- [x] Cap cadence changes at +/- 2 posts/week per platform
+- [x] Require minimum 10 posts with mature metrics before any strategy changes
+- [x] All Claude responses validated with Zod before persisting
+- [x] Log all changes in StrategyDigest.changes JSON for auditability
 
-**SST config:**
-- [ ] Add EventBridge cron for meta-optimize.ts (weekly, `cron(0 2 ? * SUN *)`)
-- [ ] Lambda handler: `src/cron/meta-optimize.handler`
-- [ ] Timeout: 300s (Claude calls may be slow)
-- [ ] Concurrency: 1
+**SST config (`sst.config.ts`):**
+- [x] Add EventBridge cron for optimize.ts (weekly, `cron(0 2 ? * SUN *)`)
+- [x] Lambda handler: `src/cron/optimize.handler`
+- [x] Timeout: 300s (Claude calls may be slow)
+- [x] Concurrency: 1 (matches existing cron pattern)
 
-**Tests (`src/__tests__/lib/bandit/optimizer.test.ts`):**
-- [ ] Skips businesses with <10 observations
-- [ ] Calls Claude with correct prompt structure
-- [ ] Validates response with Zod (rejects invalid shapes)
-- [ ] Applies guardrails: caps format mix at 20%, cadence at +/-2
-- [ ] Creates StrategyDigest record with @@unique enforced
-- [ ] Handles Claude API failure gracefully (logs, doesn't crash, strategy unchanged)
+**Tests (`src/__tests__/lib/optimizer/run.test.ts`):**
+- [x] Skips businesses with <10 mature posts
+- [x] Calls Claude with correct prompt structure including performance data
+- [x] Validates response with Zod (rejects invalid shapes)
+- [x] Applies guardrails: caps format mix at 20%, cadence at +/-2
+- [x] Creates StrategyDigest with @@unique enforced
+- [x] Handles Claude API failure gracefully (logs, doesn't crash, strategy unchanged)
+- [ ] Does not double-create digest for same business+week (enforced by @@unique constraint at DB level)
 
-#### Phase 5: Reward Normalization
+**Tests (`src/__tests__/cron/optimize.test.ts`):**
+- [x] Handler delegates to runWeeklyOptimization
+- [x] Follows thin-handler pattern (no business logic)
 
-**`src/lib/bandit/engine.ts` -- platform normalization:**
+#### Phase 4: Wire Into Brief Generation
 
-- [ ] Define static per-platform baseline engagement rates:
-  ```ts
-  const PLATFORM_BASELINES: Record<Platform, RawMetrics> = {
-    TWITTER:   { likes: 50,  comments: 10, shares: 15,  saves: 5,  impressions: null, reach: null },
-    INSTAGRAM: { likes: 200, comments: 30, shares: 20,  saves: 40, impressions: null, reach: null },
-    FACEBOOK:  { likes: 100, comments: 20, shares: 25,  saves: 10, impressions: null, reach: null },
-    TIKTOK:    { likes: 500, comments: 50, shares: 100, saves: 80, impressions: null, reach: null },
-    YOUTUBE:   { likes: 100, comments: 30, shares: 10,  saves: 20, impressions: null, reach: null },
+**Update brief generation to use learned strategy:**
+
+- [x] When generating weekly ContentBriefs, read `ContentStrategy.formatMix` to weight format selection
+- [ ] If formatMix is null (pre-optimization), use platform defaults:
+  ```typescript
+  const DEFAULT_FORMAT_MIX: Record<Platform, Record<BriefFormat, number>> = {
+    TWITTER:   { TEXT: 0.6, IMAGE: 0.3, VIDEO: 0.1, CAROUSEL: 0 },
+    INSTAGRAM: { TEXT: 0, IMAGE: 0.3, VIDEO: 0.5, CAROUSEL: 0.2 },
+    FACEBOOK:  { TEXT: 0.3, IMAGE: 0.3, VIDEO: 0.3, CAROUSEL: 0.1 },
+    TIKTOK:    { TEXT: 0, IMAGE: 0, VIDEO: 1.0, CAROUSEL: 0 },
+    YOUTUBE:   { TEXT: 0, IMAGE: 0, VIDEO: 1.0, CAROUSEL: 0 },
   };
   ```
-- [ ] Normalize: divide each metric by platform baseline, then apply weights, then sigmoid
-- [ ] Sigmoid: `reward = 1 / (1 + exp(-compositeScore))` centered at 0 (baseline engagement = reward ~0.5)
-- [ ] NaN/Infinity protection: clamp all intermediate values, return 0.5 for missing metrics
+- [x] Pass format mix + recent top performers to Claude during brief generation for context
+- [ ] Include `optimalTimeWindows` in scheduling if set (deferred — requires schedule slot logic changes)
 
 **Tests:**
-- [ ] Same raw metrics produce different rewards on different platforms
-- [ ] Sigmoid output is always in [0, 1] (fuzz test with random inputs)
-- [ ] Zero metrics -> reward < 0.5 (below baseline)
-- [ ] Baseline metrics -> reward ~0.5
-- [ ] 10x baseline -> reward > 0.8
+- [x] Brief generation uses formatMix when available
+- [x] Brief generation falls back to platform defaults when formatMix is null
+- [ ] Format distribution roughly matches target mix (statistical test over N briefs) — requires integration test with live Claude
 
-### What's Deferred (Simplicity Reviewer recommendations)
+#### Phase 5: Strategy Digest Display
 
-These items are explicitly cut from M3 scope and tracked for future work:
+**Simple UI to surface digests:**
+
+- [x] API endpoint: `GET /api/businesses/[businessId]/digests` — returns last 4 digests
+- [ ] Dashboard widget showing latest digest summary (UI — separate task)
+- [ ] Link to full digest history (UI — separate task)
+- [x] Business membership auth required (`assertBusinessMembership`)
+
+**Tests:**
+- [x] API returns 401 for unauthenticated
+- [x] API returns 403 for non-members
+- [x] API returns digests ordered by weekOf desc
+- [x] API caps at 4 results
+
+### What's Deferred
 
 | Deferred Item | Reason | When to Add |
 |---------------|--------|-------------|
-| Multi-dimension bandits (topic, tone, CTA, length) | One dimension (format) is enough to prove the system works | When format optimization plateaus |
-| Transfer learning between businesses | Zero businesses exist; leaks competitive intelligence | When 10+ businesses have 50+ posts each |
-| Adaptive baselines (workspace median after 50 posts) | Premature optimization for a pre-launch product | When a workspace actually reaches 50 posts |
-| Industry-specific priors | Inventing data we don't have | When we have empirical data from multiple industries |
-| Analytics API endpoints (/api/analytics/*) | No UI to consume them yet | When building the analytics dashboard |
-| LinThompson (contextual bandit) | Requires 500+ posts per workspace | When any workspace reaches that threshold |
-| Per-platform observation windows for YouTube (7 days) | Start with a simpler 72h uniform window, add platform-specific later | After first YouTube data comes in |
+| Thompson Sampling / MABs | Insufficient volume (3-5 posts/week), massive confounders, no industry tool uses this for organic content | Never (unless managing 100+ accounts with high volume) |
+| Multi-armed bandits | Same as above | Never for this use case |
+| Automated A/B testing | At 5 posts/week, manual observation is faster and accounts for context | When a workspace posts 5+ times/day |
+| Transfer learning between businesses | Zero businesses exist; privacy concerns | When 10+ businesses have 50+ posts each |
+| Adaptive baselines | Premature for pre-launch product | When a workspace reaches 100+ posts |
+| Analytics API endpoints (full dashboard) | No UI to consume them yet | M4 with client portal |
+| Notification of digest via email | SES integration exists but digest email template not built | After validating digest quality |
 
 ## System-Wide Impact
 
 ### Interaction Graph
-- Post publish (`scheduler.ts`) -> creates PostObservation + PostObservationArm -> observation cron matures it -> updates ContentArm posteriors
-- Weekly meta-optimize cron -> reads observations + arms -> calls Claude (via `src/lib/ai/index.ts`) -> updates ContentStrategy -> brief generation reads updated strategy
-- New workspace onboarding -> creates ContentArm records (FORMAT arms seeded per platform)
+- Post publish (scheduler.ts) -> metrics cron collects engagement (existing) -> weekly optimize cron reads metrics -> calls Claude -> updates ContentStrategy -> next brief generation reads updated strategy
+- New workspace onboarding -> ContentStrategy created (existing) -> optimizer starts running after 10+ posts publish
 
 ### Error Propagation
-- Observation cron failure: observations stay PENDING, retried next hour. No data loss.
-- Meta-optimizer Claude failure: strategy stays unchanged, logged, retried next week. StrategyDigest not created.
-- Invalid reward computation (NaN/Infinity): clamp to [0, 1], log warning. Branded `Reward` type prevents accidental misuse.
-- PostObservation creation failure after publish: post is published but untracked. This is acceptable -- the post works fine, it just won't contribute to learning. Log the error.
+- Optimize cron failure: strategy stays unchanged, retried next week. No data loss.
+- Claude API failure: strategy unchanged, logged, StrategyDigest not created. Next week tries again.
+- Invalid Claude response: Zod validation rejects it, strategy unchanged, error logged.
+- Missing metrics on posts: `isMetricsMature()` filters them out. Optimizer works with whatever data is available.
 
 ### State Lifecycle Risks
-- **Double observation processing:** Mitigated by atomic status update (`WHERE status = 'PENDING'`) and UNIQUE constraint on postId. (Data Integrity Guardian: confirmed safe)
-- **Arm posterior corruption:** Decay floors at 1.0 (enforced in `decayPosteriors`). Use gamma=0.998 per observation, not 0.95/week.
-- **Orphaned observations:** Cascade delete on Post -> PostObservation handles this.
-- **Dangling armId on Post:** `onDelete: SetNull` on the FK -- if an arm is retired, post keeps its data but arm reference is cleared.
 - **Duplicate StrategyDigest:** `@@unique([businessId, weekOf])` prevents duplicate weekly digests even if cron fires twice.
+- **Stale strategy:** If optimizer fails for multiple weeks, strategy remains at last good state. No degradation.
+- **Null tags on posts:** `topicPillar` and `tone` are nullable. Optimizer groups "untagged" posts separately and still extracts useful patterns from format + platform data.
 
-### Security Considerations (Security Sentinel)
-
-- **Business membership auth:** All analytics endpoints (when built) MUST call `assertBusinessMembership(session, businessId)` helper. Do not accept businessId as raw query param without ownership verification.
-- **Claude output validation:** All meta-optimizer responses validated with Zod before persisting. Guardrails cap all numeric changes.
-- **No cross-business data leakage:** Transfer learning is deferred. All queries scoped to single businessId.
-- **JSON field injection:** rawMetrics and changes are system-generated, not user input. Zod validation adds defense-in-depth.
+### Security Considerations
+- **Business membership auth:** Digest API endpoint MUST call `assertBusinessMembership(session, businessId)`.
+- **Claude output validation:** All optimizer responses validated with Zod before persisting. Guardrails cap all numeric changes.
+- **No cross-business data leakage:** All queries scoped to single businessId.
 
 ### Integration Test Scenarios
-1. Full loop: publish post -> create observation -> wait (mock clock) -> run observe cron -> verify arm posteriors updated
-2. Cold start: create workspace -> verify 3 FORMAT arms seeded per platform with Beta(1,1)
-3. Meta-optimizer: seed 15 observations -> run weekly cron -> verify ContentStrategy updated within guardrails
-4. Decay: seed arms with old lastDecayAt -> run observation -> verify decay applied before update
-5. Duplicate protection: process same observation twice -> verify arm updated only once
-6. Missing metrics: observation matures but metricsUpdatedAt is null -> verify observation stays PENDING
+1. Full loop: publish 15 posts across 2 formats -> run metrics cron -> run optimize cron -> verify ContentStrategy.formatMix updated and StrategyDigest created
+2. Insufficient data: business with 5 posts -> run optimize cron -> verify no changes, no digest
+3. Guardrails: mock Claude returning extreme changes -> verify caps applied
+4. Digest dedup: run optimize cron twice for same week -> verify only one digest
+5. Sparse tags: posts with null topicPillar/tone -> verify optimizer still runs with available data
 
 ## Acceptance Criteria
 
 ### Functional Requirements
-- [ ] Posts create PostObservation records on publish with platform-appropriate maturity window
-- [ ] Hourly observation cron processes mature observations and updates arm posteriors
-- [ ] Thompson Sampling selects FORMAT arm for new posts
-- [ ] 40% exploration rate for workspaces with <30 total arm pulls
-- [ ] Posterior decay (gamma=0.998) applied per observation
-- [ ] Claude meta-optimizer runs weekly, updates ContentStrategy, creates StrategyDigest
+- [ ] Published posts tagged with topicPillar and tone (from brief or manual entry)
+- [ ] Weekly optimization cron analyzes 30 days of mature post data
+- [ ] Claude identifies patterns and suggests strategy adjustments
 - [ ] Guardrails cap strategy changes (20% format mix, +/-2 cadence per week)
-- [ ] FORMAT arms seeded on workspace creation (text, image, video per platform)
+- [ ] ContentStrategy updated with formatMix, optimalTimeWindows, lastOptimizedAt
+- [ ] StrategyDigest created with plain-language summary
+- [ ] Brief generation reads learned formatMix and adjusts format selection
+- [ ] Digest API endpoint with business membership auth
+- [ ] Minimum 10 mature posts required before optimizer runs
 
 ### Non-Functional Requirements
-- [ ] Observation cron processes up to 50 observations per run in 2 queries (no N+1)
-- [ ] Meta-optimizer Lambda timeout set to 300s
-- [ ] All crons have concurrency: 1
-- [ ] Beta sampling dependency adds <5KB to bundle (stdlib or inline)
-- [ ] All JSON fields validated with Zod schemas on read
+- [ ] Optimize cron Lambda timeout: 300s
+- [ ] Optimize cron concurrency: 1
+- [ ] All JSON fields validated with Zod schemas
+- [ ] No new npm dependencies (Claude SDK already installed, Zod already installed)
 
 ### Quality Gates
-- [ ] Unit tests for bandit/engine.ts: sampling, reward computation, decay, posteriors
-- [ ] Unit tests for bandit/selection.ts: batch fetching, race condition guard, idempotency
-- [ ] Unit tests for bandit/optimizer.ts: guardrails, Zod validation, Claude failure handling
-- [ ] Integration test: full publish -> observe -> update loop
+- [ ] Unit tests for analyze.ts: grouping, scoring, top/bottom performers
+- [ ] Unit tests for run.ts: guardrails, Zod validation, Claude failure handling
+- [ ] Unit tests for optimize cron: thin handler pattern
+- [ ] Integration test: full publish -> optimize -> strategy update loop
 - [ ] Coverage stays above 75% thresholds
 
 ## Dependencies & Risks
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| M1 (Blotato/workspace) not merged yet | Can't apply migration -- no Business model | Sequence: merge M1 PR first, then start M3 |
-| Insufficient post volume for learning | Arms stay near Beta(1,1), no optimization | Exploration phase + 3 format arms keeps it simple |
-| Claude meta-optimizer hallucinates bad strategy | Engagement drops | Zod validation + guardrails cap changes + StrategyDigest audit trail |
-| Metrics cron hasn't run when observation matures | Reward computed on stale/zero metrics | Race condition guard: skip if metricsUpdatedAt < publishedAt |
-| Posterior decay too aggressive | Forgets good strategies | gamma=0.998 (effective window ~500 observations); floor at 1.0 |
-| @stdlib/random-base-beta unavailable or broken | Can't sample Beta distribution | Fallback: inline Marsaglia-Tsang implementation (~20 lines) |
+| M1 (Blotato/workspace) not merged yet | Can't apply migration — no Business model | Sequence: merge M1 PR first, then start M3 |
+| Insufficient post volume for patterns | Claude has sparse data, weak insights | Minimum 10 posts threshold; Claude prompted to be honest about confidence |
+| Claude optimizer hallucinates bad strategy | Engagement drops | Zod validation + guardrails cap changes + StrategyDigest audit trail |
+| Metrics cron hasn't run for older posts | Missing engagement data | `isMetricsMature()` filters out posts without fresh metrics |
+| Platform baseline constants are wrong | Skewed engagement scores | Start with conservative estimates, update quarterly from real data |
 
 ## Success Metrics
 
-- After 4 weeks per workspace: measurable shift in arm posteriors (top arm alpha/beta ratio > 2:1)
-- Meta-optimizer produces actionable weekly digests (not generic filler)
-- FORMAT dimension shows differentiation (not all arms converging to same value)
-- Exploration rate naturally decreases as posteriors strengthen
+- After 4 weeks per workspace: ContentStrategy has been updated at least 2x with specific, non-generic insights
+- Weekly digests contain actionable patterns (not "post more often" filler)
+- Format mix in generated briefs reflects learned preferences
+- Partner can see clear connection between post performance and strategy shifts
+
+## Comparison: This Plan vs. Thompson Sampling
+
+| Aspect | Thompson Sampling (old plan) | AI Pattern Recognition (this plan) |
+|--------|------------------------------|-------------------------------------|
+| New models | 4 (ContentArm, PostObservation, PostObservationArm, StrategyDigest) | 1 (StrategyDigest) |
+| New fields | 8+ across Post, ContentStrategy, Business | 5 (2 on Post, 3 on ContentStrategy) |
+| New crons | 2 (observe hourly, meta-optimize weekly) | 1 (optimize weekly) |
+| New dependencies | @stdlib/random-base-beta or inline implementation | None |
+| Lines of code (est.) | ~800-1000 (bandit engine + selection + observation + optimizer) | ~300-400 (analyze + optimizer + cron) |
+| Time to value | 30+ weeks for arm convergence | First useful digest after 2-3 weeks |
+| Handles confounders | No (treats each format as independent arm) | Yes (Claude reasons about context) |
+| Works at low volume | Poorly (needs 50-200 obs per arm) | Well (Claude can spot patterns in 10-20 posts) |
 
 ## Sources & References
 
 ### Origin
-- **Brainstorm document:** [docs/brainstorms/2026-03-07-autonomous-ai-social-media-manager-brainstorm.md](docs/brainstorms/2026-03-07-autonomous-ai-social-media-manager-brainstorm.md) -- Key decisions carried forward: Thompson Sampling over UCB/epsilon-greedy, observation windows, composite reward function, Claude as weekly meta-optimizer
+- **Brainstorm document:** [docs/brainstorms/2026-03-07-autonomous-ai-social-media-manager-brainstorm.md](docs/brainstorms/2026-03-07-autonomous-ai-social-media-manager-brainstorm.md) — Key decisions carried forward: observation windows, composite reward weighting, Claude as weekly meta-optimizer. Thompson Sampling replaced with simpler approach after industry research.
+
+### Industry Research (informing the pivot away from bandits)
+- Buffer 2026 State of Social Media Engagement (52M+ posts): consistency > optimization
+- No major SMM tool (Buffer, Hootsuite, Sprout Social, Later) uses MABs for organic content
+- MABs used in ads/email (Braze, Unbounce) where volume is 1000x higher
+- Thompson Sampling needs 50-200+ observations per arm to converge (Russo et al. 2018)
+- At 3-5 posts/week, convergence takes 30 weeks to 4 years
 
 ### Internal References
-- Existing metrics refresh pattern: `src/cron/metrics.ts` (50-post batch, oldest-stale-first)
-- Existing scheduler pattern: `src/cron/publish.ts` (EventBridge cron, concurrency: 1)
-- AI generation: `src/lib/ai/index.ts` (Claude integration pattern -- meta-optimizer function goes here)
-- ContentStrategy model: `prisma/schema.prisma:84-97`
-- Post engagement fields: `prisma/schema.prisma:134-140`
-- Cron handler pattern: thin export, delegate to lib (Pattern Recognition Specialist)
+- Existing metrics cron pattern: `src/cron/metrics.ts` (50-post batch, hourly)
+- Existing scheduler pattern: `src/cron/publish.ts` (EventBridge, concurrency: 1)
+- AI generation: `src/lib/ai/index.ts` (Claude integration — optimizer function goes here)
+- ContentStrategy model: `prisma/schema.prisma`
+- ContentBrief model: `prisma/schema.prisma` (already has recommendedFormat)
+- Post engagement fields: `prisma/schema.prisma`
 
 ### External References
-- Social media engagement half-lives: [Graffius 2026](https://www.scottgraffius.com/blog/files/lifespan-halflife-of-social-media-posts-update-2026.html) -- 5.6M+ posts analyzed
-- Thompson Sampling tutorial: [Russo et al. 2018](https://arxiv.org/abs/1707.02038)
-- Discounted Thompson Sampling: [Qi 2023](https://arxiv.org/abs/2305.10718)
-- Non-stationary bandits: [Trovo et al. 2024](https://arxiv.org/abs/2409.05181)
-- `@stdlib/random-base-beta`: [npm](https://www.npmjs.com/package/@stdlib/random-base-beta)
-- jStat (not recommended): [GitHub](https://github.com/jstat/jstat) -- last updated Nov 2022, no TS types
-- Thompson Sampling in social media: [TDS article](https://towardsdatascience.com/thompson-sampling-in-social-media-marketing-97d1892b125f/)
+- Social media engagement half-lives: Graffius 2026 (5.6M+ posts)
+- Buffer 2026 creator growth playbook: consistency, replies, format selection
+- Sprout Social 2024 content strategy report: edutainment, topic focus

@@ -26,7 +26,11 @@ export async function POST(
 
   const brief = await prisma.contentBrief.findUnique({
     where: { id },
-    select: { id: true, businessId: true, status: true, scheduledFor: true, platform: true },
+    select: {
+      id: true, businessId: true, status: true, scheduledFor: true, platform: true,
+      topic: true, recommendedFormat: true,
+      business: { select: { contentStrategy: { select: { contentPillars: true } } } },
+    },
   });
 
   if (!brief) {
@@ -85,6 +89,15 @@ export async function POST(
     );
   }
 
+  // Derive topic pillar from brief topic by matching against strategy pillars
+  const pillars = brief.business?.contentStrategy?.contentPillars ?? [];
+  const topicLower = brief.topic?.toLowerCase() ?? "";
+  const matchedPillar = topicLower
+    ? (pillars.find((p: string) =>
+        topicLower.includes(p.toLowerCase()) || p.toLowerCase().includes(topicLower)
+      ) ?? null)
+    : null;
+
   // Create post + update brief in a transaction
   const [post] = await prisma.$transaction([
     prisma.post.create({
@@ -96,6 +109,7 @@ export async function POST(
         status: "SCHEDULED",
         scheduledAt: scheduledAt ? new Date(scheduledAt) : brief.scheduledFor,
         briefId: brief.id,
+        topicPillar: matchedPillar,
       },
     }),
     prisma.contentBrief.update({
