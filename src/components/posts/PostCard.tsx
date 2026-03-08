@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Trash2, Loader2, Calendar, CheckCircle2, XCircle, FileText, Pencil, RefreshCw, Heart, MessageCircle, Repeat2, Eye, Bookmark, TrendingUp } from "lucide-react";
+import { Trash2, Loader2, Calendar, CheckCircle2, XCircle, FileText, Pencil, RefreshCw, Heart, MessageCircle, Repeat2, Eye, Bookmark, TrendingUp, Copy } from "lucide-react";
 import type { PostStatus, Platform } from "@/types";
 
 const STATUS_CONFIG: Record<PostStatus, { label: string; icon: React.ElementType; className: string }> = {
@@ -109,29 +110,53 @@ interface PostCardProps {
 }
 
 export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isRetrying, setIsRetrying] = useState(false);
+  const router = useRouter();
+  const [activeOp, setActiveOp] = useState<"idle" | "deleting" | "retrying" | "repurposing">("idle");
+  const isBusy = activeOp !== "idle";
+  const repurposeInFlight = useRef(false);
   const statusConfig = STATUS_CONFIG[post.status];
   const StatusIcon = statusConfig.icon;
   const platformColor = PLATFORM_COLOR[post.socialAccount.platform];
   const PlatformIcon = PLATFORM_ICONS[post.socialAccount.platform];
 
   async function handleDelete() {
-    setIsDeleting(true);
+    if (isBusy) return;
+    setActiveOp("deleting");
     try {
       await onDelete(post.id);
     } finally {
-      setIsDeleting(false);
+      setActiveOp("idle");
     }
   }
 
   async function handleRetry() {
-    if (!onRetry) return;
-    setIsRetrying(true);
+    if (!onRetry || isBusy) return;
+    setActiveOp("retrying");
     try {
       await onRetry(post.id);
     } finally {
-      setIsRetrying(false);
+      setActiveOp("idle");
+    }
+  }
+
+  async function handleRepurpose() {
+    if (repurposeInFlight.current || isBusy) return;
+    repurposeInFlight.current = true;
+    setActiveOp("repurposing");
+    try {
+      const res = await fetch("/api/posts/repurpose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceContent: post.content }),
+      });
+      if (!res.ok) return;
+      const { repurposeGroupId } = await res.json();
+      router.push(`/dashboard/posts/repurpose/${repurposeGroupId}`);
+    } catch {
+      // silently fail
+    } finally {
+      setActiveOp("idle");
+      repurposeInFlight.current = false;
     }
   }
 
@@ -213,16 +238,32 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
             </Button>
           )}
 
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-zinc-600 hover:text-violet-400 hover:bg-violet-950/50"
+            onClick={handleRepurpose}
+            disabled={isBusy}
+            aria-label="Repurpose to all platforms"
+            title="Repurpose to all platforms"
+          >
+            {activeOp === "repurposing" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Copy className="h-4 w-4" />
+            )}
+          </Button>
+
           {canRetry && (
             <Button
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-zinc-600 hover:text-amber-400 hover:bg-amber-950/50"
               onClick={handleRetry}
-              disabled={isRetrying}
+              disabled={isBusy}
               aria-label="Retry post"
             >
-              {isRetrying ? (
+              {activeOp === "retrying" ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <RefreshCw className="h-4 w-4" />
@@ -235,10 +276,10 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
             size="icon"
             className="h-8 w-8 text-zinc-600 hover:text-red-400 hover:bg-red-950/50"
             onClick={handleDelete}
-            disabled={isDeleting}
+            disabled={isBusy}
             aria-label="Delete post"
           >
-            {isDeleting ? (
+            {activeOp === "deleting" ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Trash2 className="h-4 w-4" />

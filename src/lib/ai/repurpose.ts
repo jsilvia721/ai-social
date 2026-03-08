@@ -171,15 +171,17 @@ Call generate_platform_variants with the results.`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
-      system: systemPrompt,
-      tools: [generateVariantsTool],
-      tool_choice: { type: "tool", name: "generate_platform_variants" },
-      messages: [{ role: "user", content: userMessage }],
-      signal: controller.signal,
-    });
+    const response = await client.messages.create(
+      {
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools: [generateVariantsTool],
+        tool_choice: { type: "tool", name: "generate_platform_variants" },
+        messages: [{ role: "user", content: userMessage }],
+      },
+      { signal: controller.signal },
+    );
 
     const toolUse = response.content.find((b) => b.type === "tool_use");
     if (!toolUse || toolUse.type !== "tool_use") {
