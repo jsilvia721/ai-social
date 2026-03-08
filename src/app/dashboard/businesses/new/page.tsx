@@ -44,6 +44,7 @@ export default function NewBusinessPage() {
       });
       await update({ activeBusinessId: business.id });
 
+      router.refresh();
       router.push(`/dashboard/businesses/${business.id}/onboard`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create workspace.");
