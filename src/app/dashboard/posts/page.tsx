@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PostCard } from "@/components/posts/PostCard";
@@ -32,6 +33,10 @@ interface Post {
 }
 
 export default function PostsPage() {
+  const { data: session } = useSession();
+  const activeBusinessId = (session?.user as { id: string; activeBusinessId?: string | null } | undefined)
+    ?.activeBusinessId;
+
   const [view, setView] = useState<"list" | "calendar">("list");
   const [calMode, setCalMode] = useState<"month" | "week">("month");
   const [activeTab, setActiveTab] = useState<PostStatus | "ALL">("ALL");
@@ -54,29 +59,34 @@ export default function PostsPage() {
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
-    const url = activeTab === "ALL" ? "/api/posts" : `/api/posts?status=${activeTab}`;
-    fetch(url).then(async (res) => {
+    const params = new URLSearchParams();
+    if (activeTab !== "ALL") params.set("status", activeTab);
+    if (activeBusinessId) params.set("businessId", activeBusinessId);
+    const query = params.toString();
+    fetch(`/api/posts${query ? `?${query}` : ""}`).then(async (res) => {
       if (res.ok && !cancelled) setPosts((await res.json()).posts);
       if (!cancelled) setIsLoading(false);
     }).catch(() => {
       if (!cancelled) setIsLoading(false);
     });
     return () => { cancelled = true; };
-  }, [view, activeTab]);
+  }, [view, activeTab, activeBusinessId]);
 
   useEffect(() => {
     if (view !== "calendar" || calMode !== "month") return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsCalLoading(true);
-    fetch(`/api/posts/calendar?year=${calYear}&month=${calMonth}`).then(async (res) => {
+    const params = new URLSearchParams({ year: String(calYear), month: String(calMonth) });
+    if (activeBusinessId) params.set("businessId", activeBusinessId);
+    fetch(`/api/posts/calendar?${params.toString()}`).then(async (res) => {
       if (res.ok && !cancelled) setCalPosts(await res.json());
       if (!cancelled) setIsCalLoading(false);
     }).catch(() => {
       if (!cancelled) setIsCalLoading(false);
     });
     return () => { cancelled = true; };
-  }, [view, calMode, calYear, calMonth]);
+  }, [view, calMode, calYear, calMonth, activeBusinessId]);
 
   useEffect(() => {
     if (view !== "calendar" || calMode !== "week") return;
@@ -86,16 +96,19 @@ export default function PostsPage() {
     const weekEnd = new Date(Date.UTC(
       weekStart.getUTCFullYear(), weekStart.getUTCMonth(), weekStart.getUTCDate() + 7
     ));
-    const startDate = weekStart.toISOString();
-    const endDate = weekEnd.toISOString();
-    fetch(`/api/posts/calendar?startDate=${startDate}&endDate=${endDate}`).then(async (res) => {
+    const params = new URLSearchParams({
+      startDate: weekStart.toISOString(),
+      endDate: weekEnd.toISOString(),
+    });
+    if (activeBusinessId) params.set("businessId", activeBusinessId);
+    fetch(`/api/posts/calendar?${params.toString()}`).then(async (res) => {
       if (res.ok && !cancelled) setWeekPosts(await res.json());
       if (!cancelled) setIsWeekLoading(false);
     }).catch(() => {
       if (!cancelled) setIsWeekLoading(false);
     });
     return () => { cancelled = true; };
-  }, [view, calMode, weekStart]);
+  }, [view, calMode, weekStart, activeBusinessId]);
 
   async function handleDelete(id: string) {
     const res = await fetch(`/api/posts?id=${id}`, { method: "DELETE" });
