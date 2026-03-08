@@ -29,11 +29,22 @@ jobs:
           DATABASE_URL: postgresql://test:test@localhost:5432/test
 
       - name: Check Prisma schema has matching migration
+        env:
+          GH_EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
-          # If schema.prisma changed vs base branch, a new migration must also be present
-          BASE_REF="${GITHUB_BASE_REF:-main}"
-          git fetch origin "$BASE_REF" --depth=1 2>/dev/null || true
-          CHANGED=$(git diff --name-only "origin/$BASE_REF"...HEAD 2>/dev/null || git diff --name-only HEAD~1)
+          # If schema.prisma changed, a new migration must also be present
+          if [ "$GH_EVENT" = "pull_request" ] && [ -n "$BASE_SHA" ]; then
+            git fetch origin "$BASE_SHA" --depth=1 2>/dev/null || true
+            CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
+          elif [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git fetch origin "$BEFORE_SHA" --depth=1 2>/dev/null || true
+            CHANGED=$(git diff --name-only "$BEFORE_SHA" HEAD)
+          else
+            echo "Schema/migration check skipped (no base ref available)"
+            exit 0
+          fi
           if echo "$CHANGED" | grep -q "prisma/schema.prisma"; then
             if ! echo "$CHANGED" | grep -q "prisma/migrations/"; then
               echo "::error::prisma/schema.prisma was modified but no new migration was added. Run: npx prisma migrate dev --name <name>"
