@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check } from "lucide-react";
+import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useState, useTransition } from "react";
@@ -21,6 +21,7 @@ const NAV_LINKS = [
   { icon: CalendarDays, label: "Posts", href: "/dashboard/posts" },
   { icon: PenSquare, label: "New Post", href: "/dashboard/posts/new" },
   { icon: BarChart2, label: "Analytics", href: "/dashboard/analytics" },
+  { icon: ClipboardList, label: "Content Queue", href: "/dashboard/briefs" },
   { icon: Link2, label: "Accounts", href: "/dashboard/accounts" },
 ] as const;
 

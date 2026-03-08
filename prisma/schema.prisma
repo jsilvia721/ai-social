@@ -60,14 +60,16 @@ model VerificationToken {
 // ── Business workspace models ─────────────────────────────────────────────────
 
 model Business {
-  id              String           @id @default(cuid())
-  name            String
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  members         BusinessMember[]
-  socialAccounts  SocialAccount[]
-  posts           Post[]
-  contentStrategy ContentStrategy?
+  id                String            @id @default(cuid())
+  name              String
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  members           BusinessMember[]
+  socialAccounts    SocialAccount[]
+  posts             Post[]
+  contentStrategy   ContentStrategy?
+  researchSummaries ResearchSummary[]
+  contentBriefs     ContentBrief[]
 }
 
 model BusinessMember {
@@ -92,6 +94,8 @@ model ContentStrategy {
   optimizationGoal    String
   reviewWindowEnabled Boolean  @default(false)
   reviewWindowHours   Int      @default(24)
+  postingCadence      Json?    // e.g., { "TWITTER": 5, "INSTAGRAM": 3 } — posts per platform per week
+  researchSources     Json?    // e.g., { rssFeeds: ["https://..."], subreddits: ["r/..."] }
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -132,6 +136,7 @@ model Post {
   reviewWindowExpiresAt DateTime?
   blotatoPostId         String?
   errorMessage          String?
+  briefId               String?
   metricsLikes          Int?
   metricsComments       Int?
   metricsShares         Int?
@@ -143,6 +148,7 @@ model Post {
   updatedAt             DateTime      @updatedAt
   business              Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
   socialAccount         SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  contentBrief          ContentBrief?
 
   @@index([status, scheduledAt])
   @@index([status, retryAt])
@@ -172,4 +178,57 @@ enum PostStatus {
 enum BusinessRole {
   OWNER
   MEMBER
+}
+
+// ── Content Intelligence (M2) ────────────────────────────────────────────────
+
+model ResearchSummary {
+  id                String   @id @default(cuid())
+  businessId        String
+  sourceItems       Json     // raw items from Google Trends, RSS, Reddit
+  synthesizedThemes String   @db.Text // Claude's thematic synthesis
+  sourcesUsed       String[] // ["google_trends", "rss", "reddit"]
+  createdAt         DateTime @default(now())
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+}
+
+model ContentBrief {
+  id                String      @id @default(cuid())
+  businessId        String
+  researchSummaryId String?
+  topic             String
+  rationale         String      @db.Text
+  suggestedCaption  String      @db.Text
+  aiImagePrompt     String?     @db.Text
+  contentGuidance   String?     @db.Text
+  recommendedFormat BriefFormat
+  platform          Platform
+  scheduledFor      DateTime
+  status            BriefStatus @default(PENDING)
+  weekOf            DateTime
+  sortOrder         Int         @default(0)
+  postId            String?     @unique
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  business          Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  post              Post?       @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, status])
+  @@index([status, weekOf])
+}
+
+enum BriefFormat {
+  TEXT
+  IMAGE
+  CAROUSEL
+  VIDEO
+}
+
+enum BriefStatus {
+  PENDING
+  FULFILLED
+  EXPIRED
+  CANCELLED
 }

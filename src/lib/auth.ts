@@ -25,7 +25,7 @@ export const authOptions: AuthOptions = {
           ? env.ADMIN_EMAILS.split(",").map((e) => e.trim().toLowerCase())
           : [];
         const shouldBeAdmin = adminEmails.includes((user.email ?? "").toLowerCase());
-        await prisma.user.update({ where: { id: user.id }, data: { isAdmin: shouldBeAdmin } });
+        await prisma.user.updateMany({ where: { id: user.id }, data: { isAdmin: shouldBeAdmin } });
       }
       return true;
     },
