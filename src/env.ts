@@ -8,7 +8,7 @@ const serverSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   ANTHROPIC_API_KEY: z.string().min(1),
   BLOTATO_API_KEY: z.string().min(1),
-  SES_FROM_EMAIL: z.string().email(),
+  SES_FROM_EMAIL: z.string().email().optional(),
   ALLOWED_EMAILS: z.string().min(1),
   // S3: optional in schema, injected by SST in deployed environments
   AWS_S3_BUCKET: z.string().optional(),

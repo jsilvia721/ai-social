@@ -27,7 +27,8 @@ export default $config({
       tokenEncryptionKey:  new sst.Secret("TokenEncryptionKey"),
       allowedEmails:       new sst.Secret("AllowedEmails"),
       blotatoApiKey:       new sst.Secret("BlotatoApiKey"),
-      sesFromEmail:        new sst.Secret("SesFromEmail"),
+      // SES_FROM_EMAIL: optional — only needed in production for failure alerts
+      sesFromEmail:        $app.stage === "production" ? new sst.Secret("SesFromEmail") : null,
     };
 
     // ── S3 Bucket ──────────────────────────────────────────────────
@@ -72,7 +73,10 @@ export default $config({
       TOKEN_ENCRYPTION_KEY:  secrets.tokenEncryptionKey.value,
       ALLOWED_EMAILS:        secrets.allowedEmails.value,
       BLOTATO_API_KEY:       secrets.blotatoApiKey.value,
-      SES_FROM_EMAIL:        secrets.sesFromEmail.value,
+      // Mock Blotato OAuth in non-production so a real API key isn't required
+      BLOTATO_MOCK:          $app.stage !== "production" ? "true" : "false",
+      // SES failure alerts: only wired up in production
+      ...(secrets.sesFromEmail ? { SES_FROM_EMAIL: secrets.sesFromEmail.value } : {}),
     };
 
     // ── Next.js App ───────────────────────────────────────────────

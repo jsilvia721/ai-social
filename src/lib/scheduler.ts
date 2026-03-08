@@ -50,6 +50,7 @@ async function sendFailureAlert(post: DuePost, errorMessage: string): Promise<vo
   try {
     const owner = post.business.members.find((m) => m.role === "OWNER");
     if (!owner) return;
+    if (!env.SES_FROM_EMAIL) return;
 
     const ses = new SESClient({ region: "us-east-1" });
     await ses.send(
