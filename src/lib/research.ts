@@ -289,7 +289,7 @@ export async function runResearchPipeline(
       await prisma.researchSummary.create({
         data: {
           businessId: workspace.id,
-          sourceItems: allItems as unknown as Record<string, unknown>[],
+          sourceItems: JSON.parse(JSON.stringify(allItems)),
           synthesizedThemes: JSON.stringify(synthesis),
           sourcesUsed,
         },
