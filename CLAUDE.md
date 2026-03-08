@@ -50,6 +50,12 @@ docker compose up -d db
 - **If stuck, re-plan** — don't keep pushing when something goes sideways
 - **Every `schema.prisma` change MUST have a migration** — run `npx prisma migrate dev --name <name>`, never just `npx prisma generate`. CI enforces this with `prisma migrate diff --exit-code`.
 
+### Branching & Worktrees
+- **Always branch from `staging`** — run `git fetch origin staging` then branch from `origin/staging`. PRs target `staging`, not `main`.
+- **Worktree creation** — use `git worktree add .claude/worktrees/<name> -b <branch> origin/staging` to create worktrees with the correct base in one step.
+- **Never stash across bases** — do not `git stash` on one branch and pop on a branch with a different base. This causes merge conflicts. Instead, commit WIP on the current branch, create a new branch from the correct base, and cherry-pick or re-apply changes.
+- **Verify before PR** — run `git merge-base --is-ancestor origin/staging HEAD` to confirm your branch descends from staging before pushing.
+
 ### Core Principles
 - **Simplicity first** — make every change as simple as possible, minimal code impact
 - **No laziness** — find root causes, no temporary fixes, senior developer standards
