@@ -26,6 +26,8 @@ export default $config({
       tiktokClientSecret:  new sst.Secret("TiktokClientSecret"),
       tokenEncryptionKey:  new sst.Secret("TokenEncryptionKey"),
       allowedEmails:       new sst.Secret("AllowedEmails"),
+      blotatoApiKey:       new sst.Secret("BlotatoApiKey"),
+      sesFromEmail:        new sst.Secret("SesFromEmail"),
     };
 
     // ── S3 Bucket ──────────────────────────────────────────────────
@@ -69,6 +71,8 @@ export default $config({
       TIKTOK_CLIENT_SECRET:  secrets.tiktokClientSecret.value,
       TOKEN_ENCRYPTION_KEY:  secrets.tokenEncryptionKey.value,
       ALLOWED_EMAILS:        secrets.allowedEmails.value,
+      BLOTATO_API_KEY:       secrets.blotatoApiKey.value,
+      SES_FROM_EMAIL:        secrets.sesFromEmail.value,
     };
 
     // ── Next.js App ───────────────────────────────────────────────
