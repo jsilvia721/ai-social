@@ -46,6 +46,9 @@ const STATUS_RING: Record<PostStatus, string> = {
   SCHEDULED: "ring-amber-500",
   PUBLISHED: "ring-emerald-500",
   FAILED: "ring-red-500",
+  PENDING_REVIEW: "ring-violet-500",
+  RETRYING: "ring-orange-500",
+  PUBLISHING: "ring-sky-500",
 };
 
 const START_HOUR = 6;

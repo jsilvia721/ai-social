@@ -70,8 +70,10 @@ describe("GET /api/posts/calendar", () => {
 
     await GET(makeRequest({ year: "2026", month: "2" })); // March
 
-    const call = prismaMock.post.findMany.mock.calls[0]?.[0] as { where: { userId: string; scheduledAt: { gte: Date; lt: Date } } };
-    expect(call.where.userId).toBe(mockSession.user.id);
+    const call = prismaMock.post.findMany.mock.calls[0]?.[0] as {
+      where: { business: { members: { some: { userId: string } } }; scheduledAt: { gte: Date; lt: Date } };
+    };
+    expect(call.where.business.members.some.userId).toBe(mockSession.user.id);
     expect(call.where.scheduledAt.gte).toEqual(new Date(Date.UTC(2026, 2, 1))); // Mar 1 UTC
     expect(call.where.scheduledAt.lt).toEqual(new Date(Date.UTC(2026, 3, 1)));  // Apr 1 UTC
   });

@@ -85,14 +85,9 @@ jobs:
       NEXTAUTH_SECRET: e2e-test-secret-at-least-32-chars-long
       GOOGLE_CLIENT_ID: e2e-google-client-id
       GOOGLE_CLIENT_SECRET: e2e-google-client-secret
-      TWITTER_CLIENT_ID: e2e-twitter-client-id
-      TWITTER_CLIENT_SECRET: e2e-twitter-client-secret
-      META_APP_ID: e2e-meta-app-id
-      META_APP_SECRET: e2e-meta-app-secret
       ANTHROPIC_API_KEY: e2e-anthropic-api-key
-      TIKTOK_CLIENT_ID: e2e-tiktok-client-id
-      TIKTOK_CLIENT_SECRET: e2e-tiktok-client-secret
-      TOKEN_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      BLOTATO_API_KEY: e2e-blotato-api-key
+      SES_FROM_EMAIL: noreply@example.com
       ALLOWED_EMAILS: test@example.com
       NODE_ENV: test
       AWS_S3_BUCKET: e2e-test-bucket

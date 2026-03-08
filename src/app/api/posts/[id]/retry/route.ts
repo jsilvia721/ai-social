@@ -14,7 +14,7 @@ export async function POST(_req: NextRequest, { params }: Params) {
   const { id } = await params;
 
   const post = await prisma.post.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, business: { members: { some: { userId: session.user.id } } } },
   });
 
   if (!post) {
@@ -33,8 +33,6 @@ export async function POST(_req: NextRequest, { params }: Params) {
     data: {
       status: "SCHEDULED",
       errorMessage: null,
-      // Keep existing scheduledAt — it's in the past so the scheduler
-      // picks it up immediately on the next tick
     },
   });
 

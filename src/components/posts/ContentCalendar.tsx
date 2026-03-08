@@ -45,8 +45,11 @@ const PLATFORM_DOT: Record<Platform, string> = {
 const STATUS_RING: Record<PostStatus, string> = {
   DRAFT: "ring-zinc-600",
   SCHEDULED: "ring-amber-500",
+  PUBLISHING: "ring-sky-500",
   PUBLISHED: "ring-emerald-500",
   FAILED: "ring-red-500",
+  PENDING_REVIEW: "ring-violet-500",
+  RETRYING: "ring-orange-500",
 };
 
 const MONTH_NAMES = [

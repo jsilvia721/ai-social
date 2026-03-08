@@ -63,31 +63,23 @@ const PLATFORM_ICONS: Record<Platform, React.ComponentType<{ className?: string 
   YOUTUBE: YouTubeIcon,
 };
 
-const CONNECT_URLS: Record<Platform, string> = {
-  TWITTER: "/api/connect/twitter",
-  INSTAGRAM: "/api/connect/meta",
-  FACEBOOK: "/api/connect/meta",
-  TIKTOK: "/api/connect/tiktok",
-  YOUTUBE: "/api/connect/youtube",
-};
-
 interface ConnectedAccount {
   id: string;
   username: string;
-  expiresAt: Date | null;
 }
 
 interface AccountCardProps {
   platform: Platform;
   account?: ConnectedAccount;
   onDisconnect: (id: string) => Promise<void>;
+  businessId: string;
 }
 
-export function AccountCard({ platform, account, onDisconnect }: AccountCardProps) {
+export function AccountCard({ platform, account, onDisconnect, businessId }: AccountCardProps) {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const styles = PLATFORM_STYLES[platform];
   const Icon = PLATFORM_ICONS[platform];
-  const connectUrl = CONNECT_URLS[platform];
+  const connectUrl = `/api/connect/blotato?platform=${platform}&businessId=${businessId}`;
 
   async function handleDisconnect() {
     if (!account) return;
@@ -114,8 +106,8 @@ export function AccountCard({ platform, account, onDisconnect }: AccountCardProp
           <>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-              <span className="text-sm text-zinc-300">@{account.username}</span>
-              <Badge variant="outline" className="ml-auto bg-emerald-900/30 text-emerald-400 border-emerald-800 text-xs">
+              <span className="text-sm text-zinc-300 truncate">@{account.username}</span>
+              <Badge variant="outline" className="ml-auto shrink-0 bg-emerald-900/30 text-emerald-400 border-emerald-800 text-xs">
                 Connected
               </Badge>
             </div>

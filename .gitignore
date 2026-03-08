@@ -50,6 +50,11 @@ next-env.d.ts
 # Playwright auth state (contains signed JWTs — never commit)
 /e2e/.auth/*
 !/e2e/.auth/.gitkeep
+.open-next/
+
+# Playwright artifacts
+playwright-report/
+test-results/
 
 # SST
 .sst/

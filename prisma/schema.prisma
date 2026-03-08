@@ -6,18 +6,20 @@ datasource db {
   provider = "postgresql"
 }
 
+// ── NextAuth models ───────────────────────────────────────────────────────────
+
 model User {
-  id             String          @id @default(cuid())
-  email          String          @unique
-  emailVerified  DateTime?
-  name           String?
-  image          String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  accounts       Account[]
-  sessions       Session[]
-  socialAccounts SocialAccount[]
-  posts          Post[]
+  id               String           @id @default(cuid())
+  email            String           @unique
+  emailVerified    DateTime?
+  name             String?
+  image            String?
+  activeBusinessId String?          // denormalized JWT cache — validated on session hydration
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  accounts         Account[]
+  sessions         Session[]
+  businesses       BusinessMember[]
 }
 
 model Account {
@@ -54,49 +56,99 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+// ── Business workspace models ─────────────────────────────────────────────────
+
+model Business {
+  id              String           @id @default(cuid())
+  name            String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  members         BusinessMember[]
+  socialAccounts  SocialAccount[]
+  posts           Post[]
+  contentStrategy ContentStrategy?
+}
+
+model BusinessMember {
+  id         String       @id @default(cuid())
+  businessId String
+  userId     String
+  role       BusinessRole @default(MEMBER)
+  joinedAt   DateTime     @default(now())
+  business   Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+}
+
+model ContentStrategy {
+  id                  String   @id @default(cuid())
+  businessId          String   @unique
+  industry            String
+  targetAudience      String
+  contentPillars      String[]
+  brandVoice          String   @db.Text
+  optimizationGoal    String
+  reviewWindowEnabled Boolean  @default(false)
+  reviewWindowHours   Int      @default(24)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// ── Social accounts & posts ───────────────────────────────────────────────────
+
 model SocialAccount {
-  id           String    @id @default(cuid())
-  userId       String
-  platform     Platform
-  platformId   String
-  username     String
-  accessToken  String    @db.Text
-  refreshToken String?   @db.Text
-  expiresAt    DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  posts        Post[]
+  id               String    @id @default(cuid())
+  businessId       String
+  platform         Platform
+  platformId       String
+  username         String
+  blotatoAccountId String
+  // Release 3: drop these columns once all code fully uses blotatoAccountId
+  accessToken      String?   @db.Text
+  refreshToken     String?   @db.Text
+  expiresAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  business         Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  posts            Post[]
 
   @@unique([platform, platformId])
 }
 
 model Post {
-  id              String        @id @default(cuid())
-  userId          String
-  socialAccountId String
-  content         String        @db.Text
-  mediaUrls       String[]
-  status          PostStatus    @default(DRAFT)
-  scheduledAt     DateTime?
-  publishedAt     DateTime?
-  platformPostId      String?
-  errorMessage        String?
-  metricsLikes        Int?
-  metricsComments     Int?
-  metricsShares       Int?
-  metricsImpressions  Int?
-  metricsReach        Int?
-  metricsSaves        Int?
-  metricsUpdatedAt    DateTime?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  socialAccount   SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  id                    String        @id @default(cuid())
+  businessId            String
+  socialAccountId       String
+  content               String        @db.Text
+  mediaUrls             String[]
+  status                PostStatus    @default(DRAFT)
+  retryCount            Int           @default(0)
+  retryAt               DateTime?
+  scheduledAt           DateTime?
+  publishedAt           DateTime?
+  reviewWindowExpiresAt DateTime?
+  blotatoPostId         String?
+  errorMessage          String?
+  metricsLikes          Int?
+  metricsComments       Int?
+  metricsShares         Int?
+  metricsImpressions    Int?
+  metricsReach          Int?
+  metricsSaves          Int?
+  metricsUpdatedAt      DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  business              Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  socialAccount         SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
 
-  @@index([userId, status, scheduledAt])
-  @@index([userId, scheduledAt])
+  @@index([status, scheduledAt])
+  @@index([status, retryAt])
+  @@index([status, metricsUpdatedAt])
 }
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
 
 enum Platform {
   TWITTER
@@ -111,4 +163,12 @@ enum PostStatus {
   SCHEDULED
   PUBLISHED
   FAILED
+  PENDING_REVIEW
+  RETRYING
+  PUBLISHING
+}
+
+enum BusinessRole {
+  OWNER
+  MEMBER
 }

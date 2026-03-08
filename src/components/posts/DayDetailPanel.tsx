@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import Link from "next/link";
-import { X, PenSquare, Calendar, CheckCircle2, XCircle, FileText } from "lucide-react";
+import { X, PenSquare, Calendar, CheckCircle2, XCircle, FileText, Clock, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Platform, PostStatus } from "@/types";
@@ -12,6 +12,9 @@ const STATUS_CONFIG: Record<PostStatus, { label: string; icon: React.ElementType
   SCHEDULED: { label: "Scheduled", icon: Calendar, className: "bg-amber-900/50 text-amber-400 border-amber-800" },
   PUBLISHED: { label: "Published", icon: CheckCircle2, className: "bg-emerald-900/50 text-emerald-400 border-emerald-800" },
   FAILED: { label: "Failed", icon: XCircle, className: "bg-red-900/50 text-red-400 border-red-800" },
+  PENDING_REVIEW: { label: "Pending Review", icon: Clock, className: "bg-violet-900/50 text-violet-400 border-violet-800" },
+  RETRYING: { label: "Retrying", icon: RefreshCw, className: "bg-orange-900/50 text-orange-400 border-orange-800" },
+  PUBLISHING: { label: "Publishing", icon: Loader2, className: "bg-sky-900/50 text-sky-400 border-sky-800" },
 };
 
 const PLATFORM_DOT: Record<Platform, string> = {

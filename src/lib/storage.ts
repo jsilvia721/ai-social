@@ -1,12 +1,13 @@
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { env } from "@/env";
 
-// In Lambda, credentials come from the IAM role linked by SST.
-// Locally, credentials come from ~/.aws/credentials or env vars.
-const s3 = new S3Client({ region: "us-east-1" });
+// In Lambda, credentials come from the IAM execution role — no static keys needed.
+// Locally, set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION in .env.local.
+const s3 = new S3Client({ region: process.env.AWS_REGION ?? "us-east-1" });
 
-const BUCKET = process.env.AWS_S3_BUCKET!;
-const PUBLIC_URL = process.env.AWS_S3_PUBLIC_URL!.replace(/\/$/, "");
+const bucket = env.AWS_S3_BUCKET ?? "ai-social-dev";
+const publicBase = env.AWS_S3_PUBLIC_URL ?? "http://localhost:9000/ai-social-dev";
 
 export async function uploadFile(
   file: File,
@@ -16,17 +17,18 @@ export async function uploadFile(
   const bytes = await file.arrayBuffer();
   await s3.send(
     new PutObjectCommand({
-      Bucket: BUCKET,
+      Bucket: bucket,
       Key: key,
       Body: Buffer.from(bytes),
       ContentType: mimeType,
     })
   );
-  return `${PUBLIC_URL}/${key}`;
+  return getPublicUrl(key);
 }
 
 export function getPublicUrl(key: string): string {
-  return `${PUBLIC_URL}/${key}`;
+  const base = publicBase.endsWith("/") ? publicBase.slice(0, -1) : publicBase;
+  return `${base}/${key}`;
 }
 
 export async function getPresignedUploadUrl(
@@ -36,7 +38,7 @@ export async function getPresignedUploadUrl(
   expiresInSeconds = 3600
 ): Promise<string> {
   const command = new PutObjectCommand({
-    Bucket: BUCKET,
+    Bucket: bucket,
     Key: key,
     ContentType: mimeType,
     ...(contentLength !== undefined && { ContentLength: contentLength }),

@@ -1,6 +1,6 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { assertSafeMediaUrl } from "@/lib/platforms/ssrf-guard";
+import { assertSafeMediaUrl } from "@/lib/blotato/ssrf-guard";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -15,7 +15,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
 
   const post = await prisma.post.findFirst({
-    where: { id, userId: session.user.id },
+    where: { id, business: { members: { some: { userId: session.user.id } } } },
   });
 
   if (!post) {

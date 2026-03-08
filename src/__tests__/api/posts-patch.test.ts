@@ -32,7 +32,7 @@ describe("PATCH /api/posts/[id]", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 404 when post not found or belongs to another user", async () => {
+  it("returns 404 when post not found or user is not a member of the business", async () => {
     mockAuthenticated();
     prismaMock.post.findFirst.mockResolvedValue(null);
 
@@ -41,7 +41,10 @@ describe("PATCH /api/posts/[id]", () => {
     expect(res.status).toBe(404);
     expect(prismaMock.post.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: "post-1", userId: mockSession.user.id }),
+        where: expect.objectContaining({
+          id: "post-1",
+          business: { members: { some: { userId: mockSession.user.id } } },
+        }),
       })
     );
   });

@@ -26,8 +26,10 @@ export default async function AnalyticsPage() {
 
   const userId = session.user.id;
 
+  const memberFilter = { business: { members: { some: { userId } } } };
+
   const posts = await prisma.post.findMany({
-    where: { userId, status: "PUBLISHED" },
+    where: { ...memberFilter, status: "PUBLISHED" },
     include: { socialAccount: { select: { platform: true, username: true } } },
     orderBy: { publishedAt: "desc" },
   });

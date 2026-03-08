@@ -1,91 +1,376 @@
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
-jest.mock("@/lib/token", () => ({ ensureValidToken: jest.fn() }));
-jest.mock("@/lib/analytics/fetchers", () => ({
-  fetchTwitterMetrics: jest.fn(),
-  fetchFacebookMetrics: jest.fn(),
-  fetchInstagramMetrics: jest.fn(),
-  fetchTikTokMetrics: jest.fn(),
-  fetchYouTubeMetrics: jest.fn(),
-}));
-// Platform publishers are mocked so the module loads without side effects.
-jest.mock("@/lib/platforms/twitter", () => ({ publishTweet: jest.fn() }));
-jest.mock("@/lib/platforms/instagram", () => ({ publishInstagramPost: jest.fn() }));
-jest.mock("@/lib/platforms/facebook", () => ({ publishFacebookPost: jest.fn() }));
-jest.mock("@/lib/platforms/tiktok", () => ({ publishTikTokVideo: jest.fn() }));
-jest.mock("@/lib/platforms/youtube", () => ({ publishYouTubeVideo: jest.fn() }));
+jest.mock("@/lib/blotato/publish");
+jest.mock("@aws-sdk/client-ses");
 
-import { runMetricsRefresh } from "@/lib/scheduler";
-import { ensureValidToken } from "@/lib/token";
-import {
-  fetchTwitterMetrics,
-  fetchFacebookMetrics,
-  fetchInstagramMetrics,
-} from "@/lib/analytics/fetchers";
+import { runScheduler, runMetricsRefresh } from "@/lib/scheduler";
+import { publishPost } from "@/lib/blotato/publish";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
-const mockEnsureValidToken = ensureValidToken as jest.Mock;
-const mockFetchTwitterMetrics = fetchTwitterMetrics as jest.Mock;
-const mockFetchFacebookMetrics = fetchFacebookMetrics as jest.Mock;
-const mockFetchInstagramMetrics = fetchInstagramMetrics as jest.Mock;
+const mockPublishPost = publishPost as jest.MockedFunction<typeof publishPost>;
+const mockSendEmailCommand = SendEmailCommand as jest.MockedClass<typeof SendEmailCommand>;
+const mockSESClient = SESClient as jest.MockedClass<typeof SESClient>;
 
-// ── fixtures ─────────────────────────────────────────────────────────────────
-
-const METRICS = {
-  metricsLikes: 10,
-  metricsComments: 3,
-  metricsShares: 2,
-  metricsImpressions: 500,
-  metricsReach: null,
-  metricsSaves: null,
-  metricsUpdatedAt: new Date(),
+// Shared test data
+const mockSocialAccount = {
+  id: "sa-1",
+  businessId: "biz-1",
+  platform: "TWITTER" as const,
+  platformId: "tw-123",
+  username: "@acme",
+  blotatoAccountId: "blotato-acct-1",
+  accessToken: null,
+  refreshToken: null,
+  expiresAt: null,
+  createdAt: new Date(),
+  updatedAt: new Date(),
 };
 
-function makeSocialAccount(platform: "TWITTER" | "INSTAGRAM" | "FACEBOOK" = "TWITTER") {
-  return {
-    id: "account-1",
-    platform,
-    platformId: "platform-user-id",
-    accessToken: "access-token",
-    refreshToken: null,
-    expiresAt: null,
-  };
-}
+const mockOwnerUser = {
+  id: "user-1",
+  email: "owner@example.com",
+  emailVerified: null,
+  name: "Owner",
+  image: null,
+  activeBusinessId: "biz-1",
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
 
-function makePost(
-  overrides: { id?: string; platform?: "TWITTER" | "INSTAGRAM" | "FACEBOOK" } = {}
-) {
-  const { id = "post-1", platform = "TWITTER" } = overrides;
+const mockOwnerMember = {
+  id: "mem-1",
+  businessId: "biz-1",
+  userId: "user-1",
+  role: "OWNER" as const,
+  joinedAt: new Date(),
+  user: mockOwnerUser,
+};
+
+const mockBusiness = {
+  id: "biz-1",
+  name: "Acme Corp",
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  members: [mockOwnerMember],
+};
+
+function makePost(overrides?: Partial<{
+  id: string;
+  status: string;
+  retryCount: number;
+  retryAt: Date | null;
+  scheduledAt: Date | null;
+  errorMessage: string | null;
+}>) {
+  const now = new Date();
   return {
-    id,
-    platformPostId: `platform-${id}`,
+    id: "post-1",
+    businessId: "biz-1",
+    socialAccountId: "sa-1",
+    content: "Hello world",
+    mediaUrls: [],
+    status: "SCHEDULED",
+    retryCount: 0,
+    retryAt: null,
+    scheduledAt: new Date(now.getTime() - 60_000), // 1 min ago
+    publishedAt: null,
+    reviewWindowExpiresAt: null,
+    blotatoPostId: null,
+    errorMessage: null,
+    metricsLikes: null,
+    metricsComments: null,
+    metricsShares: null,
+    metricsImpressions: null,
+    metricsReach: null,
+    metricsSaves: null,
     metricsUpdatedAt: null,
-    socialAccount: makeSocialAccount(platform),
+    createdAt: now,
+    updatedAt: now,
+    socialAccount: mockSocialAccount,
+    business: mockBusiness,
+    ...overrides,
   };
 }
-
-// ── setup ────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
   resetPrismaMock();
   jest.clearAllMocks();
-  mockEnsureValidToken.mockImplementation((account: { accessToken: string }) =>
-    Promise.resolve(account.accessToken)
-  );
+
+  // Default: SES send succeeds
+  const mockSend = jest.fn().mockResolvedValue({});
+  mockSESClient.mockImplementation(() => ({ send: mockSend }) as unknown as SESClient);
+});
+
+// ── runScheduler ──────────────────────────────────────────────────────────────
+
+describe("runScheduler", () => {
+  it("does nothing when no due posts exist", async () => {
+    prismaMock.post.findMany.mockResolvedValue([]);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await runScheduler();
+
+    expect(result.processed).toBe(0);
+    // Stuck-post recovery always fires but should not publish anything
+    expect(mockPublishPost).not.toHaveBeenCalled();
+    // No per-post atomic claim should be made
+    expect(prismaMock.post.update).not.toHaveBeenCalled();
+  });
+
+  it("publishes a due SCHEDULED post and marks it PUBLISHED", async () => {
+    const post = makePost({ status: "SCHEDULED" });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    // Atomic claim succeeds (count: 1)
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockResolvedValue({ blotatoPostId: "blotato-post-abc" });
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    const result = await runScheduler();
+
+    expect(result.processed).toBe(1);
+    expect(prismaMock.post.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "post-1", status: { in: ["SCHEDULED", "RETRYING"] } },
+        data: { status: "PUBLISHING" },
+      })
+    );
+    expect(mockPublishPost).toHaveBeenCalledWith(
+      "blotato-acct-1",
+      "Hello world",
+      []
+    );
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "post-1" },
+        data: expect.objectContaining({
+          status: "PUBLISHED",
+          blotatoPostId: "blotato-post-abc",
+          retryCount: 0,
+          retryAt: null,
+        }),
+      })
+    );
+  });
+
+  it("picks up RETRYING posts whose retryAt has passed", async () => {
+    const post = makePost({
+      status: "RETRYING",
+      retryCount: 1,
+      retryAt: new Date(Date.now() - 1000), // already past
+    });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockResolvedValue({ blotatoPostId: "blotato-post-xyz" });
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            expect.objectContaining({ status: "RETRYING" }),
+          ]),
+        }),
+      })
+    );
+    expect(mockPublishPost).toHaveBeenCalled();
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "PUBLISHED" }),
+      })
+    );
+  });
+
+  it("skips a post when atomic claim returns count=0 (another invocation won the race)", async () => {
+    const post = makePost({ status: "SCHEDULED" });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    // Claim fails — another lambda claimed it first
+    prismaMock.post.updateMany.mockResolvedValue({ count: 0 });
+
+    await runScheduler();
+
+    expect(mockPublishPost).not.toHaveBeenCalled();
+    expect(prismaMock.post.update).not.toHaveBeenCalled();
+  });
+
+  it("sets post to RETRYING with jitter delay on first publish failure", async () => {
+    const post = makePost({ status: "SCHEDULED", retryCount: 0 });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockRejectedValue(new Error("Network error"));
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "post-1" },
+        data: expect.objectContaining({
+          status: "RETRYING",
+          retryCount: 1,
+          retryAt: expect.any(Date),
+          errorMessage: "Network error",
+        }),
+      })
+    );
+    // Should NOT send SES alert on first failure
+    expect(mockSendEmailCommand).not.toHaveBeenCalled();
+  });
+
+  it("sets post to RETRYING on second failure", async () => {
+    const post = makePost({ status: "RETRYING", retryCount: 1 });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockRejectedValue(new Error("Timeout"));
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "RETRYING", retryCount: 2 }),
+      })
+    );
+    expect(mockSendEmailCommand).not.toHaveBeenCalled();
+  });
+
+  it("sets post to FAILED and sends SES alert on third failure", async () => {
+    const post = makePost({ status: "RETRYING", retryCount: 2 });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockRejectedValue(new Error("Blotato down"));
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          errorMessage: "Blotato down",
+        }),
+      })
+    );
+    // SES alert should be sent
+    expect(mockSendEmailCommand).toHaveBeenCalled();
+  });
+
+  it("does NOT retry on 4xx non-429 errors (client errors are permanent)", async () => {
+    const { BlotatoApiError } = await import("@/lib/blotato/client");
+    const post = makePost({ status: "SCHEDULED", retryCount: 0 });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockRejectedValue(new BlotatoApiError("Invalid account", 404));
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    // Should go straight to FAILED, skip retry
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "FAILED" }),
+      })
+    );
+  });
+
+  it("retries on 429 rate limit errors", async () => {
+    const { BlotatoRateLimitError } = await import("@/lib/blotato/client");
+    const post = makePost({ status: "SCHEDULED", retryCount: 0 });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockRejectedValue(new BlotatoRateLimitError(60_000));
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "RETRYING", retryCount: 1 }),
+      })
+    );
+  });
+
+  it("recovers stuck PUBLISHING posts (older than 5 min) by resetting to RETRYING", async () => {
+    // First findMany: no due posts; stuck-post recovery still runs via updateMany
+    prismaMock.post.findMany.mockResolvedValueOnce([]);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 }); // stuck post recovery
+
+    await runScheduler();
+
+    // Stuck post recovery should call updateMany to reset PUBLISHING → RETRYING
+    expect(prismaMock.post.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "PUBLISHING",
+          updatedAt: expect.objectContaining({ lte: expect.any(Date) }),
+        }),
+        data: expect.objectContaining({ status: "RETRYING" }),
+      })
+    );
+  });
 });
 
 // ── runMetricsRefresh ────────────────────────────────────────────────────────
 
 describe("runMetricsRefresh", () => {
-  it("does nothing when there are no stale published posts", async () => {
+  it("returns 0 processed when no published posts need refresh", async () => {
     prismaMock.post.findMany.mockResolvedValue([]);
 
-    await runMetricsRefresh();
+    const result = await runMetricsRefresh();
 
-    expect(prismaMock.post.update).not.toHaveBeenCalled();
+    expect(result.processed).toBe(0);
   });
 
-  it("queries with take: 50 and orderBy metricsUpdatedAt asc to cap batch size", async () => {
+  it("fetches metrics and updates DB for each published post", async () => {
+    const publishedPost = {
+      ...makePost({ status: "PUBLISHED" }),
+      blotatoPostId: "blotato-post-abc",
+    };
+    prismaMock.post.findMany.mockResolvedValue([publishedPost] as any);
+
+    const mockMetrics = {
+      likes: 42,
+      comments: 5,
+      shares: 10,
+      impressions: 1000,
+      reach: 800,
+      saves: 3,
+    };
+
+    // Spy on global.fetch for the Blotato metrics call
+    const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => mockMetrics,
+    } as Response);
+
+    prismaMock.post.update.mockResolvedValue(publishedPost as any);
+
+    const result = await runMetricsRefresh();
+
+    expect(result.processed).toBe(1);
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "post-1" },
+        data: expect.objectContaining({
+          metricsLikes: 42,
+          metricsComments: 5,
+          metricsShares: 10,
+          metricsImpressions: 1000,
+          metricsReach: 800,
+          metricsSaves: 3,
+          metricsUpdatedAt: expect.any(Date),
+        }),
+      })
+    );
+
+    fetchSpy.mockRestore();
+  });
+
+  it("caps refresh at 50 posts (oldest-stale first)", async () => {
     prismaMock.post.findMany.mockResolvedValue([]);
 
     await runMetricsRefresh();
@@ -93,117 +378,8 @@ describe("runMetricsRefresh", () => {
     expect(prismaMock.post.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         take: 50,
-        orderBy: { metricsUpdatedAt: "asc" },
+        orderBy: expect.objectContaining({ metricsUpdatedAt: "asc" }),
       })
-    );
-  });
-
-  it("calls fetchTwitterMetrics for TWITTER posts", async () => {
-    prismaMock.post.findMany.mockResolvedValue([makePost({ platform: "TWITTER" })] as any);
-    mockFetchTwitterMetrics.mockResolvedValue(METRICS);
-    prismaMock.post.update.mockResolvedValue({} as any);
-
-    await runMetricsRefresh();
-
-    expect(mockFetchTwitterMetrics).toHaveBeenCalledWith("access-token", "platform-post-1");
-    expect(mockFetchFacebookMetrics).not.toHaveBeenCalled();
-    expect(mockFetchInstagramMetrics).not.toHaveBeenCalled();
-  });
-
-  it("calls fetchInstagramMetrics for INSTAGRAM posts", async () => {
-    prismaMock.post.findMany.mockResolvedValue([makePost({ platform: "INSTAGRAM" })] as any);
-    mockFetchInstagramMetrics.mockResolvedValue(METRICS);
-    prismaMock.post.update.mockResolvedValue({} as any);
-
-    await runMetricsRefresh();
-
-    expect(mockFetchInstagramMetrics).toHaveBeenCalledWith("access-token", "platform-post-1");
-    expect(mockFetchTwitterMetrics).not.toHaveBeenCalled();
-  });
-
-  it("calls fetchFacebookMetrics for FACEBOOK posts", async () => {
-    prismaMock.post.findMany.mockResolvedValue([makePost({ platform: "FACEBOOK" })] as any);
-    mockFetchFacebookMetrics.mockResolvedValue(METRICS);
-    prismaMock.post.update.mockResolvedValue({} as any);
-
-    await runMetricsRefresh();
-
-    expect(mockFetchFacebookMetrics).toHaveBeenCalledWith("access-token", "platform-post-1");
-    expect(mockFetchTwitterMetrics).not.toHaveBeenCalled();
-  });
-
-  it("updates the post with the metrics returned by the fetcher", async () => {
-    prismaMock.post.findMany.mockResolvedValue([makePost()] as any);
-    mockFetchTwitterMetrics.mockResolvedValue(METRICS);
-    prismaMock.post.update.mockResolvedValue({} as any);
-
-    await runMetricsRefresh();
-
-    expect(prismaMock.post.update).toHaveBeenCalledWith({
-      where: { id: "post-1" },
-      data: METRICS,
-    });
-  });
-
-  it("skips the update when the fetcher returns null", async () => {
-    prismaMock.post.findMany.mockResolvedValue([makePost()] as any);
-    mockFetchTwitterMetrics.mockResolvedValue(null);
-
-    await runMetricsRefresh();
-
-    expect(prismaMock.post.update).not.toHaveBeenCalled();
-  });
-
-  it("does not throw when ensureValidToken rejects", async () => {
-    prismaMock.post.findMany.mockResolvedValue([makePost()] as any);
-    mockEnsureValidToken.mockRejectedValue(new Error("Token expired"));
-
-    await expect(runMetricsRefresh()).resolves.not.toThrow();
-    expect(prismaMock.post.update).not.toHaveBeenCalled();
-  });
-
-  it("throws (caught per-post) for unknown platform instead of silently routing to YouTube", async () => {
-    const post = {
-      ...makePost(),
-      socialAccount: { ...makeSocialAccount(), platform: "LINKEDIN" as any },
-    };
-    prismaMock.post.findMany.mockResolvedValue([post] as any);
-
-    // The error is caught per-post, so runMetricsRefresh resolves without throwing
-    await expect(runMetricsRefresh()).resolves.not.toThrow();
-    // No update should happen since it threw before fetching metrics
-    expect(prismaMock.post.update).not.toHaveBeenCalled();
-  });
-
-  it("continues processing remaining posts when one fails", async () => {
-    const posts = [makePost({ id: "post-1" }), makePost({ id: "post-2" })];
-    prismaMock.post.findMany.mockResolvedValue(posts as any);
-    mockFetchTwitterMetrics
-      .mockRejectedValueOnce(new Error("API error"))
-      .mockResolvedValueOnce(METRICS);
-    prismaMock.post.update.mockResolvedValue({} as any);
-
-    await runMetricsRefresh();
-
-    // post-1 errored inside the per-post try/catch, post-2 succeeded
-    expect(prismaMock.post.update).toHaveBeenCalledTimes(1);
-    expect(prismaMock.post.update).toHaveBeenCalledWith({
-      where: { id: "post-2" },
-      data: METRICS,
-    });
-  });
-
-  it("uses the token returned by ensureValidToken, not the raw accessToken", async () => {
-    prismaMock.post.findMany.mockResolvedValue([makePost()] as any);
-    mockEnsureValidToken.mockResolvedValue("refreshed-token");
-    mockFetchTwitterMetrics.mockResolvedValue(METRICS);
-    prismaMock.post.update.mockResolvedValue({} as any);
-
-    await runMetricsRefresh();
-
-    expect(mockFetchTwitterMetrics).toHaveBeenCalledWith(
-      "refreshed-token",
-      expect.any(String)
     );
   });
 });
