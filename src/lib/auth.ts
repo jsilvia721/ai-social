@@ -51,8 +51,11 @@ export const authOptions: AuthOptions = {
       } else if (token.sub && token.email) {
         // Token refresh: verify the stored user ID still exists (guards against DB resets in dev).
         // If stale, look up by email and self-heal the token so the user doesn't need to sign out.
-        const exists = await prisma.user.findUnique({ where: { id: token.sub }, select: { id: true } });
-        if (!exists) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.sub },
+          select: { id: true, isAdmin: true },
+        });
+        if (!dbUser) {
           const byEmail = await prisma.user.findUnique({
             where: { email: token.email as string },
             select: { id: true, activeBusinessId: true, isAdmin: true },
@@ -62,6 +65,9 @@ export const authOptions: AuthOptions = {
             token.activeBusinessId = byEmail.activeBusinessId ?? null;
             token.isAdmin = byEmail.isAdmin ?? false;
           }
+        } else {
+          // Keep admin status in sync with DB (e.g. after ADMIN_EMAILS changes)
+          token.isAdmin = dbUser.isAdmin ?? false;
         }
       }
       // Client can trigger a session update via update({ activeBusinessId })
