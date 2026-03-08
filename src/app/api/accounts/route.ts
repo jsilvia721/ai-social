@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const businessId = searchParams.get("businessId");
-  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
 
   const memberFilter = isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } };
   const where = businessId
@@ -51,11 +51,11 @@ export async function DELETE(req: NextRequest) {
   }
 
   // Verify access before deleting (prevents IDOR; admins bypass membership check)
-  const isAdminDel = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
   const account = await prisma.socialAccount.findFirst({
     where: {
       id,
-      ...(isAdminDel ? {} : { business: { members: { some: { userId: session.user.id } } } }),
+      ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
     },
   });
 

@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10) || 50));
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
 
-  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
 
   const where = {
     // Admins bypass membership check; non-admins scoped to their businesses
@@ -53,7 +53,7 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
 
   const post = await prisma.post.findFirst({
     where: {
@@ -84,12 +84,12 @@ export async function POST(req: NextRequest) {
   }
 
   // Verify social account belongs to this business (and user is a member if not admin)
-  const isAdminPost = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
   const account = await prisma.socialAccount.findFirst({
     where: {
       id: socialAccountId,
       businessId,
-      ...(isAdminPost ? {} : { business: { members: { some: { userId: session.user.id } } } }),
+      ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
     },
   });
 

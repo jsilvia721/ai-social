@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "businessId is required" }, { status: 400 });
   }
 
-  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
 
   if (!isAdmin) {
     const membership = await prisma.businessMember.findFirst({

@@ -15,7 +15,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const { id: businessId } = await params;
 
   // Verify user is a member of this business (admins bypass membership check)
-  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
   if (!isAdmin) {
     const member = await prisma.businessMember.findFirst({
       where: { businessId, userId: session.user.id },

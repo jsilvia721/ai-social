@@ -8,6 +8,8 @@ declare module "next-auth" {
       email: string;
       name?: string | null;
       image?: string | null;
+      isAdmin?: boolean;
+      activeBusinessId?: string | null;
     };
   }
 }
@@ -15,5 +17,7 @@ declare module "next-auth" {
 declare module "next-auth/jwt" {
   interface JWT {
     userId?: string;
+    isAdmin?: boolean;
+    activeBusinessId?: string | null;
   }
 }

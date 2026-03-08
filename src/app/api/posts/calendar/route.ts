@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     end = new Date(Date.UTC(year, month + 1, 1));
   }
 
-  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
 
   const posts = await prisma.post.findMany({
     where: {

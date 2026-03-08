@@ -19,12 +19,13 @@ export const authOptions: AuthOptions = {
     async signIn({ user }) {
       const allowed = env.ALLOWED_EMAILS.split(",").map((e) => e.trim().toLowerCase());
       if (!allowed.includes((user.email ?? "").toLowerCase())) return false;
-      // Promote to admin if email is in ADMIN_EMAILS (idempotent upsert)
-      if (env.ADMIN_EMAILS && user.id) {
-        const adminEmails = env.ADMIN_EMAILS.split(",").map((e) => e.trim().toLowerCase());
-        if (adminEmails.includes((user.email ?? "").toLowerCase())) {
-          await prisma.user.update({ where: { id: user.id }, data: { isAdmin: true } });
-        }
+      // Sync admin status from ADMIN_EMAILS on every sign-in (promote or demote)
+      if (user.id) {
+        const adminEmails = env.ADMIN_EMAILS
+          ? env.ADMIN_EMAILS.split(",").map((e) => e.trim().toLowerCase())
+          : [];
+        const shouldBeAdmin = adminEmails.includes((user.email ?? "").toLowerCase());
+        await prisma.user.update({ where: { id: user.id }, data: { isAdmin: shouldBeAdmin } });
       }
       return true;
     },
@@ -72,10 +73,8 @@ export const authOptions: AuthOptions = {
     async session({ session, token }) {
       if (token?.sub && session.user) {
         session.user.id = token.sub;
-        (session.user as { id: string; isAdmin?: boolean; activeBusinessId?: string | null }).activeBusinessId =
-          (token.activeBusinessId as string | null) ?? null;
-        (session.user as { id: string; isAdmin?: boolean; activeBusinessId?: string | null }).isAdmin =
-          (token.isAdmin as boolean) ?? false;
+        session.user.activeBusinessId = (token.activeBusinessId as string | null) ?? null;
+        session.user.isAdmin = (token.isAdmin as boolean) ?? false;
       }
       return session;
     },

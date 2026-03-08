@@ -30,6 +30,8 @@ export default $config({
       blotatoApiKey:       $app.stage === "production" ? new sst.Secret("BlotatoApiKey") : null,
       // SES_FROM_EMAIL: optional — only needed in production for failure alerts
       sesFromEmail:        $app.stage === "production" ? new sst.Secret("SesFromEmail") : null,
+      // ADMIN_EMAILS: optional — comma-separated emails to auto-promote to admin on sign-in
+      adminEmails:         new sst.Secret("AdminEmails"),
     };
 
     // ── S3 Bucket ──────────────────────────────────────────────────
@@ -78,6 +80,8 @@ export default $config({
       ...(secrets.blotatoApiKey ? { BLOTATO_API_KEY: secrets.blotatoApiKey.value } : { BLOTATO_API_KEY: "mock" }),
       // SES failure alerts: only wired up in production
       ...(secrets.sesFromEmail ? { SES_FROM_EMAIL: secrets.sesFromEmail.value } : {}),
+      // Admin role bootstrap: optional, comma-separated emails granted isAdmin on sign-in
+      ...(secrets.adminEmails ? { ADMIN_EMAILS: secrets.adminEmails.value } : {}),
     };
 
     // ── Next.js App ───────────────────────────────────────────────

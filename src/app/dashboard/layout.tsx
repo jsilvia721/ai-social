@@ -15,13 +15,14 @@ export default async function DashboardLayout({
     redirect("/auth/signin");
   }
 
-  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
 
   let businesses: { id: string; name: string }[];
   if (isAdmin) {
     businesses = await prisma.business.findMany({
       select: { id: true, name: true },
       orderBy: { createdAt: "asc" },
+      take: 200,
     });
   } else {
     const memberships = await prisma.businessMember.findMany({
@@ -37,7 +38,7 @@ export default async function DashboardLayout({
       <Sidebar
         user={session.user}
         businesses={businesses}
-        activeBusinessId={(session.user as { id: string; isAdmin?: boolean; activeBusinessId?: string | null }).activeBusinessId}
+        activeBusinessId={session.user.activeBusinessId}
       />
       <main className="ml-60 min-h-screen">
         <div className="p-8">{children}</div>

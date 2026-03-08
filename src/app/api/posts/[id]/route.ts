@@ -14,7 +14,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  const isAdmin = (session.user as { id: string; isAdmin?: boolean }).isAdmin ?? false;
+  const isAdmin = session.user.isAdmin ?? false;
 
   const post = await prisma.post.findFirst({
     where: {
