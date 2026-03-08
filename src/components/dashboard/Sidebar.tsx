@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList, LogOut } from "lucide-react";
+import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList, LogOut, Wrench } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useState, useTransition } from "react";
@@ -61,9 +61,10 @@ interface SidebarProps {
   };
   businesses?: Business[];
   activeBusinessId?: string | null;
+  showDevTools?: boolean;
 }
 
-export function Sidebar({ user, businesses = [], activeBusinessId }: SidebarProps) {
+export function Sidebar({ user, businesses = [], activeBusinessId, showDevTools = false }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { update } = useSession();
@@ -191,6 +192,20 @@ export function Sidebar({ user, businesses = [], activeBusinessId }: SidebarProp
             {label}
           </Link>
         ))}
+        {showDevTools && (
+          <Link
+            href="/dashboard/dev-tools"
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              isActive("/dashboard/dev-tools")
+                ? "bg-zinc-800 text-zinc-50"
+                : "text-amber-500/70 hover:bg-zinc-800/60 hover:text-amber-400"
+            )}
+          >
+            <Wrench className="h-4 w-4 shrink-0" />
+            Dev Tools
+          </Link>
+        )}
         {businesses.length === 0 && (
           <Link
             href="/dashboard/businesses/new"
