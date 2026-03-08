@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList } from "lucide-react";
+import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList, LogOut } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useState, useTransition } from "react";
-import { useSession } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -203,7 +203,7 @@ export function Sidebar({ user, businesses = [], activeBusinessId }: SidebarProp
       </nav>
 
       {/* User */}
-      <div className="border-t border-zinc-800 px-4 py-4">
+      <div className="border-t border-zinc-800 px-4 py-4 space-y-3">
         <div className="flex items-center gap-3">
           <Avatar className="h-8 w-8">
             {user.image && <AvatarImage src={user.image} alt={user.name ?? "User"} />}
@@ -220,6 +220,13 @@ export function Sidebar({ user, businesses = [], activeBusinessId }: SidebarProp
             )}
           </div>
         </div>
+        <button
+          onClick={() => signOut({ callbackUrl: "/auth/signin" })}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+        >
+          <LogOut className="h-4 w-4" />
+          Sign out
+        </button>
       </div>
     </aside>
   );
