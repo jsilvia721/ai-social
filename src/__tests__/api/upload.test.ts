@@ -74,6 +74,8 @@ describe("POST /api/upload", () => {
     const res = await POST(req);
 
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("presigned");
     expect(mockUploadFile).not.toHaveBeenCalled();
   });
 
@@ -106,15 +108,13 @@ describe("POST /api/upload", () => {
     expect(key).toMatch(/\.jpg$/);
   });
 
-  it("returns 200 for a valid video/mp4", async () => {
+  it("returns 400 for video/mp4 (videos must use presigned upload)", async () => {
     mockAuthenticated();
-    mockUploadFile.mockResolvedValue(
-      "http://example.com/storage/ai-social/uploads/user-test-id/vid.mp4"
-    );
 
     const req = makeUploadRequest(new Uint8Array([0x00, 0x00]), "clip.mp4", "video/mp4");
     const res = await POST(req);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
+    expect(mockUploadFile).not.toHaveBeenCalled();
   });
 });

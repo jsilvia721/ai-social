@@ -135,7 +135,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
     }
   }
 
-  const canEdit = post.status === "DRAFT" || post.status === "SCHEDULED";
+  const canEdit = post.status !== "PUBLISHED";
   const canRetry = post.status === "FAILED" && !!onRetry;
 
   return (

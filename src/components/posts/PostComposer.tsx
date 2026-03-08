@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X } from "lucide-react";
+import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X, Film } from "lucide-react";
 import type { Platform } from "@/types";
 
 const CHAR_LIMITS: Partial<Record<Platform, number>> = {
@@ -28,6 +28,19 @@ const PLATFORM_LABELS: Record<Platform, string> = {
   TIKTOK: "TikTok",
   YOUTUBE: "YouTube",
 };
+
+const VIDEO_PUBLISHING_PLATFORMS = new Set<Platform>(["TIKTOK", "YOUTUBE"]);
+
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
+
+function isVideoUrl(url: string): boolean {
+  const ext = url.slice(url.lastIndexOf(".")).toLowerCase();
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
+function isVideoFile(file: File): boolean {
+  return file.type.startsWith("video/");
+}
 
 interface Account {
   id: string;
@@ -45,7 +58,7 @@ interface EditPostData {
   mediaUrls: string[];
 }
 
-export function PostComposer({ editPost }: { editPost?: EditPostData }) {
+export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: EditPostData; defaultScheduledAt?: string }) {
   const isEditMode = !!editPost;
   const router = useRouter();
   const { data: session } = useSession();
@@ -56,17 +69,21 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
   const [content, setContent] = useState(editPost?.content ?? "");
   const [aiTopic, setAiTopic] = useState("");
   const [scheduleMode, setScheduleMode] = useState<"draft" | "schedule">(
-    editPost?.scheduledAt ? "schedule" : "draft"
+    editPost?.scheduledAt || defaultScheduledAt ? "schedule" : "draft"
   );
   const [scheduledAt, setScheduledAt] = useState(
-    editPost?.scheduledAt ? new Date(editPost.scheduledAt).toISOString().slice(0, 16) : ""
+    editPost?.scheduledAt
+      ? new Date(editPost.scheduledAt).toISOString().slice(0, 16)
+      : defaultScheduledAt ?? ""
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mediaUrls, setMediaUrls] = useState<string[]>(editPost?.mediaUrls ?? []);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
 
   useEffect(() => {
     if (isEditMode) return; // don't fetch accounts in edit mode
@@ -83,6 +100,9 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
   const charLimit = selectedAccount ? CHAR_LIMITS[selectedAccount.platform] : undefined;
   const charCount = content.length;
   const isOverLimit = charLimit !== undefined && charCount > charLimit;
+  const selectedPlatform = isEditMode ? editPost.platform : selectedAccount?.platform;
+  const videoSupported = !selectedPlatform || VIDEO_PUBLISHING_PLATFORMS.has(selectedPlatform);
+  const hasVideo = mediaUrls.some(isVideoUrl);
 
   async function handleGenerate() {
     if (!aiTopic.trim()) return;
@@ -107,17 +127,84 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
     }
   }
 
+  function uploadViaPresigned(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      fetch(`/api/upload/presigned?mimeType=${encodeURIComponent(file.type)}&fileSize=${file.size}`)
+        .then((res) => {
+          if (!res.ok) return res.json().then((d) => Promise.reject(new Error(d.error ?? "Failed to get upload URL")));
+          return res.json();
+        })
+        .then(({ uploadUrl, publicUrl }) => {
+          const xhr = new XMLHttpRequest();
+          xhrRef.current = xhr;
+
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              setUploadProgress(Math.round((e.loaded / e.total) * 100));
+            }
+          };
+
+          xhr.onload = () => {
+            xhrRef.current = null;
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(publicUrl);
+            } else {
+              reject(new Error("Upload to storage failed"));
+            }
+          };
+
+          xhr.onerror = () => {
+            xhrRef.current = null;
+            reject(new Error("Upload failed — check your connection"));
+          };
+
+          xhr.onabort = () => {
+            xhrRef.current = null;
+            reject(new Error("Upload cancelled"));
+          };
+
+          xhr.open("PUT", uploadUrl);
+          xhr.setRequestHeader("Content-Type", file.type);
+          xhr.send(file);
+        })
+        .catch(reject);
+    });
+  }
+
+  function abortUpload() {
+    if (xhrRef.current) {
+      xhrRef.current.abort();
+    }
+  }
+
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
 
-    const videos = files.filter((f) => f.type === "video/mp4");
-    const images = files.filter((f) => f.type !== "video/mp4");
+    const videos = files.filter(isVideoFile);
+    const images = files.filter((f) => !isVideoFile(f));
+
+    // Mutual exclusion: video and images can't coexist
+    if (videos.length > 0 && images.length > 0) {
+      setError("You can attach either images or a video, not both.");
+      return;
+    }
 
     if (videos.length > 1) {
       setError("You can attach at most 1 video.");
       return;
     }
+
+    if (videos.length > 0 && mediaUrls.length > 0 && !mediaUrls.every(isVideoUrl)) {
+      setError("Remove existing images before adding a video.");
+      return;
+    }
+
+    if (images.length > 0 && hasVideo) {
+      setError("Remove the existing video before adding images.");
+      return;
+    }
+
     if (images.length + mediaUrls.length > 4) {
       setError("You can attach at most 4 images.");
       return;
@@ -125,22 +212,41 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
 
     setIsUploading(true);
     setError(null);
+    setUploadProgress(null);
     try {
-      const uploaded: string[] = [];
-      for (const file of files) {
-        const fd = new FormData();
-        fd.append("file", file);
-        const res = await fetch("/api/upload", { method: "POST", body: fd });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error ?? "Upload failed");
+      if (videos.length === 1) {
+        // Video: use presigned URL with progress tracking
+        const url = await uploadViaPresigned(videos[0]);
+        // Clear any existing images (mutual exclusion)
+        setMediaUrls([url]);
+        setUploadProgress(null);
+      } else {
+        // Images: use server-side upload
+        const uploaded: string[] = [];
+        for (const file of images) {
+          const fd = new FormData();
+          fd.append("file", file);
+          const res = await fetch("/api/upload", { method: "POST", body: fd });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error ?? "Upload failed");
+          }
+          const { url } = await res.json();
+          uploaded.push(url);
         }
-        const { url } = await res.json();
-        uploaded.push(url);
+        // Clear any existing video (mutual exclusion)
+        setMediaUrls((prev) => {
+          const existing = prev.filter((u) => !isVideoUrl(u));
+          return [...existing, ...uploaded];
+        });
       }
-      setMediaUrls((prev) => [...prev, ...uploaded]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      setUploadProgress(null);
+      if (err instanceof Error && err.message === "Upload cancelled") {
+        // Don't show error for intentional cancellation
+      } else {
+        setError(err instanceof Error ? err.message : "Upload failed.");
+      }
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -190,6 +296,10 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
       setIsSubmitting(false);
     }
   }
+
+  const fileAccept = videoSupported
+    ? "image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/webm"
+    : "image/jpeg,image/png,image/gif,image/webp";
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
@@ -258,7 +368,7 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/jpeg,image/png,image/gif,image/webp,video/mp4"
+        accept={fileAccept}
         multiple
         className="hidden"
         onChange={handleFileSelect}
@@ -271,13 +381,16 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
             <div className="flex items-center gap-2">
               <ImageIcon className="h-4 w-4 text-zinc-400" />
               <span className="text-sm font-medium text-zinc-300">Media</span>
+              {!videoSupported && selectedPlatform && (
+                <span className="text-xs text-zinc-500">(images only — video not yet supported for {PLATFORM_LABELS[selectedPlatform]})</span>
+              )}
             </div>
             <Button
               type="button"
               size="sm"
               variant="outline"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading || mediaUrls.length >= 4}
+              disabled={isUploading || (mediaUrls.length >= 4 && !hasVideo)}
               className="border-zinc-600 text-zinc-300 hover:bg-zinc-800"
             >
               {isUploading ? (
@@ -288,16 +401,48 @@ export function PostComposer({ editPost }: { editPost?: EditPostData }) {
               {isUploading ? "Uploading…" : "Add media"}
             </Button>
           </div>
+
+          {/* Upload progress bar */}
+          {isUploading && uploadProgress !== null && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span>Uploading video… {uploadProgress}%</span>
+                <button
+                  type="button"
+                  onClick={abortUpload}
+                  className="text-red-400 hover:text-red-300"
+                >
+                  Cancel
+                </button>
+              </div>
+              <div className="w-full bg-zinc-700 rounded-full h-1.5">
+                <div
+                  className="bg-violet-500 h-1.5 rounded-full transition-all duration-200"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {mediaUrls.length > 0 && (
             <div className="grid grid-cols-2 gap-2">
               {mediaUrls.map((url, i) =>
-                url.endsWith(".mp4") ? (
-                  <div key={i} className="relative group">
-                    <video
-                      src={url}
-                      className="w-full rounded-md object-cover max-h-40"
-                      controls={false}
-                    />
+                isVideoUrl(url) ? (
+                  <div key={i} className="relative group col-span-2">
+                    {url.endsWith(".mov") ? (
+                      <div className="w-full rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center gap-2 py-8">
+                        <Film className="h-6 w-6 text-zinc-500" />
+                        <span className="text-sm text-zinc-400">
+                          {url.split("/").pop()}
+                        </span>
+                      </div>
+                    ) : (
+                      <video
+                        src={url}
+                        className="w-full rounded-md object-cover max-h-48"
+                        controls
+                      />
+                    )}
                     <button
                       type="button"
                       onClick={() => removeMedia(i)}
