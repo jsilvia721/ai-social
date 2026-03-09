@@ -15,6 +15,7 @@ const STEPS = [
     placeholder:
       "e.g. Boutique fitness studio specializing in HIIT classes for busy professionals",
     hint: "Be specific — this shapes every piece of content we create.",
+    maxLength: 500,
   },
   {
     key: "targetAudience",
@@ -22,6 +23,7 @@ const STEPS = [
     placeholder:
       "e.g. Professionals aged 28-45, mostly female, value work-life balance, time-poor but health-conscious",
     hint: "Include demographics, psychographics, and what they care about most.",
+    maxLength: 1000,
   },
   {
     key: "tonePreference",
@@ -29,6 +31,7 @@ const STEPS = [
     placeholder:
       "e.g. Energetic, no-nonsense, science-backed — like a knowledgeable friend, not a salesperson",
     hint: "Think of how you talk to your best clients in person.",
+    maxLength: 500,
   },
   {
     key: "primaryGoal",
@@ -36,6 +39,7 @@ const STEPS = [
     placeholder:
       "e.g. Grow Instagram following to drive class bookings, build authority on LinkedIn, increase DM inquiries",
     hint: "We'll optimize posting strategy around this goal.",
+    maxLength: 500,
   },
   {
     key: "competitors",
@@ -43,6 +47,7 @@ const STEPS = [
     placeholder:
       "e.g. @CrossFitHQ for their community energy, @hubermanlab for science-credibility format",
     hint: "These help calibrate the content style — skip if unsure.",
+    maxLength: 500,
   },
 ];
 
@@ -190,6 +195,7 @@ export default function OnboardPage() {
             value={currentAnswer}
             onChange={(e) => setCurrentAnswer(e.target.value)}
             placeholder={currentStep.placeholder}
+            maxLength={currentStep.maxLength}
             rows={4}
             className="bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 resize-none focus:border-violet-500 focus:ring-violet-500"
             onKeyDown={(e) => {

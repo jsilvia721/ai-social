@@ -10,13 +10,8 @@
  */
 import { prisma } from "@/lib/db";
 import { generateBriefs } from "@/lib/ai/briefs";
+import { flattenFormatMix } from "@/lib/strategy/schemas";
 import { sendBriefDigest } from "@/lib/notifications";
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
-interface PostingCadence {
-  [platform: string]: number;
-}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -125,14 +120,16 @@ export async function runBriefGeneration(
 
       // 4. Build cadence per platform
       const connectedPlatforms = [...new Set(workspace.socialAccounts.map((a) => a.platform))];
-      const cadenceConfig = (strategy.postingCadence as PostingCadence) ?? {};
+      const cadenceConfig = (strategy.postingCadence as Record<string, number | null>) ?? {};
       const cadencePerPlatform: Record<string, number> = {};
       for (const platform of connectedPlatforms) {
+        // null means AI-optimized — use default cadence
         cadencePerPlatform[platform] = cadenceConfig[platform] ?? DEFAULT_CADENCE_PER_PLATFORM;
       }
 
       // 5. Call Claude to generate briefs (pass learned format mix if available)
-      const formatMix = strategy.formatMix as Record<string, number> | null;
+      // flattenFormatMix handles both old flat format and new per-platform format
+      const formatMix = flattenFormatMix(strategy.formatMix as Record<string, unknown> | null);
       const result = await generateBriefs(
         strategy.industry,
         strategy.targetAudience,

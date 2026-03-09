@@ -134,6 +134,11 @@ describe("computeReviewDecision", () => {
       reviewWindowExpiresAt: new Date("2026-03-09T12:00:00Z"),
     });
   });
+
+  it("returns SCHEDULED with no_review_configured when hours is 0 (immediate mode)", () => {
+    const result = computeReviewDecision(true, 0, new Date("2026-03-10T12:00:00Z"), NOW);
+    expect(result).toEqual({ status: "SCHEDULED", reason: "no_review_configured" });
+  });
 });
 
 // ── runFulfillment ──────────────────────────────────────────────────────────────
