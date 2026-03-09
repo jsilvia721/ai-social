@@ -80,6 +80,7 @@ describe("POST /api/businesses", () => {
 
   it("creates a business with the user as OWNER", async () => {
     mockAuthenticated();
+    prismaMock.businessMember.count.mockResolvedValue(0);
     const created = { id: "biz-new", name: "New Corp", createdAt: new Date(), updatedAt: new Date() };
     prismaMock.business.create.mockResolvedValue(created as any);
 
@@ -97,5 +98,16 @@ describe("POST /api/businesses", () => {
         }),
       })
     );
+  });
+
+  it("returns 429 when user owns 50 or more businesses", async () => {
+    mockAuthenticated();
+    prismaMock.businessMember.count.mockResolvedValue(50);
+
+    const res = await POST(makeRequest("POST", { name: "One Too Many" }));
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error).toContain("limit");
+    expect(prismaMock.business.create).not.toHaveBeenCalled();
   });
 });

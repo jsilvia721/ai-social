@@ -24,11 +24,11 @@ export class BlotatoRateLimitError extends BlotatoApiError {
   }
 }
 
-export async function blotatoFetch<T>(
+export async function blotatoFetch<S extends z.ZodTypeAny>(
   path: string,
-  schema: z.ZodType<T>,
+  schema: S,
   options: RequestInit = {},
-): Promise<T> {
+): Promise<z.infer<S>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
