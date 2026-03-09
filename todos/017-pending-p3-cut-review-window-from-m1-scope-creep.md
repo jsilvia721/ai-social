@@ -1,5 +1,5 @@
 ---
-status: pending
+status: closed
 priority: p3
 issue_id: "017"
 tags: [code-review, scope, yagni]

@@ -129,6 +129,17 @@ describe("GET /api/connect/blotato/callback", () => {
     );
   });
 
+  it("redirects with error=invalid_platform when Blotato returns unknown platform", async () => {
+    mockAuthenticated();
+    mockGetAccount.mockResolvedValue({ ...fakeBlotatoAccount, platform: "MASTODON" });
+
+    const res = await GET(makeRequest({ state: validState, accountId: "blotato-acct-123" }));
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("error=invalid_platform");
+    expect(prismaMock.socialAccount.upsert).not.toHaveBeenCalled();
+  });
+
   it("redirects to /dashboard/accounts?error=connect when Blotato API call fails", async () => {
     mockAuthenticated();
     mockGetAccount.mockRejectedValue(new Error("Blotato API error"));

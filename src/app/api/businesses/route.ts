@@ -32,6 +32,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
+  const ownedCount = await prisma.businessMember.count({
+    where: { userId: session.user.id, role: "OWNER" },
+  });
+  if (ownedCount >= 50) {
+    return NextResponse.json({ error: "Business limit reached" }, { status: 429 });
+  }
+
   const business = await prisma.business.create({
     data: {
       name: body.name,

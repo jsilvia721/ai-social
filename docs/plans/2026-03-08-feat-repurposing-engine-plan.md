@@ -1,7 +1,7 @@
 ---
 title: "feat: Content Repurposing Engine"
 type: feat
-status: active
+status: completed
 date: 2026-03-08
 origin: docs/brainstorms/2026-03-08-repurposing-engine-brainstorm.md
 deepened: 2026-03-08

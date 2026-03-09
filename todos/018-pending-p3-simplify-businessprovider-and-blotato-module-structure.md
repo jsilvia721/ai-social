@@ -1,5 +1,5 @@
 ---
-status: pending
+status: closed
 priority: p3
 issue_id: "018"
 tags: [code-review, yagni, simplicity, typescript]

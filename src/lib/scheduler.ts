@@ -3,12 +3,11 @@
  *   src/cron/publish.ts  → every 1 minute
  *   src/cron/metrics.ts  → every 1 hour
  */
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { prisma } from "@/lib/db";
 import { publishPost } from "@/lib/blotato/publish";
 import { getPostMetrics } from "@/lib/blotato/metrics";
 import { BlotatoApiError } from "@/lib/blotato/client";
-import { env } from "@/env";
+import { sendFailureAlert } from "@/lib/alerts";
 import type { Post, SocialAccount, Business, BusinessMember, User } from "@prisma/client";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -44,41 +43,6 @@ function shouldRetry(err: unknown, retryCount: number): boolean {
   return true;
 }
 
-// ── SES alert ────────────────────────────────────────────────────────────────
-
-async function sendFailureAlert(post: DuePost, errorMessage: string): Promise<void> {
-  try {
-    const owner = post.business.members.find((m) => m.role === "OWNER");
-    if (!owner) return;
-    if (!env.SES_FROM_EMAIL) return;
-
-    const ses = new SESClient({ region: "us-east-1" });
-    await ses.send(
-      new SendEmailCommand({
-        Source: env.SES_FROM_EMAIL,
-        Destination: { ToAddresses: [owner.user.email] },
-        Message: {
-          Subject: { Data: `[AI Social] Post failed to publish after ${MAX_RETRIES + 1} attempts` },
-          Body: {
-            Text: {
-              Data: [
-                `Post ID: ${post.id}`,
-                `Business: ${post.business.name}`,
-                `Content preview: ${post.content.slice(0, 100)}`,
-                `Error: ${errorMessage}`,
-                ``,
-                `Please check your social account connection and retry the post manually.`,
-              ].join("\n"),
-            },
-          },
-        },
-      })
-    );
-  } catch {
-    // Best-effort — never let an alert failure cascade into a thrown error
-  }
-}
-
 // ── Publish helpers ───────────────────────────────────────────────────────────
 
 async function handlePublishFailure(post: DuePost, err: unknown): Promise<void> {
@@ -100,7 +64,21 @@ async function handlePublishFailure(post: DuePost, err: unknown): Promise<void> 
       where: { id: post.id },
       data: { status: "FAILED", errorMessage },
     });
-    await sendFailureAlert(post, errorMessage);
+    const owner = post.business.members.find((m) => m.role === "OWNER");
+    if (owner) {
+      await sendFailureAlert(
+        owner.user.email,
+        `[AI Social] Post failed to publish after ${MAX_RETRIES + 1} attempts`,
+        [
+          `Post ID: ${post.id}`,
+          `Business: ${post.business.name}`,
+          `Content preview: ${post.content.slice(0, 100)}`,
+          `Error: ${errorMessage}`,
+          ``,
+          `Please check your social account connection and retry the post manually.`,
+        ].join("\n"),
+      );
+    }
   }
 }
 

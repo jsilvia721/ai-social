@@ -3,13 +3,16 @@ import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/media");
 jest.mock("@/lib/storage");
+jest.mock("@/lib/alerts");
 
 import { runFulfillment, computeReviewDecision } from "@/lib/fulfillment";
 import { generateImage } from "@/lib/media";
 import { uploadBuffer } from "@/lib/storage";
+import { sendFailureAlert } from "@/lib/alerts";
 
 const mockGenerateImage = generateImage as jest.MockedFunction<typeof generateImage>;
 const mockUploadBuffer = uploadBuffer as jest.MockedFunction<typeof uploadBuffer>;
+const mockSendFailureAlert = sendFailureAlert as jest.MockedFunction<typeof sendFailureAlert>;
 
 // ── Test helpers ────────────────────────────────────────────────────────────────
 
@@ -315,6 +318,45 @@ describe("runFulfillment", () => {
         }),
       })
     );
+  });
+
+  it("sends SES failure alert to business owner after max retries", async () => {
+    const brief = makeBrief({ retryCount: 2 }); // Already at max
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.findUnique.mockResolvedValue(null);
+    mockGenerateImage.mockRejectedValue(new Error("Provider timeout"));
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+    prismaMock.businessMember.findFirst.mockResolvedValue({
+      id: "mem-1",
+      businessId: "biz-1",
+      userId: "user-1",
+      role: "OWNER",
+      joinedAt: new Date(),
+      user: { id: "user-1", email: "owner@example.com", name: "Owner", emailVerified: null, image: null, isAdmin: false, activeBusinessId: "biz-1", createdAt: new Date(), updatedAt: new Date() },
+    } as never);
+    mockSendFailureAlert.mockResolvedValue(undefined);
+
+    await runFulfillment();
+
+    expect(mockSendFailureAlert).toHaveBeenCalledWith(
+      "owner@example.com",
+      expect.stringContaining("Content brief failed"),
+      expect.stringContaining("AI in marketing"),
+    );
+  });
+
+  it("does not send alert when brief fails but retries remain", async () => {
+    const brief = makeBrief({ retryCount: 0 });
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.findUnique.mockResolvedValue(null);
+    mockGenerateImage.mockRejectedValue(new Error("Provider timeout"));
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+
+    await runFulfillment();
+
+    expect(mockSendFailureAlert).not.toHaveBeenCalled();
   });
 
   it("creates text-only post for TEXT format (no media)", async () => {

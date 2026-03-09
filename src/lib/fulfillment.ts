@@ -8,6 +8,7 @@
 import { prisma } from "@/lib/db";
 import { generateImage } from "@/lib/media";
 import { uploadBuffer } from "@/lib/storage";
+import { sendFailureAlert } from "@/lib/alerts";
 import type { BriefFormat, ContentBrief, ContentStrategy, SocialAccount } from "@prisma/client";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -222,6 +223,25 @@ async function fulfillOneBrief(
         });
         // Structured log for CloudWatch alarm detection
         console.error(`[fulfillment] BRIEF_FAILED briefId=${brief.id} businessId=${brief.businessId} retries=${MAX_RETRIES} error=${errorMessage}`);
+        // SES alert to business owner
+        const owner = await prisma.businessMember.findFirst({
+          where: { businessId: brief.businessId, role: "OWNER" },
+          include: { user: true },
+        });
+        if (owner) {
+          await sendFailureAlert(
+            owner.user.email,
+            `[AI Social] Content brief failed after ${MAX_RETRIES + 1} attempts`,
+            [
+              `Brief ID: ${brief.id}`,
+              `Topic: ${brief.topic}`,
+              `Platform: ${brief.platform}`,
+              `Error: ${errorMessage}`,
+              ``,
+              `The AI fulfillment engine was unable to generate this content. You may want to manually create this post or adjust the brief.`,
+            ].join("\n"),
+          );
+        }
       } else {
         // Revert to PENDING for retry in next cycle
         await prisma.contentBrief.update({

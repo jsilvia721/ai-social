@@ -2,15 +2,14 @@ import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/blotato/publish");
-jest.mock("@aws-sdk/client-ses");
+jest.mock("@/lib/alerts");
 
 import { runScheduler, runMetricsRefresh } from "@/lib/scheduler";
 import { publishPost } from "@/lib/blotato/publish";
-import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { sendFailureAlert } from "@/lib/alerts";
 
 const mockPublishPost = publishPost as jest.MockedFunction<typeof publishPost>;
-const mockSendEmailCommand = SendEmailCommand as jest.MockedClass<typeof SendEmailCommand>;
-const mockSESClient = SESClient as jest.MockedClass<typeof SESClient>;
+const mockSendFailureAlert = sendFailureAlert as jest.MockedFunction<typeof sendFailureAlert>;
 
 // Shared test data
 const mockSocialAccount = {
@@ -97,9 +96,8 @@ beforeEach(() => {
   resetPrismaMock();
   jest.clearAllMocks();
 
-  // Default: SES send succeeds
-  const mockSend = jest.fn().mockResolvedValue({});
-  mockSESClient.mockImplementation(() => ({ send: mockSend }) as unknown as SESClient);
+  // Default: alert utility succeeds
+  mockSendFailureAlert.mockResolvedValue(undefined);
 });
 
 // ── runScheduler ──────────────────────────────────────────────────────────────
@@ -216,7 +214,7 @@ describe("runScheduler", () => {
       })
     );
     // Should NOT send SES alert on first failure
-    expect(mockSendEmailCommand).not.toHaveBeenCalled();
+    expect(mockSendFailureAlert).not.toHaveBeenCalled();
   });
 
   it("sets post to RETRYING on second failure", async () => {
@@ -233,7 +231,7 @@ describe("runScheduler", () => {
         data: expect.objectContaining({ status: "RETRYING", retryCount: 2 }),
       })
     );
-    expect(mockSendEmailCommand).not.toHaveBeenCalled();
+    expect(mockSendFailureAlert).not.toHaveBeenCalled();
   });
 
   it("sets post to FAILED and sends SES alert on third failure", async () => {
@@ -254,7 +252,11 @@ describe("runScheduler", () => {
       })
     );
     // SES alert should be sent
-    expect(mockSendEmailCommand).toHaveBeenCalled();
+    expect(mockSendFailureAlert).toHaveBeenCalledWith(
+      "owner@example.com",
+      expect.stringContaining("Post failed to publish"),
+      expect.stringContaining("post-1"),
+    );
   });
 
   it("does NOT retry on 4xx non-429 errors (client errors are permanent)", async () => {
