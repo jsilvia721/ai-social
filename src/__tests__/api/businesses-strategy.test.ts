@@ -239,14 +239,37 @@ describe("PATCH /api/businesses/[id]/strategy", () => {
     (prismaMock.contentStrategy.update as jest.Mock).mockResolvedValue({
       ...FULL_STRATEGY,
       postingCadence: { TWITTER: 7 },
-      formatMix: { TEXT: 0.5, IMAGE: 0.5 },
+      formatMix: { TWITTER: { TEXT: 5, IMAGE: 5 } },
     });
 
     const res = await PATCH(
       makeReq("PATCH", {
         updatedAt: UPDATED_AT.toISOString(),
         postingCadence: { TWITTER: 7 },
-        formatMix: { TEXT: 0.5, IMAGE: 0.5 },
+        formatMix: { TWITTER: { TEXT: 5, IMAGE: 5 } },
+      }),
+      mockParams
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts nullable cadence (AI-optimized) and null format mix per platform", async () => {
+    mockOwner();
+    (prismaMock.contentStrategy.findUnique as jest.Mock).mockResolvedValue({
+      updatedAt: UPDATED_AT,
+    });
+    (prismaMock.contentStrategy.update as jest.Mock).mockResolvedValue({
+      ...FULL_STRATEGY,
+      postingCadence: { TWITTER: null, INSTAGRAM: 5 },
+      formatMix: { TWITTER: { TEXT: 5, IMAGE: 5 }, INSTAGRAM: null },
+    });
+
+    const res = await PATCH(
+      makeReq("PATCH", {
+        updatedAt: UPDATED_AT.toISOString(),
+        postingCadence: { TWITTER: null, INSTAGRAM: 5 },
+        formatMix: { TWITTER: { TEXT: 5, IMAGE: 5 }, INSTAGRAM: null },
       }),
       mockParams
     );

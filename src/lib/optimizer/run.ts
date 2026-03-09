@@ -19,6 +19,7 @@ import {
   type AnalyzablePost,
 } from "./analyze";
 import { PerformanceAnalysisSchema, DigestChangesSchema } from "./schemas";
+import { flattenFormatMix } from "@/lib/strategy/schemas";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -215,16 +216,22 @@ export async function runWeeklyOptimization(): Promise<{
       let newCadence: Record<string, number> | undefined;
 
       if (guarded.formatMixChanges && Object.keys(guarded.formatMixChanges).length > 0) {
+        // flattenFormatMix handles both old flat format and new per-platform format
         newFormatMix = applyFormatMixChanges(
-          strategy.formatMix as Record<string, number> | null,
+          flattenFormatMix(strategy.formatMix as Record<string, unknown> | null),
           guarded.formatMixChanges
         );
         changes.formatMix = guarded.formatMixChanges;
       }
 
       if (guarded.cadenceChanges && Object.keys(guarded.cadenceChanges).length > 0) {
+        // Filter out null (AI-optimized) cadence values before applying deltas
+        const currentCadence = strategy.postingCadence as Record<string, number | null> | null;
+        const numericCadence = currentCadence
+          ? Object.fromEntries(Object.entries(currentCadence).filter(([, v]) => v !== null)) as Record<string, number>
+          : null;
         newCadence = applyCadenceChanges(
-          strategy.postingCadence as Record<string, number> | null,
+          numericCadence,
           guarded.cadenceChanges
         );
         changes.cadence = guarded.cadenceChanges;

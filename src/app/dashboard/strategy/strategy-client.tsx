@@ -14,6 +14,7 @@ import {
   Loader2,
 } from "lucide-react";
 import type { Prisma } from "@prisma/client";
+import { PLATFORM_FORMATS } from "@/lib/strategy/schemas";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,6 @@ const GOAL_OPTIONS = [
 ];
 
 const PLATFORMS = ["TWITTER", "INSTAGRAM", "FACEBOOK", "TIKTOK", "YOUTUBE"] as const;
-const FORMATS = ["TEXT", "IMAGE", "CAROUSEL", "VIDEO"] as const;
 
 type ReviewMode = "always_human" | "timed_auto" | "immediate";
 
@@ -70,11 +70,31 @@ function reviewModeToFields(mode: ReviewMode, hours: number): { reviewWindowEnab
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function asRecord(val: Prisma.JsonValue): Record<string, number> {
+/** Parse postingCadence JSON: { platform: number | null } */
+function asCadenceRecord(val: Prisma.JsonValue): Record<string, number | null> {
   if (val && typeof val === "object" && !Array.isArray(val)) {
-    return val as Record<string, number>;
+    return val as Record<string, number | null>;
   }
   return {};
+}
+
+/** Parse formatMix JSON: { platform: { format: weight } | null } */
+function asFormatMixRecord(val: Prisma.JsonValue): Record<string, Record<string, number> | null> {
+  if (val && typeof val === "object" && !Array.isArray(val)) {
+    return val as Record<string, Record<string, number> | null>;
+  }
+  return {};
+}
+
+/** Compute percentage from weight within a platform's format weights */
+function weightToPercent(weight: number, totalWeight: number): number {
+  if (totalWeight === 0) return 0;
+  return Math.round((weight / totalWeight) * 100);
+}
+
+/** Capitalize first letter, lowercase the rest */
+function capitalize(s: string): string {
+  return s.charAt(0) + s.slice(1).toLowerCase();
 }
 
 function asResearchSources(val: Prisma.JsonValue): {
@@ -128,8 +148,8 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
   const [pubDraft, setPubDraft] = useState({
     reviewWindowEnabled: committed.reviewWindowEnabled,
     reviewWindowHours: committed.reviewWindowHours,
-    postingCadence: asRecord(committed.postingCadence),
-    formatMix: asRecord(committed.formatMix),
+    postingCadence: asCadenceRecord(committed.postingCadence),
+    formatMix: asFormatMixRecord(committed.formatMix),
   });
 
   const [resDraft, setResDraft] = useState(asResearchSources(committed.researchSources));
@@ -158,8 +178,8 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
       setPubDraft({
         reviewWindowEnabled: committed.reviewWindowEnabled,
         reviewWindowHours: committed.reviewWindowHours,
-        postingCadence: { ...asRecord(committed.postingCadence) },
-        formatMix: { ...asRecord(committed.formatMix) },
+        postingCadence: { ...asCadenceRecord(committed.postingCadence) },
+        formatMix: structuredClone(asFormatMixRecord(committed.formatMix)),
       });
     } else {
       setResDraft({ ...asResearchSources(committed.researchSources) });
@@ -342,7 +362,10 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
             )}
           </Field>
 
-          <Field label="Content Pillars">
+          <Field
+            label="Content Pillars"
+            description="The core topics and themes your content revolves around. These guide AI-generated briefs to stay on-brand and cover a balanced mix of subjects."
+          >
             {coreEditing ? (
               <TagEditor
                 tags={coreDraft.contentPillars}
@@ -417,9 +440,10 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
   const pubEditing = sectionStates.publishing !== "viewing";
   const cadence = pubEditing
     ? pubDraft.postingCadence
-    : asRecord(committed.postingCadence);
-  const mix = pubEditing ? pubDraft.formatMix : asRecord(committed.formatMix);
-  const mixTotal = Object.values(mix).reduce((a, b) => a + b, 0);
+    : asCadenceRecord(committed.postingCadence);
+  const fmix = pubEditing
+    ? pubDraft.formatMix
+    : asFormatMixRecord(committed.formatMix);
 
   function PublishingSection() {
     const reviewMode = pubEditing
@@ -431,14 +455,17 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
       setPubDraft((d) => ({ ...d, ...fields }));
     }
 
-    const unusedPlatforms = PLATFORMS.filter((p) => !(p in cadence));
-    const unusedFormats = FORMATS.filter((f) => !(f in mix));
+    const configuredCadencePlatforms = Object.keys(cadence);
+    const unusedCadencePlatforms = PLATFORMS.filter((p) => !(p in cadence));
+    const configuredMixPlatforms = Object.keys(fmix);
+    const unusedMixPlatforms = PLATFORMS.filter((p) => !(p in fmix));
 
     return (
       <Card className="bg-zinc-800 border-zinc-700">
         <SectionHeader title="Publishing Config" section="publishing" />
         <ErrorBanner section="publishing" />
         <CardContent className="space-y-5">
+          {/* Review Mode */}
           <Field label="Review Mode">
             {pubEditing ? (
               <div className="space-y-2">
@@ -509,58 +536,89 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
             )}
           </Field>
 
-          <Field label="Posting Cadence (posts/week)">
-            <div className="space-y-3">
-              {Object.keys(cadence).length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {Object.entries(cadence).map(([platform, count]) => (
-                    <div key={platform} className="flex items-center gap-2">
-                      <span className="text-sm text-zinc-400 w-24 truncate">
-                        {platform}
-                      </span>
-                      {pubEditing ? (
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            min={0}
-                            max={30}
-                            value={count}
+          {/* Posting Cadence — per platform with AI toggle */}
+          <Field
+            label="Posting Cadence"
+            description="Set the number of posts per week for each platform, or let AI optimize automatically."
+          >
+            <div className="space-y-2">
+              {configuredCadencePlatforms.map((platform) => {
+                const value = cadence[platform];
+                const isAI = value === null;
+                return (
+                  <div
+                    key={platform}
+                    className="flex items-center gap-3 rounded-lg border border-zinc-700 p-3"
+                  >
+                    <span className="text-sm font-medium text-zinc-200 w-24">
+                      {capitalize(platform)}
+                    </span>
+                    {pubEditing ? (
+                      <div className="flex items-center gap-3 flex-1">
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isAI}
                             onChange={(e) =>
                               setPubDraft((d) => ({
                                 ...d,
                                 postingCadence: {
                                   ...d.postingCadence,
-                                  [platform]: parseInt(e.target.value) || 0,
+                                  [platform]: e.target.checked ? null : 3,
                                 },
                               }))
                             }
-                            className="w-16 bg-zinc-700 border-zinc-600"
+                            className="rounded"
                           />
-                          <button
-                            onClick={() =>
-                              setPubDraft((d) => {
-                                const { [platform]: _, ...rest } = d.postingCadence;
-                                return { ...d, postingCadence: rest };
-                              })
-                            }
-                            className="text-zinc-500 hover:text-red-400"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-zinc-300">{count}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {!pubEditing && Object.keys(cadence).length === 0 && (
+                          <span className="text-xs text-zinc-400">AI optimized</span>
+                        </label>
+                        {!isAI && (
+                          <div className="flex items-center gap-1.5">
+                            <Input
+                              type="number"
+                              min={0}
+                              max={30}
+                              value={value ?? 3}
+                              onChange={(e) =>
+                                setPubDraft((d) => ({
+                                  ...d,
+                                  postingCadence: {
+                                    ...d.postingCadence,
+                                    [platform]: parseInt(e.target.value) || 0,
+                                  },
+                                }))
+                              }
+                              className="w-16 bg-zinc-700 border-zinc-600"
+                            />
+                            <span className="text-xs text-zinc-400">posts/week</span>
+                          </div>
+                        )}
+                        <button
+                          onClick={() =>
+                            setPubDraft((d) => {
+                              const { [platform]: _, ...rest } = d.postingCadence;
+                              return { ...d, postingCadence: rest };
+                            })
+                          }
+                          className="ml-auto text-zinc-500 hover:text-red-400"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-zinc-300">
+                        {isAI ? "AI optimized" : `${value} posts/week`}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              {!pubEditing && configuredCadencePlatforms.length === 0 && (
                 <p className="text-sm text-zinc-500">Not configured</p>
               )}
-              {pubEditing && unusedPlatforms.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {unusedPlatforms.map((p) => (
+              {pubEditing && unusedCadencePlatforms.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {unusedCadencePlatforms.map((p) => (
                     <Button
                       key={p}
                       variant="ghost"
@@ -574,7 +632,7 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
                       className="text-violet-400 text-xs"
                     >
                       <Plus className="h-3 w-3 mr-1" />
-                      {p}
+                      {capitalize(p)}
                     </Button>
                   ))}
                 </div>
@@ -582,90 +640,157 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
             </div>
           </Field>
 
-          <Field label="Format Mix">
-            <div className="space-y-3">
-              {Object.keys(mix).length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {Object.entries(mix).map(([format, ratio]) => (
-                    <div key={format} className="flex items-center gap-2">
-                      <span className="text-sm text-zinc-400 w-20 truncate">
-                        {format}
+          {/* Format Mix — per platform with weight sliders */}
+          <Field
+            label="Format Mix"
+            description="Set relative weights for each content format per platform. Percentages are calculated automatically from the weights you assign."
+          >
+            <div className="space-y-4">
+              {configuredMixPlatforms.map((platform) => {
+                const platformWeights = fmix[platform];
+                const isAI = platformWeights === null;
+                const validFormats = PLATFORM_FORMATS[platform] ?? [];
+                const totalWeight = isAI
+                  ? 0
+                  : Object.values(platformWeights ?? {}).reduce((a, b) => a + b, 0);
+
+                return (
+                  <div
+                    key={platform}
+                    className="rounded-lg border border-zinc-700 p-3 space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-zinc-200">
+                        {capitalize(platform)}
                       </span>
-                      {pubEditing ? (
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            min={0}
-                            max={100}
-                            value={Math.round(ratio * 100)}
-                            onChange={(e) =>
-                              setPubDraft((d) => ({
-                                ...d,
-                                formatMix: {
-                                  ...d.formatMix,
-                                  [format]: (parseInt(e.target.value) || 0) / 100,
-                                },
-                              }))
-                            }
-                            className="w-16 bg-zinc-700 border-zinc-600"
-                          />
-                          <span className="text-xs text-zinc-500">%</span>
-                          <button
-                            onClick={() =>
-                              setPubDraft((d) => {
-                                const { [format]: _, ...rest } = d.formatMix;
-                                return { ...d, formatMix: rest };
-                              })
-                            }
-                            className="text-zinc-500 hover:text-red-400"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-zinc-300">
-                          {Math.round(ratio * 100)}%
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {pubEditing && (
+                          <>
+                            <label className="flex items-center gap-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isAI}
+                                onChange={(e) =>
+                                  setPubDraft((d) => ({
+                                    ...d,
+                                    formatMix: {
+                                      ...d.formatMix,
+                                      [platform]: e.target.checked
+                                        ? null
+                                        : Object.fromEntries(
+                                            validFormats.map((f) => [f, 1])
+                                          ),
+                                    },
+                                  }))
+                                }
+                                className="rounded"
+                              />
+                              <span className="text-xs text-zinc-400">AI optimized</span>
+                            </label>
+                            <button
+                              onClick={() =>
+                                setPubDraft((d) => {
+                                  const { [platform]: _, ...rest } = d.formatMix;
+                                  return { ...d, formatMix: rest };
+                                })
+                              }
+                              className="text-zinc-500 hover:text-red-400"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  ))}
-                </div>
-              )}
-              {pubEditing && (
-                <p
-                  className={`text-xs ${
-                    Object.keys(mix).length === 0
-                      ? "text-zinc-500"
-                      : Math.abs(mixTotal - 1) <= 0.05
-                        ? "text-zinc-500"
-                        : "text-amber-400"
-                  }`}
-                >
-                  {Object.keys(mix).length === 0
-                    ? "Add formats to configure the mix"
-                    : `Total: ${Math.round(mixTotal * 100)}%${Math.abs(mixTotal - 1) > 0.05 ? " — should be ~100%" : ""}`}
-                </p>
-              )}
-              {!pubEditing && Object.keys(mix).length === 0 && (
+
+                    {isAI ? (
+                      <p className="text-xs text-zinc-500">AI will determine the best format mix for this platform</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {validFormats.map((format) => {
+                          const weight = platformWeights?.[format] ?? 0;
+                          const pct = weightToPercent(weight, totalWeight);
+
+                          return (
+                            <div key={format} className="flex items-center gap-3">
+                              <span className="text-xs text-zinc-400 w-16">
+                                {capitalize(format)}
+                              </span>
+                              {pubEditing ? (
+                                <>
+                                  <input
+                                    type="range"
+                                    min={0}
+                                    max={10}
+                                    step={1}
+                                    value={weight}
+                                    onChange={(e) =>
+                                      setPubDraft((d) => ({
+                                        ...d,
+                                        formatMix: {
+                                          ...d.formatMix,
+                                          [platform]: {
+                                            ...(d.formatMix[platform] ?? {}),
+                                            [format]: parseInt(e.target.value),
+                                          },
+                                        },
+                                      }))
+                                    }
+                                    className="flex-1 h-1.5 accent-violet-500 bg-zinc-700 rounded-full cursor-pointer appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-violet-500 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-zinc-700"
+                                  />
+                                  <span className="text-xs text-zinc-400 w-8 text-right tabular-nums">
+                                    {weight}
+                                  </span>
+                                  <span className="text-xs text-zinc-500 w-10 text-right tabular-nums">
+                                    {pct}%
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="flex-1 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full bg-violet-500 rounded-full"
+                                      style={{ width: `${pct}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-xs text-zinc-300 w-10 text-right tabular-nums">
+                                    {pct}%
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {!pubEditing && configuredMixPlatforms.length === 0 && (
                 <p className="text-sm text-zinc-500">Not configured</p>
               )}
-              {pubEditing && unusedFormats.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {unusedFormats.map((f) => (
+              {pubEditing && unusedMixPlatforms.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {unusedMixPlatforms.map((p) => (
                     <Button
-                      key={f}
+                      key={p}
                       variant="ghost"
                       size="sm"
                       onClick={() =>
                         setPubDraft((d) => ({
                           ...d,
-                          formatMix: { ...d.formatMix, [f]: 0 },
+                          formatMix: {
+                            ...d.formatMix,
+                            [p]: Object.fromEntries(
+                              (PLATFORM_FORMATS[p] ?? []).map((f) => [f, 1])
+                            ),
+                          },
                         }))
                       }
                       className="text-violet-400 text-xs"
                     >
                       <Plus className="h-3 w-3 mr-1" />
-                      {f}
+                      {capitalize(p)}
                     </Button>
                   ))}
                 </div>
@@ -784,14 +909,20 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
 
 function Field({
   label,
+  description,
   children,
 }: {
   label: string;
+  description?: string;
   children: React.ReactNode;
 }) {
   return (
     <div>
-      <p className="text-sm font-medium text-zinc-400 mb-1.5">{label}</p>
+      <p className="text-sm font-medium text-zinc-400 mb-0.5">{label}</p>
+      {description && (
+        <p className="text-xs text-zinc-500 mb-2">{description}</p>
+      )}
+      {!description && <div className="mb-1" />}
       {children}
     </div>
   );
