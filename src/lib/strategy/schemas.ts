@@ -59,7 +59,7 @@ export const StrategyPatchSchema = z
       .enum(["ENGAGEMENT", "REACH", "CONVERSIONS", "BRAND_AWARENESS"])
       .optional(),
     reviewWindowEnabled: z.boolean().optional(),
-    reviewWindowHours: z.number().int().min(1).max(168).optional(),
+    reviewWindowHours: z.number().int().min(0).max(168).optional(),
     postingCadence: PostingCadenceSchema.optional(),
     formatMix: FormatMixSchema.optional(),
     researchSources: ResearchSourcesSchema.optional(),

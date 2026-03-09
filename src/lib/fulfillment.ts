@@ -23,7 +23,7 @@ export interface FulfillmentResult {
 export type ReviewDecision =
   | { status: "PENDING_REVIEW"; reviewWindowExpiresAt: Date }
   | { status: "PENDING_REVIEW"; reviewWindowExpiresAt: null }
-  | { status: "SCHEDULED"; reason: "insufficient_review_time" };
+  | { status: "SCHEDULED"; reason: "insufficient_review_time" | "no_review_configured" };
 
 type FulfillableBrief = ContentBrief & {
   business: {
@@ -61,6 +61,10 @@ export function computeReviewDecision(
   }
 
   if (reviewWindowEnabled) {
+    // Immediate auto-publish mode — no review at all
+    if (reviewWindowHours === 0) {
+      return { status: "SCHEDULED", reason: "no_review_configured" };
+    }
     // Auto-approve mode: if review window would exceed scheduledFor, skip review
     if (hoursUntilScheduled < reviewWindowHours) {
       return { status: "SCHEDULED", reason: "insufficient_review_time" };

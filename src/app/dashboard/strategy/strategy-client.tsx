@@ -12,7 +12,6 @@ import {
   Plus,
   Trash2,
   Loader2,
-  Bot,
 } from "lucide-react";
 import type { Prisma } from "@prisma/client";
 
@@ -50,6 +49,25 @@ const GOAL_OPTIONS = [
   { value: "BRAND_AWARENESS", label: "Brand Awareness" },
 ];
 
+const PLATFORMS = ["TWITTER", "INSTAGRAM", "FACEBOOK", "TIKTOK", "YOUTUBE"] as const;
+const FORMATS = ["TEXT", "IMAGE", "CAROUSEL", "VIDEO"] as const;
+
+type ReviewMode = "always_human" | "timed_auto" | "immediate";
+
+function getReviewMode(enabled: boolean, hours: number): ReviewMode {
+  if (!enabled) return "always_human";
+  if (hours === 0) return "immediate";
+  return "timed_auto";
+}
+
+function reviewModeToFields(mode: ReviewMode, hours: number): { reviewWindowEnabled: boolean; reviewWindowHours: number } {
+  switch (mode) {
+    case "always_human": return { reviewWindowEnabled: false, reviewWindowHours: hours || 24 };
+    case "timed_auto": return { reviewWindowEnabled: true, reviewWindowHours: Math.max(hours, 1) };
+    case "immediate": return { reviewWindowEnabled: true, reviewWindowHours: 0 };
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function asRecord(val: Prisma.JsonValue): Record<string, number> {
@@ -77,12 +95,6 @@ function asResearchSources(val: Prisma.JsonValue): {
   return { rssFeeds: [], subreddits: [] };
 }
 
-function asStringRecord(val: Prisma.JsonValue): Record<string, string[]> {
-  if (val && typeof val === "object" && !Array.isArray(val)) {
-    return val as Record<string, string[]>;
-  }
-  return {};
-}
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -410,95 +422,169 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
   const mixTotal = Object.values(mix).reduce((a, b) => a + b, 0);
 
   function PublishingSection() {
+    const reviewMode = pubEditing
+      ? getReviewMode(pubDraft.reviewWindowEnabled, pubDraft.reviewWindowHours)
+      : getReviewMode(committed.reviewWindowEnabled, committed.reviewWindowHours);
+
+    function setReviewMode(mode: ReviewMode) {
+      const fields = reviewModeToFields(mode, pubDraft.reviewWindowHours);
+      setPubDraft((d) => ({ ...d, ...fields }));
+    }
+
+    const unusedPlatforms = PLATFORMS.filter((p) => !(p in cadence));
+    const unusedFormats = FORMATS.filter((f) => !(f in mix));
+
     return (
       <Card className="bg-zinc-800 border-zinc-700">
         <SectionHeader title="Publishing Config" section="publishing" />
         <ErrorBanner section="publishing" />
         <CardContent className="space-y-5">
-          <Field label="Review Window">
+          <Field label="Review Mode">
             {pubEditing ? (
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <label className="flex items-center gap-2 text-sm text-zinc-300">
+              <div className="space-y-2">
+                <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border border-zinc-700 p-3 hover:bg-zinc-700/30 transition-colors">
                   <input
-                    type="checkbox"
-                    checked={pubDraft.reviewWindowEnabled}
-                    onChange={(e) =>
-                      setPubDraft((d) => ({
-                        ...d,
-                        reviewWindowEnabled: e.target.checked,
-                      }))
-                    }
-                    className="rounded bg-zinc-700 border-zinc-600"
+                    type="radio"
+                    name="reviewMode"
+                    checked={reviewMode === "always_human"}
+                    onChange={() => setReviewMode("always_human")}
+                    className="mt-0.5"
                   />
-                  Require human review
-                </label>
-                {pubDraft.reviewWindowEnabled && (
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={168}
-                      value={pubDraft.reviewWindowHours}
-                      onChange={(e) =>
-                        setPubDraft((d) => ({
-                          ...d,
-                          reviewWindowHours: parseInt(e.target.value) || 1,
-                        }))
-                      }
-                      className="w-20 bg-zinc-700 border-zinc-600"
-                    />
-                    <span className="text-sm text-zinc-400">hours</span>
+                  <div>
+                    <p className="text-sm font-medium text-zinc-200">Always require human review</p>
+                    <p className="text-xs text-zinc-500">Posts stay in review until manually approved or rejected</p>
                   </div>
-                )}
+                </label>
+                <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border border-zinc-700 p-3 hover:bg-zinc-700/30 transition-colors">
+                  <input
+                    type="radio"
+                    name="reviewMode"
+                    checked={reviewMode === "timed_auto"}
+                    onChange={() => setReviewMode("timed_auto")}
+                    className="mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-zinc-200">Auto-approve after delay</p>
+                    <p className="text-xs text-zinc-500">Posts auto-approve if not reviewed within the window</p>
+                    {reviewMode === "timed_auto" && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <Input
+                          type="number"
+                          min={1}
+                          max={168}
+                          value={pubDraft.reviewWindowHours}
+                          onChange={(e) =>
+                            setPubDraft((d) => ({
+                              ...d,
+                              reviewWindowHours: parseInt(e.target.value) || 1,
+                            }))
+                          }
+                          className="w-20 bg-zinc-700 border-zinc-600"
+                        />
+                        <span className="text-sm text-zinc-400">hours</span>
+                      </div>
+                    )}
+                  </div>
+                </label>
+                <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border border-zinc-700 p-3 hover:bg-zinc-700/30 transition-colors">
+                  <input
+                    type="radio"
+                    name="reviewMode"
+                    checked={reviewMode === "immediate"}
+                    onChange={() => setReviewMode("immediate")}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-zinc-200">Automatic (no review)</p>
+                    <p className="text-xs text-zinc-500">Posts publish immediately without review</p>
+                  </div>
+                </label>
               </div>
             ) : (
               <p className="text-zinc-300">
-                {committed.reviewWindowEnabled
-                  ? `Enabled — ${committed.reviewWindowHours}h review window`
-                  : "Disabled — posts publish automatically"}
+                {reviewMode === "always_human" && "Always require human review"}
+                {reviewMode === "timed_auto" && `Auto-approve after ${committed.reviewWindowHours}h if not reviewed`}
+                {reviewMode === "immediate" && "Automatic — posts publish without review"}
               </p>
             )}
           </Field>
 
           <Field label="Posting Cadence (posts/week)">
-            {Object.keys(cadence).length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {Object.entries(cadence).map(([platform, count]) => (
-                  <div key={platform} className="flex items-center gap-2">
-                    <span className="text-sm text-zinc-400 w-24 truncate">
-                      {platform}
-                    </span>
-                    {pubEditing ? (
-                      <Input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={count}
-                        onChange={(e) =>
-                          setPubDraft((d) => ({
-                            ...d,
-                            postingCadence: {
-                              ...d.postingCadence,
-                              [platform]: parseInt(e.target.value) || 0,
-                            },
-                          }))
-                        }
-                        className="w-16 bg-zinc-700 border-zinc-600"
-                      />
-                    ) : (
-                      <span className="text-zinc-300">{count}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-500">Not configured</p>
-            )}
+            <div className="space-y-3">
+              {Object.keys(cadence).length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {Object.entries(cadence).map(([platform, count]) => (
+                    <div key={platform} className="flex items-center gap-2">
+                      <span className="text-sm text-zinc-400 w-24 truncate">
+                        {platform}
+                      </span>
+                      {pubEditing ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={30}
+                            value={count}
+                            onChange={(e) =>
+                              setPubDraft((d) => ({
+                                ...d,
+                                postingCadence: {
+                                  ...d.postingCadence,
+                                  [platform]: parseInt(e.target.value) || 0,
+                                },
+                              }))
+                            }
+                            className="w-16 bg-zinc-700 border-zinc-600"
+                          />
+                          <button
+                            onClick={() =>
+                              setPubDraft((d) => {
+                                const { [platform]: _, ...rest } = d.postingCadence;
+                                return { ...d, postingCadence: rest };
+                              })
+                            }
+                            className="text-zinc-500 hover:text-red-400"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-zinc-300">{count}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!pubEditing && Object.keys(cadence).length === 0 && (
+                <p className="text-sm text-zinc-500">Not configured</p>
+              )}
+              {pubEditing && unusedPlatforms.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {unusedPlatforms.map((p) => (
+                    <Button
+                      key={p}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setPubDraft((d) => ({
+                          ...d,
+                          postingCadence: { ...d.postingCadence, [p]: 3 },
+                        }))
+                      }
+                      className="text-violet-400 text-xs"
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      {p}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
           </Field>
 
           <Field label="Format Mix">
-            {Object.keys(mix).length > 0 ? (
-              <div className="space-y-3">
+            <div className="space-y-3">
+              {Object.keys(mix).length > 0 && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {Object.entries(mix).map(([format, ratio]) => (
                     <div key={format} className="flex items-center gap-2">
@@ -524,6 +610,17 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
                             className="w-16 bg-zinc-700 border-zinc-600"
                           />
                           <span className="text-xs text-zinc-500">%</span>
+                          <button
+                            onClick={() =>
+                              setPubDraft((d) => {
+                                const { [format]: _, ...rest } = d.formatMix;
+                                return { ...d, formatMix: rest };
+                              })
+                            }
+                            className="text-zinc-500 hover:text-red-400"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       ) : (
                         <span className="text-zinc-300">
@@ -533,48 +630,47 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
                     </div>
                   ))}
                 </div>
-                {pubEditing && (
-                  <p
-                    className={`text-xs ${
-                      Math.abs(mixTotal - 1) <= 0.05
+              )}
+              {pubEditing && (
+                <p
+                  className={`text-xs ${
+                    Object.keys(mix).length === 0
+                      ? "text-zinc-500"
+                      : Math.abs(mixTotal - 1) <= 0.05
                         ? "text-zinc-500"
                         : "text-amber-400"
-                    }`}
-                  >
-                    Total: {Math.round(mixTotal * 100)}%
-                    {Math.abs(mixTotal - 1) > 0.05 && " — should be ~100%"}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-500">Not configured</p>
-            )}
-          </Field>
-
-          <Field label="Optimal Time Windows">
-            <div className="flex items-center gap-2 text-sm">
-              <Bot className="h-4 w-4 text-violet-400" />
-              <span className="text-violet-400">AI-optimized</span>
+                  }`}
+                >
+                  {Object.keys(mix).length === 0
+                    ? "Add formats to configure the mix"
+                    : `Total: ${Math.round(mixTotal * 100)}%${Math.abs(mixTotal - 1) > 0.05 ? " — should be ~100%" : ""}`}
+                </p>
+              )}
+              {!pubEditing && Object.keys(mix).length === 0 && (
+                <p className="text-sm text-zinc-500">Not configured</p>
+              )}
+              {pubEditing && unusedFormats.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {unusedFormats.map((f) => (
+                    <Button
+                      key={f}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setPubDraft((d) => ({
+                          ...d,
+                          formatMix: { ...d.formatMix, [f]: 0 },
+                        }))
+                      }
+                      className="text-violet-400 text-xs"
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      {f}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
-            {Object.keys(asStringRecord(committed.optimalTimeWindows)).length >
-            0 ? (
-              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {Object.entries(
-                  asStringRecord(committed.optimalTimeWindows)
-                ).map(([platform, windows]) => (
-                  <div key={platform} className="text-sm">
-                    <span className="text-zinc-400">{platform}: </span>
-                    <span className="text-zinc-300">
-                      {(windows as string[]).join(", ")}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-1 text-sm text-zinc-500">
-                Will be set after the first optimization cycle
-              </p>
-            )}
           </Field>
         </CardContent>
       </Card>
@@ -664,9 +760,8 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
       <div className="flex flex-col gap-1 mb-6">
         <h1 className="text-2xl font-bold text-zinc-50">Content Strategy</h1>
         {committed.lastOptimizedAt && (
-          <p className="text-sm text-zinc-500 flex items-center gap-1.5">
-            <Bot className="h-3.5 w-3.5" />
-            Last AI optimization:{" "}
+          <p className="text-sm text-zinc-500">
+            Last optimized:{" "}
             {new Date(committed.lastOptimizedAt).toLocaleDateString("en-US", {
               month: "long",
               day: "numeric",

@@ -106,6 +106,7 @@ export default async function StrategyPage() {
 
   return (
     <StrategyClient
+      key={activeBusinessId}
       initialStrategy={serialized}
       businessId={activeBusinessId}
       isOwner={isOwner}

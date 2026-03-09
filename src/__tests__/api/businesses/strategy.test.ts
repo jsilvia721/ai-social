@@ -81,12 +81,12 @@ describe("PATCH /api/businesses/[id]/strategy", () => {
     expect(body.reviewWindowHours).toBe(12);
   });
 
-  it("rejects invalid reviewWindowHours", async () => {
+  it("rejects negative reviewWindowHours", async () => {
     mockAuthenticated();
     prismaMock.businessMember.findUnique.mockResolvedValue({ id: "mem-1", role: "OWNER" } as never);
 
     const res = await PATCH(
-      makePatchRequest("biz-1", { updatedAt: "2026-03-09T10:00:00Z", reviewWindowHours: 0 }),
+      makePatchRequest("biz-1", { updatedAt: "2026-03-09T10:00:00Z", reviewWindowHours: -1 }),
       makeParams("biz-1")
     );
     expect(res.status).toBe(400);
