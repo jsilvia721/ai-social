@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList, LogOut, Wrench, Menu, X } from "lucide-react";
+import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList, LogOut, Wrench, Menu, X, FileCheck } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useState, useTransition, useEffect, useRef, createContext, useContext } from "react";
@@ -30,6 +30,7 @@ const NAV_LINKS = [
   { icon: LayoutDashboard, label: "Overview", href: "/dashboard" },
   { icon: CalendarDays, label: "Posts", href: "/dashboard/posts" },
   { icon: PenSquare, label: "New Post", href: "/dashboard/posts/new" },
+  { icon: FileCheck, label: "Review", href: "/dashboard/review" },
   { icon: BarChart2, label: "Analytics", href: "/dashboard/analytics" },
   { icon: ClipboardList, label: "Content Queue", href: "/dashboard/briefs" },
   { icon: Link2, label: "Accounts", href: "/dashboard/accounts" },
@@ -83,6 +84,30 @@ export function Sidebar({ user, businesses = [], activeBusinessId, showDevTools 
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const activeBusiness = businesses.find((b) => b.id === localActiveId) ?? businesses[0];
+
+  // Review badge count (client-side polling)
+  const [reviewCount, setReviewCount] = useState(0);
+  useEffect(() => {
+    if (!localActiveId) return;
+    let cancelled = false;
+    async function fetchCount() {
+      try {
+        const res = await fetch("/api/posts/review-count");
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setReviewCount(data.count ?? 0);
+        }
+      } catch {
+        // best-effort
+      }
+    }
+    fetchCount();
+    const id = setInterval(fetchCount, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [localActiveId]);
 
   // Close mobile sidebar on route change
   const pathnameRef = useRef(pathname);
@@ -219,6 +244,11 @@ export function Sidebar({ user, businesses = [], activeBusinessId, showDevTools 
           >
             <Icon className="h-4 w-4 shrink-0" />
             {label}
+            {label === "Review" && reviewCount > 0 && (
+              <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-600 px-1.5 text-[10px] font-bold text-white">
+                {reviewCount > 99 ? "99+" : reviewCount}
+              </span>
+            )}
           </Link>
         ))}
         {showDevTools && (

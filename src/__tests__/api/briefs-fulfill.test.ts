@@ -133,8 +133,9 @@ describe("POST /api/briefs/[id]/fulfill", () => {
       id: "post-1", businessId: "biz-1", socialAccountId: "sa-1",
       content: "Great post about AI!", status: "SCHEDULED",
     };
-    prismaMock.$transaction.mockResolvedValue([createdPost, {}] as any);
+    prismaMock.post.create.mockResolvedValue(createdPost as any);
     prismaMock.contentBrief.update.mockResolvedValue({} as any);
+    prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock));
     prismaMock.contentBrief.findFirst.mockResolvedValue({ id: "cb-2" } as any);
 
     const [req, ctx] = makeRequest("cb-1", validBody);
@@ -157,8 +158,9 @@ describe("POST /api/briefs/[id]/fulfill", () => {
       id: "sa-1", businessId: "biz-1", platform: "TWITTER",
     } as any);
 
-    prismaMock.$transaction.mockResolvedValue([{ id: "post-1" }, {}] as any);
+    prismaMock.post.create.mockResolvedValue({ id: "post-1" } as any);
     prismaMock.contentBrief.update.mockResolvedValue({} as any);
+    prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock));
     prismaMock.contentBrief.findFirst.mockResolvedValue(null);
 
     const [req, ctx] = makeRequest("cb-1", validBody);

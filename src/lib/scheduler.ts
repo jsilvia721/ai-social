@@ -146,11 +146,35 @@ async function recoverStuckPosts(): Promise<void> {
   });
 }
 
+// ── Auto-approval ────────────────────────────────────────────────────────────
+
+async function autoApproveExpiredReviews(): Promise<void> {
+  const now = new Date();
+  const result = await prisma.post.updateMany({
+    where: {
+      status: "PENDING_REVIEW",
+      reviewWindowExpiresAt: { lte: now, not: null },
+    },
+    data: { status: "SCHEDULED" },
+  });
+  if (result.count > 0) {
+    console.log(`[scheduler] Auto-approved ${result.count} posts with expired review windows`);
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function runScheduler(): Promise<{ processed: number }> {
   // Reset any posts stuck in PUBLISHING for > 5 min (Lambda crash / cold start gap)
   await recoverStuckPosts();
+
+  // Auto-approve posts with expired review windows (BEFORE due-posts query for same-invocation pickup)
+  try {
+    await autoApproveExpiredReviews();
+  } catch (err) {
+    // Must NOT prevent publisher from running
+    console.error("[scheduler] Auto-approval failed (non-fatal):", err);
+  }
 
   const now = new Date();
 

@@ -140,7 +140,7 @@ model Post {
   reviewWindowExpiresAt DateTime?
   blotatoPostId         String?
   errorMessage          String?
-  briefId               String?
+  briefId               String?       @unique
   repurposeGroupId      String?   // cuid linking variant posts from a single repurpose operation
   topicPillar           String?   // which content pillar this maps to
   tone                  String?   // "educational" | "entertaining" | "promotional" | "community"
@@ -160,6 +160,9 @@ model Post {
   @@index([status, scheduledAt])
   @@index([status, retryAt])
   @@index([status, metricsUpdatedAt])
+  @@index([status, reviewWindowExpiresAt])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
   @@index([repurposeGroupId])
 }
 
@@ -217,6 +220,8 @@ model ContentBrief {
   status            BriefStatus @default(PENDING)
   weekOf            DateTime
   sortOrder         Int         @default(0)
+  retryCount        Int         @default(0)
+  errorMessage      String?     @db.Text
   postId            String?     @unique
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
@@ -225,6 +230,7 @@ model ContentBrief {
 
   @@index([businessId, status])
   @@index([status, weekOf])
+  @@index([status, scheduledFor])
 }
 
 enum BriefFormat {
@@ -236,7 +242,9 @@ enum BriefFormat {
 
 enum BriefStatus {
   PENDING
+  FULFILLING
   FULFILLED
+  FAILED
   EXPIRED
   CANCELLED
 }

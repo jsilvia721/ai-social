@@ -26,6 +26,23 @@ export async function uploadFile(
   return getPublicUrl(key);
 }
 
+export async function uploadBuffer(
+  buffer: Buffer,
+  key: string,
+  mimeType: string
+): Promise<string> {
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: mimeType,
+      ContentLength: buffer.byteLength,
+    })
+  );
+  return getPublicUrl(key);
+}
+
 export function getPublicUrl(key: string): string {
   const base = publicBase.endsWith("/") ? publicBase.slice(0, -1) : publicBase;
   return `${base}/${key}`;
