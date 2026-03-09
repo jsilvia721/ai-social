@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList, LogOut, Wrench, Menu, X, FileCheck } from "lucide-react";
+import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList, LogOut, Wrench, Menu, X, FileCheck, Lightbulb } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useState, useTransition, useEffect, useRef, createContext, useContext } from "react";
@@ -32,6 +32,7 @@ const NAV_LINKS = [
   { icon: PenSquare, label: "New Post", href: "/dashboard/posts/new" },
   { icon: FileCheck, label: "Review", href: "/dashboard/review" },
   { icon: BarChart2, label: "Analytics", href: "/dashboard/analytics" },
+  { icon: Lightbulb, label: "Insights", href: "/dashboard/insights" },
   { icon: ClipboardList, label: "Content Queue", href: "/dashboard/briefs" },
   { icon: Link2, label: "Accounts", href: "/dashboard/accounts" },
 ] as const;
