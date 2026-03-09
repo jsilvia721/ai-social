@@ -140,6 +140,18 @@ export default $config({
       },
     });
 
+    // ── Cron: Brief Fulfillment (every 6 hours) ────────────────
+    new sst.aws.Cron("BriefFulfillment", {
+      schedule: "rate(6 hours)",
+      job: {
+        handler: "src/cron/fulfill.handler",
+        environment,
+        timeout: "5 minutes",
+        logging: { retention: "1 month" },
+        concurrency: 1,
+      },
+    });
+
     // ── Cron: Strategy Optimizer (Sunday 02:00 UTC) ─────────────
     new sst.aws.Cron("StrategyOptimizer", {
       schedule: "cron(0 2 ? * SUN *)",

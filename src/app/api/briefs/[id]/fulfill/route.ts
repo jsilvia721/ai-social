@@ -91,16 +91,13 @@ export async function POST(
 
   // Derive topic pillar from brief topic by matching against strategy pillars
   const pillars = brief.business?.contentStrategy?.contentPillars ?? [];
-  const topicLower = brief.topic?.toLowerCase() ?? "";
-  const matchedPillar = topicLower
-    ? (pillars.find((p: string) =>
-        topicLower.includes(p.toLowerCase()) || p.toLowerCase().includes(topicLower)
-      ) ?? null)
-    : null;
+  const { matchPillar } = await import("@/lib/fulfillment");
+  const matchedPillar = matchPillar(brief.topic ?? "", pillars);
 
-  // Create post + update brief in a transaction
-  const [post] = await prisma.$transaction([
-    prisma.post.create({
+  // Create post + update brief in an interactive transaction
+  // (uses interactive form so postId can be set in the same transaction)
+  const post = await prisma.$transaction(async (tx) => {
+    const created = await tx.post.create({
       data: {
         businessId: brief.businessId,
         socialAccountId,
@@ -111,17 +108,12 @@ export async function POST(
         briefId: brief.id,
         topicPillar: matchedPillar,
       },
-    }),
-    prisma.contentBrief.update({
+    });
+    await tx.contentBrief.update({
       where: { id: brief.id },
-      data: { status: "FULFILLED" },
-    }),
-  ]);
-
-  // Update brief with postId (separate query since we need the post ID)
-  await prisma.contentBrief.update({
-    where: { id: brief.id },
-    data: { postId: post.id },
+      data: { status: "FULFILLED", postId: created.id },
+    });
+    return created;
   });
 
   // Find the next pending brief for auto-advance
