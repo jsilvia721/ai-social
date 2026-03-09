@@ -20,6 +20,7 @@ const config: Config = {
     "!src/app/globals.css",
     "!src/app/**/layout.tsx",
     "!src/app/**/page.tsx",         // server components — DB-coupled, covered via API route tests
+    "!src/app/**/*-client.tsx",     // React client components — need React Testing Library (deferred)
     "!src/components/ui/**",        // shadcn/ui — generated, no logic
     "!src/components/providers/**",
     "!src/types/**",

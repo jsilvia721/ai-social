@@ -1,6 +1,7 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { extractContentStrategy } from "@/lib/ai";
+import { WizardAnswersSchema } from "@/lib/strategy/schemas";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const { id: businessId } = await params;
 
-  // Verify user is a member of this business (admins bypass membership check)
+  // Owner-only — creating a content strategy is a high-impact action
   const isAdmin = session.user.isAdmin ?? false;
   if (!isAdmin) {
     const member = await prisma.businessMember.findFirst({
@@ -22,6 +23,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
     if (!member) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (member.role !== "OWNER") {
+      return NextResponse.json(
+        { error: "Only business owners can set up content strategy" },
+        { status: 403 }
+      );
     }
   }
 
@@ -33,18 +40,24 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ strategy: existing });
   }
 
-  const body = await req.json();
-  const { answers } = body as { answers?: Record<string, string> };
-
-  if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
+  const body = await req.json().catch(() => null);
+  if (!body || !body.answers) {
     return NextResponse.json(
       { error: "answers are required when no strategy exists" },
       { status: 400 }
     );
   }
 
+  const parsed = WizardAnswersSchema.safeParse(body.answers);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid answers", details: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+
   try {
-    const strategyData = await extractContentStrategy(answers);
+    const strategyData = await extractContentStrategy(parsed.data);
     const strategy = await prisma.contentStrategy.create({
       data: { businessId, ...strategyData },
     });

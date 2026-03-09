@@ -63,14 +63,16 @@ describe("GET /api/businesses/[id]/strategy", () => {
 describe("PATCH /api/businesses/[id]/strategy", () => {
   it("updates review window settings with Zod validation", async () => {
     mockAuthenticated();
+    const updatedAt = new Date("2026-03-09T10:00:00Z");
     prismaMock.businessMember.findUnique.mockResolvedValue({ id: "mem-1", role: "OWNER" } as never);
+    prismaMock.contentStrategy.findUnique.mockResolvedValue({ updatedAt } as never);
     prismaMock.contentStrategy.update.mockResolvedValue({
       reviewWindowEnabled: true,
       reviewWindowHours: 12,
     } as never);
 
     const res = await PATCH(
-      makePatchRequest("biz-1", { reviewWindowEnabled: true, reviewWindowHours: 12 }),
+      makePatchRequest("biz-1", { updatedAt: updatedAt.toISOString(), reviewWindowEnabled: true, reviewWindowHours: 12 }),
       makeParams("biz-1")
     );
     expect(res.status).toBe(200);
@@ -84,7 +86,7 @@ describe("PATCH /api/businesses/[id]/strategy", () => {
     prismaMock.businessMember.findUnique.mockResolvedValue({ id: "mem-1", role: "OWNER" } as never);
 
     const res = await PATCH(
-      makePatchRequest("biz-1", { reviewWindowHours: 0 }),
+      makePatchRequest("biz-1", { updatedAt: "2026-03-09T10:00:00Z", reviewWindowHours: 0 }),
       makeParams("biz-1")
     );
     expect(res.status).toBe(400);
@@ -95,7 +97,7 @@ describe("PATCH /api/businesses/[id]/strategy", () => {
     prismaMock.businessMember.findUnique.mockResolvedValue({ id: "mem-1", role: "OWNER" } as never);
 
     const res = await PATCH(
-      makePatchRequest("biz-1", { reviewWindowHours: 200 }),
+      makePatchRequest("biz-1", { updatedAt: "2026-03-09T10:00:00Z", reviewWindowHours: 200 }),
       makeParams("biz-1")
     );
     expect(res.status).toBe(400);

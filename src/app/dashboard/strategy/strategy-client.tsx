@@ -1,0 +1,851 @@
+"use client";
+
+import { useState, useRef, useCallback } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Pencil,
+  Save,
+  X,
+  Plus,
+  Trash2,
+  Loader2,
+  Bot,
+} from "lucide-react";
+import type { Prisma } from "@prisma/client";
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+type SectionKey = "core" | "publishing" | "research";
+type SectionState = "viewing" | "editing" | "saving" | "error";
+
+interface Strategy {
+  industry: string;
+  targetAudience: string;
+  contentPillars: string[];
+  brandVoice: string;
+  optimizationGoal: string;
+  reviewWindowEnabled: boolean;
+  reviewWindowHours: number;
+  postingCadence: Prisma.JsonValue;
+  formatMix: Prisma.JsonValue;
+  researchSources: Prisma.JsonValue;
+  optimalTimeWindows: Prisma.JsonValue;
+  lastOptimizedAt: string | null;
+  updatedAt: string;
+}
+
+interface Props {
+  initialStrategy: Strategy;
+  businessId: string;
+  isOwner: boolean;
+}
+
+const GOAL_OPTIONS = [
+  { value: "ENGAGEMENT", label: "Engagement" },
+  { value: "REACH", label: "Reach" },
+  { value: "CONVERSIONS", label: "Conversions" },
+  { value: "BRAND_AWARENESS", label: "Brand Awareness" },
+];
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function asRecord(val: Prisma.JsonValue): Record<string, number> {
+  if (val && typeof val === "object" && !Array.isArray(val)) {
+    return val as Record<string, number>;
+  }
+  return {};
+}
+
+function asResearchSources(val: Prisma.JsonValue): {
+  rssFeeds: string[];
+  subreddits: string[];
+} {
+  if (val && typeof val === "object" && !Array.isArray(val)) {
+    const obj = val as Record<string, unknown>;
+    return {
+      rssFeeds: Array.isArray(obj.rssFeeds)
+        ? (obj.rssFeeds as string[])
+        : [],
+      subreddits: Array.isArray(obj.subreddits)
+        ? (obj.subreddits as string[])
+        : [],
+    };
+  }
+  return { rssFeeds: [], subreddits: [] };
+}
+
+function asStringRecord(val: Prisma.JsonValue): Record<string, string[]> {
+  if (val && typeof val === "object" && !Array.isArray(val)) {
+    return val as Record<string, string[]>;
+  }
+  return {};
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
+
+export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) {
+  // Committed state (last saved / server truth)
+  const [committed, setCommitted] = useState<Strategy>(initialStrategy);
+
+  // Per-section state machine
+  const [sectionStates, setSectionStates] = useState<Record<SectionKey, SectionState>>({
+    core: "viewing",
+    publishing: "viewing",
+    research: "viewing",
+  });
+
+  // Per-section error messages
+  const [errors, setErrors] = useState<Record<SectionKey, string | null>>({
+    core: null,
+    publishing: null,
+    research: null,
+  });
+
+  // Draft state for each section (populated when editing)
+  const [coreDraft, setCoreDraft] = useState({
+    industry: committed.industry,
+    targetAudience: committed.targetAudience,
+    contentPillars: [...committed.contentPillars],
+    brandVoice: committed.brandVoice,
+    optimizationGoal: committed.optimizationGoal,
+  });
+
+  const [pubDraft, setPubDraft] = useState({
+    reviewWindowEnabled: committed.reviewWindowEnabled,
+    reviewWindowHours: committed.reviewWindowHours,
+    postingCadence: asRecord(committed.postingCadence),
+    formatMix: asRecord(committed.formatMix),
+  });
+
+  const [resDraft, setResDraft] = useState(asResearchSources(committed.researchSources));
+
+  // Double-click guards (refs, not state)
+  const saveInFlight = useRef<Record<SectionKey, boolean>>({
+    core: false,
+    publishing: false,
+    research: false,
+  });
+
+  // ── Section transitions ──────────────────────────────────────────────────
+
+  function startEdit(section: SectionKey) {
+    if (sectionStates[section] !== "viewing") return;
+    // Snapshot current committed values into drafts
+    if (section === "core") {
+      setCoreDraft({
+        industry: committed.industry,
+        targetAudience: committed.targetAudience,
+        contentPillars: [...committed.contentPillars],
+        brandVoice: committed.brandVoice,
+        optimizationGoal: committed.optimizationGoal,
+      });
+    } else if (section === "publishing") {
+      setPubDraft({
+        reviewWindowEnabled: committed.reviewWindowEnabled,
+        reviewWindowHours: committed.reviewWindowHours,
+        postingCadence: { ...asRecord(committed.postingCadence) },
+        formatMix: { ...asRecord(committed.formatMix) },
+      });
+    } else {
+      setResDraft({ ...asResearchSources(committed.researchSources) });
+    }
+    setSectionStates((s) => ({ ...s, [section]: "editing" }));
+    setErrors((e) => ({ ...e, [section]: null }));
+  }
+
+  function cancelEdit(section: SectionKey) {
+    setSectionStates((s) => ({ ...s, [section]: "viewing" }));
+    setErrors((e) => ({ ...e, [section]: null }));
+  }
+
+  const handleSave = useCallback(
+    async (section: SectionKey) => {
+      if (saveInFlight.current[section]) return;
+      saveInFlight.current[section] = true;
+      setSectionStates((s) => ({ ...s, [section]: "saving" }));
+      setErrors((e) => ({ ...e, [section]: null }));
+
+      // Build patch payload
+      let patchData: Record<string, unknown> = {};
+      if (section === "core") {
+        patchData = { ...coreDraft };
+      } else if (section === "publishing") {
+        patchData = { ...pubDraft };
+      } else {
+        patchData = { researchSources: resDraft };
+      }
+
+      try {
+        const res = await fetch(`/api/businesses/${businessId}/strategy`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            updatedAt: committed.updatedAt,
+            ...patchData,
+          }),
+        });
+
+        if (res.status === 409) {
+          setErrors((e) => ({
+            ...e,
+            [section]:
+              "Settings were modified since you loaded them. Please refresh the page.",
+          }));
+          setSectionStates((s) => ({ ...s, [section]: "error" }));
+          return;
+        }
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error ?? "Failed to save");
+        }
+
+        const updated = (await res.json()) as Strategy;
+        // Update committed state with server response (only this section's fields + updatedAt)
+        setCommitted((prev) => ({ ...prev, ...updated }));
+        setSectionStates((s) => ({ ...s, [section]: "viewing" }));
+      } catch (err) {
+        setErrors((e) => ({
+          ...e,
+          [section]: err instanceof Error ? err.message : "Failed to save",
+        }));
+        setSectionStates((s) => ({ ...s, [section]: "error" }));
+      } finally {
+        saveInFlight.current[section] = false;
+      }
+    },
+    [businessId, committed.updatedAt, coreDraft, pubDraft, resDraft]
+  );
+
+  // ── Render helpers ─────────────────────────────────────────────────────
+
+  function SectionHeader({
+    title,
+    section,
+  }: {
+    title: string;
+    section: SectionKey;
+  }) {
+    const state = sectionStates[section];
+    return (
+      <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <CardTitle className="text-lg text-zinc-100">{title}</CardTitle>
+        {isOwner && (
+          <div className="flex items-center gap-2">
+            {state === "viewing" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => startEdit(section)}
+                className="text-zinc-400 hover:text-zinc-200"
+              >
+                <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                Edit
+              </Button>
+            )}
+            {(state === "editing" || state === "error") && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => cancelEdit(section)}
+                  className="text-zinc-400 hover:text-zinc-200"
+                >
+                  <X className="h-3.5 w-3.5 mr-1.5" />
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleSave(section)}
+                  className="bg-violet-600 hover:bg-violet-700"
+                >
+                  <Save className="h-3.5 w-3.5 mr-1.5" />
+                  Save
+                </Button>
+              </>
+            )}
+            {state === "saving" && (
+              <Button size="sm" disabled className="bg-violet-600/60">
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Saving...
+              </Button>
+            )}
+          </div>
+        )}
+      </CardHeader>
+    );
+  }
+
+  function ErrorBanner({ section }: { section: SectionKey }) {
+    const msg = errors[section];
+    if (!msg) return null;
+    return (
+      <div className="mx-6 mb-4 rounded-lg bg-red-900/20 border border-red-800 px-4 py-3 text-sm text-red-400">
+        {msg}
+      </div>
+    );
+  }
+
+  // ── Section: Core Strategy ─────────────────────────────────────────────
+
+  const coreEditing = sectionStates.core !== "viewing";
+
+  function CoreSection() {
+    return (
+      <Card className="bg-zinc-800 border-zinc-700">
+        <SectionHeader title="Core Strategy" section="core" />
+        <ErrorBanner section="core" />
+        <CardContent className="space-y-5">
+          <Field label="Industry">
+            {coreEditing ? (
+              <Input
+                value={coreDraft.industry}
+                onChange={(e) =>
+                  setCoreDraft((d) => ({ ...d, industry: e.target.value }))
+                }
+                maxLength={200}
+                className="bg-zinc-700 border-zinc-600"
+              />
+            ) : (
+              <p className="text-zinc-300">{committed.industry}</p>
+            )}
+          </Field>
+
+          <Field label="Target Audience">
+            {coreEditing ? (
+              <Textarea
+                value={coreDraft.targetAudience}
+                onChange={(e) =>
+                  setCoreDraft((d) => ({ ...d, targetAudience: e.target.value }))
+                }
+                maxLength={1000}
+                rows={3}
+                className="bg-zinc-700 border-zinc-600 resize-none"
+              />
+            ) : (
+              <p className="text-zinc-300">{committed.targetAudience}</p>
+            )}
+          </Field>
+
+          <Field label="Content Pillars">
+            {coreEditing ? (
+              <TagEditor
+                tags={coreDraft.contentPillars}
+                onChange={(tags) =>
+                  setCoreDraft((d) => ({ ...d, contentPillars: tags }))
+                }
+                maxTags={10}
+                maxLength={100}
+              />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {committed.contentPillars.map((p) => (
+                  <span
+                    key={p}
+                    className="rounded-full bg-violet-600/20 px-3 py-1 text-sm text-violet-300"
+                  >
+                    {p}
+                  </span>
+                ))}
+              </div>
+            )}
+          </Field>
+
+          <Field label="Brand Voice">
+            {coreEditing ? (
+              <Textarea
+                value={coreDraft.brandVoice}
+                onChange={(e) =>
+                  setCoreDraft((d) => ({ ...d, brandVoice: e.target.value }))
+                }
+                maxLength={2000}
+                rows={4}
+                className="bg-zinc-700 border-zinc-600 resize-none"
+              />
+            ) : (
+              <p className="text-zinc-300 whitespace-pre-wrap">
+                {committed.brandVoice}
+              </p>
+            )}
+          </Field>
+
+          <Field label="Optimization Goal">
+            {coreEditing ? (
+              <select
+                value={coreDraft.optimizationGoal}
+                onChange={(e) =>
+                  setCoreDraft((d) => ({ ...d, optimizationGoal: e.target.value }))
+                }
+                className="w-full rounded-md bg-zinc-700 border border-zinc-600 px-3 py-2 text-sm text-zinc-100"
+              >
+                {GOAL_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-zinc-300">
+                {GOAL_OPTIONS.find(
+                  (o) => o.value === committed.optimizationGoal
+                )?.label ?? committed.optimizationGoal}
+              </p>
+            )}
+          </Field>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ── Section: Publishing Config ─────────────────────────────────────────
+
+  const pubEditing = sectionStates.publishing !== "viewing";
+  const cadence = pubEditing
+    ? pubDraft.postingCadence
+    : asRecord(committed.postingCadence);
+  const mix = pubEditing ? pubDraft.formatMix : asRecord(committed.formatMix);
+  const mixTotal = Object.values(mix).reduce((a, b) => a + b, 0);
+
+  function PublishingSection() {
+    return (
+      <Card className="bg-zinc-800 border-zinc-700">
+        <SectionHeader title="Publishing Config" section="publishing" />
+        <ErrorBanner section="publishing" />
+        <CardContent className="space-y-5">
+          <Field label="Review Window">
+            {pubEditing ? (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <label className="flex items-center gap-2 text-sm text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={pubDraft.reviewWindowEnabled}
+                    onChange={(e) =>
+                      setPubDraft((d) => ({
+                        ...d,
+                        reviewWindowEnabled: e.target.checked,
+                      }))
+                    }
+                    className="rounded bg-zinc-700 border-zinc-600"
+                  />
+                  Require human review
+                </label>
+                {pubDraft.reviewWindowEnabled && (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={168}
+                      value={pubDraft.reviewWindowHours}
+                      onChange={(e) =>
+                        setPubDraft((d) => ({
+                          ...d,
+                          reviewWindowHours: parseInt(e.target.value) || 1,
+                        }))
+                      }
+                      className="w-20 bg-zinc-700 border-zinc-600"
+                    />
+                    <span className="text-sm text-zinc-400">hours</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-zinc-300">
+                {committed.reviewWindowEnabled
+                  ? `Enabled — ${committed.reviewWindowHours}h review window`
+                  : "Disabled — posts publish automatically"}
+              </p>
+            )}
+          </Field>
+
+          <Field label="Posting Cadence (posts/week)">
+            {Object.keys(cadence).length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {Object.entries(cadence).map(([platform, count]) => (
+                  <div key={platform} className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-400 w-24 truncate">
+                      {platform}
+                    </span>
+                    {pubEditing ? (
+                      <Input
+                        type="number"
+                        min={0}
+                        max={30}
+                        value={count}
+                        onChange={(e) =>
+                          setPubDraft((d) => ({
+                            ...d,
+                            postingCadence: {
+                              ...d.postingCadence,
+                              [platform]: parseInt(e.target.value) || 0,
+                            },
+                          }))
+                        }
+                        className="w-16 bg-zinc-700 border-zinc-600"
+                      />
+                    ) : (
+                      <span className="text-zinc-300">{count}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-500">Not configured</p>
+            )}
+          </Field>
+
+          <Field label="Format Mix">
+            {Object.keys(mix).length > 0 ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {Object.entries(mix).map(([format, ratio]) => (
+                    <div key={format} className="flex items-center gap-2">
+                      <span className="text-sm text-zinc-400 w-20 truncate">
+                        {format}
+                      </span>
+                      {pubEditing ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={Math.round(ratio * 100)}
+                            onChange={(e) =>
+                              setPubDraft((d) => ({
+                                ...d,
+                                formatMix: {
+                                  ...d.formatMix,
+                                  [format]: (parseInt(e.target.value) || 0) / 100,
+                                },
+                              }))
+                            }
+                            className="w-16 bg-zinc-700 border-zinc-600"
+                          />
+                          <span className="text-xs text-zinc-500">%</span>
+                        </div>
+                      ) : (
+                        <span className="text-zinc-300">
+                          {Math.round(ratio * 100)}%
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {pubEditing && (
+                  <p
+                    className={`text-xs ${
+                      Math.abs(mixTotal - 1) <= 0.05
+                        ? "text-zinc-500"
+                        : "text-amber-400"
+                    }`}
+                  >
+                    Total: {Math.round(mixTotal * 100)}%
+                    {Math.abs(mixTotal - 1) > 0.05 && " — should be ~100%"}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-500">Not configured</p>
+            )}
+          </Field>
+
+          <Field label="Optimal Time Windows">
+            <div className="flex items-center gap-2 text-sm">
+              <Bot className="h-4 w-4 text-violet-400" />
+              <span className="text-violet-400">AI-optimized</span>
+            </div>
+            {Object.keys(asStringRecord(committed.optimalTimeWindows)).length >
+            0 ? (
+              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {Object.entries(
+                  asStringRecord(committed.optimalTimeWindows)
+                ).map(([platform, windows]) => (
+                  <div key={platform} className="text-sm">
+                    <span className="text-zinc-400">{platform}: </span>
+                    <span className="text-zinc-300">
+                      {(windows as string[]).join(", ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1 text-sm text-zinc-500">
+                Will be set after the first optimization cycle
+              </p>
+            )}
+          </Field>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ── Section: Research Sources ───────────────────────────────────────────
+
+  const resEditing = sectionStates.research !== "viewing";
+  const sources = resEditing
+    ? resDraft
+    : asResearchSources(committed.researchSources);
+
+  function ResearchSection() {
+    return (
+      <Card className="bg-zinc-800 border-zinc-700">
+        <SectionHeader title="Research Sources" section="research" />
+        <ErrorBanner section="research" />
+        <CardContent className="space-y-5">
+          <Field label="RSS Feeds">
+            {resEditing ? (
+              <ListEditor
+                items={resDraft.rssFeeds}
+                onChange={(feeds) => setResDraft((d) => ({ ...d, rssFeeds: feeds }))}
+                placeholder="https://blog.example.com/feed.xml"
+                validateItem={(url) => {
+                  try {
+                    new URL(url);
+                    return url.startsWith("https://") ? null : "Must use HTTPS";
+                  } catch {
+                    return "Invalid URL";
+                  }
+                }}
+              />
+            ) : sources.rssFeeds.length > 0 ? (
+              <ul className="space-y-1">
+                {sources.rssFeeds.map((url) => (
+                  <li key={url} className="text-sm text-zinc-300 truncate">
+                    {url}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-zinc-500">No RSS feeds configured</p>
+            )}
+          </Field>
+
+          <Field label="Subreddits">
+            {resEditing ? (
+              <ListEditor
+                items={resDraft.subreddits}
+                onChange={(subs) =>
+                  setResDraft((d) => ({ ...d, subreddits: subs }))
+                }
+                placeholder="marketing"
+                prefix="r/"
+                validateItem={(name) =>
+                  /^[a-zA-Z0-9_]+$/.test(name)
+                    ? null
+                    : "Letters, numbers, and underscores only"
+                }
+              />
+            ) : sources.subreddits.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {sources.subreddits.map((sub) => (
+                  <span
+                    key={sub}
+                    className="rounded-full bg-zinc-700 px-3 py-1 text-sm text-zinc-300"
+                  >
+                    r/{sub}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-500">No subreddits configured</p>
+            )}
+          </Field>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ── Main render ────────────────────────────────────────────────────────
+
+  return (
+    <div className="py-2 md:px-6 md:py-6">
+      <div className="flex flex-col gap-1 mb-6">
+        <h1 className="text-2xl font-bold text-zinc-50">Content Strategy</h1>
+        {committed.lastOptimizedAt && (
+          <p className="text-sm text-zinc-500 flex items-center gap-1.5">
+            <Bot className="h-3.5 w-3.5" />
+            Last AI optimization:{" "}
+            {new Date(committed.lastOptimizedAt).toLocaleDateString("en-US", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            })}
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-6">
+        <CoreSection />
+        <PublishingSection />
+        <ResearchSection />
+      </div>
+    </div>
+  );
+}
+
+// ── Shared sub-components ──────────────────────────────────────────────────
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <p className="text-sm font-medium text-zinc-400 mb-1.5">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+function TagEditor({
+  tags,
+  onChange,
+  maxTags,
+  maxLength,
+}: {
+  tags: string[];
+  onChange: (tags: string[]) => void;
+  maxTags: number;
+  maxLength: number;
+}) {
+  const [input, setInput] = useState("");
+
+  function addTag() {
+    const trimmed = input.trim();
+    if (!trimmed || tags.includes(trimmed) || tags.length >= maxTags) return;
+    onChange([...tags, trimmed]);
+    setInput("");
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            className="flex items-center gap-1 rounded-full bg-violet-600/20 px-3 py-1 text-sm text-violet-300"
+          >
+            {tag}
+            <button
+              onClick={() => onChange(tags.filter((t) => t !== tag))}
+              className="text-violet-400 hover:text-violet-200"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+      </div>
+      {tags.length < maxTags && (
+        <div className="flex gap-2">
+          <Input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            maxLength={maxLength}
+            placeholder="Add a content pillar..."
+            className="bg-zinc-700 border-zinc-600"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addTag();
+              }
+            }}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={addTag}
+            disabled={!input.trim()}
+            className="text-violet-400"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ListEditor({
+  items,
+  onChange,
+  placeholder,
+  prefix,
+  validateItem,
+}: {
+  items: string[];
+  onChange: (items: string[]) => void;
+  placeholder: string;
+  prefix?: string;
+  validateItem?: (item: string) => string | null;
+}) {
+  const [input, setInput] = useState("");
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  function addItem() {
+    const trimmed = input.trim();
+    if (!trimmed || items.includes(trimmed)) return;
+    if (validateItem) {
+      const err = validateItem(trimmed);
+      if (err) {
+        setValidationError(err);
+        return;
+      }
+    }
+    onChange([...items, trimmed]);
+    setInput("");
+    setValidationError(null);
+  }
+
+  return (
+    <div className="space-y-2">
+      {items.map((item) => (
+        <div key={item} className="flex items-center gap-2">
+          <span className="flex-1 text-sm text-zinc-300 truncate">
+            {prefix}
+            {item}
+          </span>
+          <button
+            onClick={() => onChange(items.filter((i) => i !== item))}
+            className="text-zinc-500 hover:text-red-400"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+      <div className="flex gap-2">
+        <Input
+          value={input}
+          onChange={(e) => {
+            setInput(e.target.value);
+            setValidationError(null);
+          }}
+          placeholder={placeholder}
+          className="bg-zinc-700 border-zinc-600"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addItem();
+            }
+          }}
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={addItem}
+          disabled={!input.trim()}
+          className="text-violet-400"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+      {validationError && (
+        <p className="text-xs text-red-400">{validationError}</p>
+      )}
+    </div>
+  );
+}

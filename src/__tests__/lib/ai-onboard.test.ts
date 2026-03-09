@@ -45,7 +45,7 @@ describe("extractContentStrategy", () => {
     reviewWindowHours: 24,
   };
 
-  it("calls Anthropic with tool_use and tool_choice: any", async () => {
+  it("calls Anthropic with tool_use and pinned tool_choice", async () => {
     mockCreate.mockResolvedValue(makeToolUseResponse(validInput));
 
     await extractContentStrategy({ businessType: "Fitness studio" });
@@ -54,7 +54,8 @@ describe("extractContentStrategy", () => {
     const call = mockCreate.mock.calls[0][0];
     expect(call.tools).toBeDefined();
     expect(call.tools[0].name).toBe("save_content_strategy");
-    expect(call.tool_choice).toEqual({ type: "any" });
+    expect(call.tool_choice).toEqual({ type: "tool", name: "save_content_strategy" });
+    expect(call.system).toBeDefined();
   });
 
   it("returns parsed ContentStrategy when Claude calls the tool", async () => {

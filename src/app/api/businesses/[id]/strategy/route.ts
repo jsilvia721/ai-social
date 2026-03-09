@@ -2,11 +2,27 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { StrategyPatchSchema } from "@/lib/strategy/schemas";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** GET /api/businesses/[id]/strategy — returns review/fulfillment config */
+const STRATEGY_SELECT = {
+  industry: true,
+  targetAudience: true,
+  contentPillars: true,
+  brandVoice: true,
+  optimizationGoal: true,
+  reviewWindowEnabled: true,
+  reviewWindowHours: true,
+  postingCadence: true,
+  formatMix: true,
+  researchSources: true,
+  optimalTimeWindows: true,
+  lastOptimizedAt: true,
+  updatedAt: true,
+} as const;
+
+/** GET /api/businesses/[id]/strategy — returns full content strategy */
 export async function GET(req: NextRequest, { params }: Params) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -16,24 +32,22 @@ export async function GET(req: NextRequest, { params }: Params) {
   const { id } = await params;
   const isAdmin = session.user.isAdmin ?? false;
 
-  if (!isAdmin) {
-    const membership = await prisma.businessMember.findUnique({
-      where: { businessId_userId: { businessId: id, userId: session.user.id } },
-    });
-    if (!membership) {
-      return NextResponse.json({ error: "Not a member of this business" }, { status: 403 });
-    }
-  }
+  // Parallelize membership check and strategy fetch
+  const [membership, strategy] = await Promise.all([
+    isAdmin
+      ? null
+      : prisma.businessMember.findUnique({
+          where: { businessId_userId: { businessId: id, userId: session.user.id } },
+        }),
+    prisma.contentStrategy.findUnique({
+      where: { businessId: id },
+      select: STRATEGY_SELECT,
+    }),
+  ]);
 
-  const strategy = await prisma.contentStrategy.findUnique({
-    where: { businessId: id },
-    select: {
-      reviewWindowEnabled: true,
-      reviewWindowHours: true,
-      postingCadence: true,
-      formatMix: true,
-    },
-  });
+  if (!isAdmin && !membership) {
+    return NextResponse.json({ error: "Not a member of this business" }, { status: 403 });
+  }
 
   if (!strategy) {
     return NextResponse.json({ error: "No strategy configured" }, { status: 404 });
@@ -42,12 +56,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   return NextResponse.json(strategy);
 }
 
-const PatchSchema = z.object({
-  reviewWindowEnabled: z.boolean().optional(),
-  reviewWindowHours: z.number().int().min(1).max(168).optional(), // 1h to 1 week
-});
-
-/** PATCH /api/businesses/[id]/strategy — update review/fulfillment config */
+/** PATCH /api/businesses/[id]/strategy — update content strategy (OWNER-only) */
 export async function PATCH(req: NextRequest, { params }: Params) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -57,7 +66,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
   const isAdmin = session.user.isAdmin ?? false;
 
-  // Owner-only — changing review settings affects whether posts auto-publish
+  // Owner-only — changing strategy affects content generation pipeline
   const membership = isAdmin
     ? null
     : await prisma.businessMember.findUnique({
@@ -71,7 +80,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const body = await req.json().catch(() => null);
-  const parsed = PatchSchema.safeParse(body);
+  const parsed = StrategyPatchSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Invalid request body", details: parsed.error.flatten() },
@@ -79,13 +88,28 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     );
   }
 
+  // Optimistic locking via updatedAt
+  const { updatedAt: clientUpdatedAt, ...updateData } = parsed.data;
+  const current = await prisma.contentStrategy.findUnique({
+    where: { businessId: id },
+    select: { updatedAt: true },
+  });
+
+  if (!current) {
+    return NextResponse.json({ error: "No strategy configured" }, { status: 404 });
+  }
+
+  if (current.updatedAt.toISOString() !== clientUpdatedAt) {
+    return NextResponse.json(
+      { error: "Settings were modified since you loaded them. Please refresh." },
+      { status: 409 }
+    );
+  }
+
   const strategy = await prisma.contentStrategy.update({
     where: { businessId: id },
-    data: parsed.data,
-    select: {
-      reviewWindowEnabled: true,
-      reviewWindowHours: true,
-    },
+    data: updateData,
+    select: STRATEGY_SELECT,
   });
 
   return NextResponse.json(strategy);
