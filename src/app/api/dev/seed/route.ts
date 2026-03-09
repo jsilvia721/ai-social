@@ -54,11 +54,14 @@ export async function POST(req: NextRequest) {
       return seedBriefs(businessId);
     case "seed-research":
       return seedResearch(businessId);
+    case "seed-insights":
+      return seedInsights(businessId);
     case "seed-all":
       await seedAccountsData(businessId);
       await seedPostsData(businessId);
       await seedResearchData(businessId);
       await seedBriefsData(businessId);
+      await seedInsightsData(businessId);
       return NextResponse.json({ message: "All test data seeded" });
     case "clear":
       return clearWorkspace(businessId);
@@ -521,10 +524,147 @@ async function seedBriefs(businessId: string) {
   });
 }
 
+// ── Seed strategy digest insights ─────────────────────────────────────────────
+
+async function seedInsightsData(businessId: string) {
+  // Get published posts to reference as top performers
+  const publishedPosts = await prisma.post.findMany({
+    where: { businessId, status: "PUBLISHED" },
+    include: { socialAccount: { select: { platform: true } } },
+    take: 10,
+    orderBy: { publishedAt: "desc" },
+  });
+
+  // If no published posts exist, seed posts first
+  if (publishedPosts.length === 0) {
+    await seedAccountsData(businessId);
+    await seedPostsData(businessId);
+    return seedInsightsData(businessId);
+  }
+
+  const now = new Date();
+  const digests = [];
+
+  // Create 4 weeks of digest history
+  for (let weekOffset = 0; weekOffset < 4; weekOffset++) {
+    const weekOf = new Date(now);
+    weekOf.setDate(weekOf.getDate() - weekOf.getDay() - weekOffset * 7); // Sunday of each week
+    weekOf.setHours(0, 0, 0, 0);
+
+    // Pick 2-3 top performers from available published posts
+    const topPerformers = publishedPosts
+      .slice(0, Math.min(3, publishedPosts.length))
+      .map((post, i) => ({
+        postId: post.id,
+        score: parseFloat((4.5 - i * 0.8 - weekOffset * 0.3).toFixed(1)),
+        format: ["VIDEO", "CAROUSEL", "IMAGE", "TEXT"][i % 4],
+        topicPillar: ["Tips & Tutorials", "Behind the Scenes", "Product Updates", "Community"][i % 4],
+      }));
+
+    const SUMMARIES = [
+      "Strong week overall. Video content outperformed all other formats by 2.5x, particularly the quick tutorial which reached 95K users. Instagram engagement is up 18% week-over-week, driven by carousel posts. Consider doubling down on short-form educational content.",
+      "Engagement metrics improved across the board this week. Twitter saw the biggest gains with a 25% increase in retweets. The community-focused content resonated well — posts asking questions generated 3x more comments than promotional content.",
+      "Mixed results this week. Facebook engagement dropped 12% while TikTok continues to surge. The behind-the-scenes content style is clearly resonating with younger demographics. Recommend shifting more resources to short-form video.",
+      "Steady growth continues. Overall impressions up 8% week-over-week. The AI tools roundup thread on Twitter was the standout performer, generating significant discussion. Instagram Stories completion rates improved to 72%.",
+    ];
+
+    const INSIGHTS_SETS = [
+      [
+        "Video posts generate 2.5x more engagement than text-only posts",
+        "Posts published between 9-11 AM EST get 40% higher reach",
+        "Carousel posts on Instagram have the highest save rate (4.2%)",
+        "Questions in post copy increase comment rate by 3x",
+      ],
+      [
+        "Thread-style Twitter posts outperform single tweets by 180%",
+        "User-generated content reposts drive 2x more shares",
+        "Tuesday and Thursday are peak engagement days across platforms",
+        "Posts with emojis in the first line get 25% more impressions",
+      ],
+      [
+        "TikTok tutorials under 30 seconds have 85% completion rate",
+        "Instagram Reels are now outperforming static image posts",
+        "Facebook engagement peaks on weekday evenings (6-8 PM)",
+      ],
+      [
+        "Consistent posting cadence (daily) correlates with 30% higher follower growth",
+        "Behind-the-scenes content generates the most authentic engagement",
+        "Cross-platform repurposing saves 60% of content creation time",
+        "Hashtag usage on Twitter has diminishing returns after 3 tags",
+      ],
+    ];
+
+    const FORMAT_MIX_SETS = [
+      { VIDEO: 0.1, TEXT: -0.05, IMAGE: -0.05 },
+      { CAROUSEL: 0.05, TEXT: -0.05 },
+      { VIDEO: 0.15, IMAGE: -0.1, TEXT: -0.05 },
+      {},
+    ];
+
+    const CADENCE_SETS = [
+      { TWITTER: 1, TIKTOK: 1 },
+      { INSTAGRAM: 1 },
+      { TIKTOK: 2, FACEBOOK: -1 },
+      { TWITTER: -1, YOUTUBE: 1 },
+    ];
+
+    const TOPIC_INSIGHTS_SETS = [
+      ["Increase tutorial/how-to content — highest engagement category", "Reduce promotional posts — audience fatigue detected"],
+      ["Lean into community-driven content — questions and polls", "Test more thread-style long-form on Twitter"],
+      ["Double down on behind-the-scenes content", "Explore collaboration posts with industry peers"],
+      [],
+    ];
+
+    const digest = await prisma.strategyDigest.upsert({
+      where: { businessId_weekOf: { businessId, weekOf } },
+      update: {
+        summary: SUMMARIES[weekOffset],
+        patterns: {
+          topPerformers,
+          insights: INSIGHTS_SETS[weekOffset],
+        },
+        changes: {
+          formatMix: FORMAT_MIX_SETS[weekOffset],
+          cadence: CADENCE_SETS[weekOffset],
+          topicInsights: TOPIC_INSIGHTS_SETS[weekOffset],
+        },
+      },
+      create: {
+        businessId,
+        weekOf,
+        summary: SUMMARIES[weekOffset],
+        patterns: {
+          topPerformers,
+          insights: INSIGHTS_SETS[weekOffset],
+        },
+        changes: {
+          formatMix: FORMAT_MIX_SETS[weekOffset],
+          cadence: CADENCE_SETS[weekOffset],
+          topicInsights: TOPIC_INSIGHTS_SETS[weekOffset],
+        },
+      },
+    });
+    digests.push(digest);
+  }
+
+  return digests;
+}
+
+async function seedInsights(businessId: string) {
+  const digests = await seedInsightsData(businessId);
+  return NextResponse.json({
+    message: `Seeded ${digests.length} weekly insight digests`,
+    count: digests.length,
+  });
+}
+
 // ── Clear workspace test data ─────────────────────────────────────────────────
 
 async function clearWorkspace(businessId: string) {
   // Delete in dependency order
+  const digests = await prisma.strategyDigest.deleteMany({
+    where: { businessId },
+  });
   const briefs = await prisma.contentBrief.deleteMany({
     where: { businessId },
   });
@@ -542,6 +682,7 @@ async function clearWorkspace(businessId: string) {
   return NextResponse.json({
     message: "Cleared all workspace data",
     deleted: {
+      strategyDigests: digests.count,
       contentBriefs: briefs.count,
       posts: posts.count,
       researchSummaries: research.count,

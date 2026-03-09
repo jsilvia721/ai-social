@@ -7,6 +7,7 @@ import {
   FileText,
   BarChart2,
   FlaskConical,
+  Lightbulb,
   Layers,
   Trash2,
   Loader2,
@@ -56,10 +57,18 @@ const SEED_ACTIONS: SeedAction[] = [
     variant: "default",
   },
   {
+    id: "seed-insights",
+    label: "Weekly Insights",
+    description:
+      "Creates 4 weeks of strategy digest data with top performers, insights, and strategy adjustments",
+    icon: Lightbulb,
+    variant: "default",
+  },
+  {
     id: "seed-all",
     label: "Seed Everything",
     description:
-      "Creates all of the above at once — accounts, posts, research, and briefs",
+      "Creates all of the above at once — accounts, posts, research, briefs, and insights",
     icon: Layers,
     variant: "default",
   },
