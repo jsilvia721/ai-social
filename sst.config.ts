@@ -75,11 +75,10 @@ export default $config({
       TIKTOK_CLIENT_SECRET:  secrets.tiktokClientSecret.value,
       TOKEN_ENCRYPTION_KEY:  secrets.tokenEncryptionKey.value,
       ALLOWED_EMAILS:        secrets.allowedEmails.value,
-      // Mock Blotato OAuth when no real API key is configured
-      BLOTATO_MOCK:          secrets.blotatoApiKey ? "false" : "true",
-      ...(secrets.blotatoApiKey ? { BLOTATO_API_KEY: secrets.blotatoApiKey.value } : { BLOTATO_API_KEY: "mock" }),
-      // SES failure alerts: only wired up in production
-      ...(secrets.sesFromEmail ? { SES_FROM_EMAIL: secrets.sesFromEmail.value } : {}),
+      // Blotato: mock mode until real API key is configured
+      BLOTATO_MOCK:          "true",
+      BLOTATO_API_KEY:       "mock",
+      // SES failure alerts: disabled until SesFromEmail secret is configured
       // Admin role bootstrap: optional, comma-separated emails granted isAdmin on sign-in
       ...(secrets.adminEmails ? { ADMIN_EMAILS: secrets.adminEmails.value } : {}),
     };
