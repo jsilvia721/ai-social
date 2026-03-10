@@ -83,6 +83,7 @@ model BusinessMember {
   user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([businessId, userId])
+  @@index([userId])
 }
 
 model ContentStrategy {
@@ -113,7 +114,7 @@ model SocialAccount {
   platform         Platform
   platformId       String
   username         String
-  blotatoAccountId String
+  blotatoAccountId String    @unique
   // Release 3: drop these columns once all code fully uses blotatoAccountId
   accessToken      String?   @db.Text
   refreshToken     String?   @db.Text
@@ -124,6 +125,7 @@ model SocialAccount {
   posts            Post[]
 
   @@unique([platform, platformId])
+  @@index([businessId])
 }
 
 model Post {
@@ -163,6 +165,7 @@ model Post {
   @@index([status, reviewWindowExpiresAt])
   @@index([businessId, status])
   @@index([businessId, createdAt])
+  @@index([businessId, publishedAt])
   @@index([repurposeGroupId])
 }
 
@@ -229,6 +232,7 @@ model ContentBrief {
   post              Post?       @relation(fields: [postId], references: [id], onDelete: SetNull)
 
   @@index([businessId, status])
+  @@index([businessId, scheduledFor])
   @@index([status, weekOf])
   @@index([status, scheduledFor])
 }
