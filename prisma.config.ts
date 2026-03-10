@@ -11,6 +11,6 @@ export default defineConfig({
   datasource: {
     // Prefer DIRECT_URL for migrations (bypasses connection pooler like PgBouncer/Neon pooler)
     // Falls back to DATABASE_URL for local dev where no pooler exists
-    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
+    url: process.env["DIRECT_URL"] || process.env["DATABASE_URL"],
   },
 });
