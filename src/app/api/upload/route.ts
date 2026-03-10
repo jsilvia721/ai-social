@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { ensureBucket, uploadFile } from "@/lib/storage";
+import { uploadFile } from "@/lib/storage";
 
 const ALLOWED_TYPES = new Set([
   "image/jpeg",
   "image/png",
   "image/gif",
   "image/webp",
-  "video/mp4",
 ]);
 
 const EXT_MAP: Record<string, string> = {
@@ -16,7 +15,6 @@ const EXT_MAP: Record<string, string> = {
   "image/png": "png",
   "image/gif": "gif",
   "image/webp": "webp",
-  "video/mp4": "mp4",
 };
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -44,13 +42,12 @@ export async function POST(req: NextRequest) {
   }
 
   if (file.size > MAX_SIZE) {
-    return NextResponse.json({ error: "File too large (max 10 MB)" }, { status: 400 });
+    return NextResponse.json({ error: "File too large (max 10 MB). Use presigned upload for videos." }, { status: 400 });
   }
 
   const ext = EXT_MAP[file.type];
   const key = `uploads/${session.user.id}/${crypto.randomUUID()}.${ext}`;
 
-  await ensureBucket();
   const url = await uploadFile(file, key, file.type);
 
   return NextResponse.json({ url }, { status: 200 });

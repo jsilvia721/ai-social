@@ -1,5 +1,5 @@
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
-import { mockAuthenticated, mockUnauthenticated, mockSession } from "@/__tests__/mocks/auth";
+import { mockAuthenticated, mockAuthenticatedAsAdmin, mockUnauthenticated, mockSession } from "@/__tests__/mocks/auth";
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("next-auth/next");
@@ -73,13 +73,12 @@ describe("GET /api/posts", () => {
 
     await GET(makeGetRequest({ limit: "999" }));
 
-    // $transaction receives already-evaluated PrismaPromises — verify findMany was called with take:200
     expect(prismaMock.post.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ take: 200 })
     );
   });
 
-  it("always filters by the current user's id", async () => {
+  it("always filters by the current user's business membership", async () => {
     mockAuthenticated();
     prismaMock.$transaction.mockResolvedValue([[], 0] as any);
 
@@ -87,7 +86,9 @@ describe("GET /api/posts", () => {
 
     expect(prismaMock.post.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ userId: mockSession.user.id }),
+        where: expect.objectContaining({
+          business: { members: { some: { userId: mockSession.user.id } } },
+        }),
       })
     );
   });
@@ -104,6 +105,47 @@ describe("GET /api/posts", () => {
       })
     );
   });
+
+  it("filters by businessId when provided", async () => {
+    mockAuthenticated();
+    prismaMock.$transaction.mockResolvedValue([[], 0] as any);
+
+    await GET(makeGetRequest({ businessId: "biz-1" }));
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ businessId: "biz-1" }),
+      })
+    );
+  });
+
+  it("does not add businessId filter when param is absent", async () => {
+    mockAuthenticated();
+    prismaMock.$transaction.mockResolvedValue([[], 0] as any);
+
+    await GET(makeGetRequest());
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({ businessId: expect.anything() }),
+      })
+    );
+  });
+
+  it("admin bypasses membership filter", async () => {
+    mockAuthenticatedAsAdmin();
+    prismaMock.$transaction.mockResolvedValue([[], 0] as any);
+
+    await GET(makeGetRequest());
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({
+          business: expect.anything(),
+        }),
+      })
+    );
+  });
 });
 
 describe("POST /api/posts", () => {
@@ -111,31 +153,44 @@ describe("POST /api/posts", () => {
     mockUnauthenticated();
 
     const res = await POST(
-      makePostRequest({ content: "test", socialAccountId: "acc-1" })
+      makePostRequest({ content: "test", socialAccountId: "acc-1", businessId: "biz-1" })
     );
 
     expect(res.status).toBe(401);
   });
 
-  it("returns 404 when the social account belongs to a different user", async () => {
+  it("returns 400 when businessId is missing", async () => {
+    mockAuthenticated();
+
+    const res = await POST(
+      makePostRequest({ content: "test", socialAccountId: "acc-1" })
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when the social account does not belong to the business", async () => {
     mockAuthenticated();
     prismaMock.socialAccount.findFirst.mockResolvedValue(null);
 
     const res = await POST(
-      makePostRequest({ content: "test", socialAccountId: "other-users-account" })
+      makePostRequest({ content: "test", socialAccountId: "other-account", businessId: "biz-1" })
     );
 
     expect(res.status).toBe(404);
     expect(prismaMock.socialAccount.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ userId: mockSession.user.id }),
+        where: expect.objectContaining({
+          businessId: "biz-1",
+          business: { members: { some: { userId: mockSession.user.id } } },
+        }),
       })
     );
   });
 
   it("creates a SCHEDULED post when scheduledAt is provided", async () => {
     mockAuthenticated();
-    prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1" } as any);
+    prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1", businessId: "biz-1" } as any);
     const createdPost = {
       id: "post-new",
       content: "Scheduled post",
@@ -148,6 +203,7 @@ describe("POST /api/posts", () => {
       makePostRequest({
         content: "Scheduled post",
         socialAccountId: "acc-1",
+        businessId: "biz-1",
         scheduledAt: "2025-06-01T12:00:00Z",
       })
     );
@@ -155,18 +211,18 @@ describe("POST /api/posts", () => {
     expect(res.status).toBe(201);
     expect(prismaMock.post.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: "SCHEDULED" }),
+        data: expect.objectContaining({ status: "SCHEDULED", businessId: "biz-1" }),
       })
     );
   });
 
   it("creates a DRAFT post when no scheduledAt is provided", async () => {
     mockAuthenticated();
-    prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1" } as any);
+    prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1", businessId: "biz-1" } as any);
     prismaMock.post.create.mockResolvedValue({ id: "post-draft", status: "DRAFT" } as any);
 
     const res = await POST(
-      makePostRequest({ content: "Draft post", socialAccountId: "acc-1" })
+      makePostRequest({ content: "Draft post", socialAccountId: "acc-1", businessId: "biz-1" })
     );
 
     expect(res.status).toBe(201);
@@ -177,22 +233,22 @@ describe("POST /api/posts", () => {
     );
   });
 
-  it("uses session.user.id as userId (never trusts request body)", async () => {
+  it("uses businessId from the request body (never trusts implicit context)", async () => {
     mockAuthenticated();
-    prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1" } as any);
+    prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1", businessId: "biz-1" } as any);
     prismaMock.post.create.mockResolvedValue({ id: "post-1" } as any);
 
     await POST(
       makePostRequest({
         content: "test",
         socialAccountId: "acc-1",
-        userId: "attacker-user-id", // should be ignored
+        businessId: "biz-1",
       })
     );
 
     expect(prismaMock.post.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ userId: mockSession.user.id }),
+        data: expect.objectContaining({ businessId: "biz-1" }),
       })
     );
   });

@@ -20,11 +20,13 @@ const config: Config = {
     "!src/app/globals.css",
     "!src/app/**/layout.tsx",
     "!src/app/**/page.tsx",         // server components — DB-coupled, covered via API route tests
+    "!src/app/**/*-client.tsx",     // React client components — need React Testing Library (deferred)
     "!src/components/ui/**",        // shadcn/ui — generated, no logic
     "!src/components/providers/**",
     "!src/types/**",
     "!src/instrumentation.ts",
     "!src/middleware.ts",
+    "!src/cron/**",               // EventBridge Lambda handlers — no testable logic
     // Config / setup files — no testable business logic
     "!src/lib/auth.ts",             // NextAuth config
     "!src/lib/db.ts",               // Prisma singleton

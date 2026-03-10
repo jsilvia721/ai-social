@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PostCard } from "@/components/posts/PostCard";
 import { ContentCalendar } from "@/components/posts/ContentCalendar";
+import { WeekCalendar, getMondayOfWeek } from "@/components/posts/WeekCalendar";
 import { PenSquare, List, CalendarDays } from "lucide-react";
 import type { PostStatus, Platform } from "@/types";
 
@@ -31,7 +33,12 @@ interface Post {
 }
 
 export default function PostsPage() {
+  const { data: session } = useSession();
+  const activeBusinessId = (session?.user as { id: string; activeBusinessId?: string | null } | undefined)
+    ?.activeBusinessId;
+
   const [view, setView] = useState<"list" | "calendar">("list");
+  const [calMode, setCalMode] = useState<"month" | "week">("month");
   const [activeTab, setActiveTab] = useState<PostStatus | "ALL">("ALL");
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -42,34 +49,66 @@ export default function PostsPage() {
   const [calPosts, setCalPosts] = useState<Post[]>([]);
   const [isCalLoading, setIsCalLoading] = useState(false);
 
+  // Week view state
+  const [weekStart, setWeekStart] = useState(() => getMondayOfWeek(new Date()));
+  const [weekPosts, setWeekPosts] = useState<Post[]>([]);
+  const [isWeekLoading, setIsWeekLoading] = useState(false);
+
   useEffect(() => {
     if (view !== "list") return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
-    const url = activeTab === "ALL" ? "/api/posts" : `/api/posts?status=${activeTab}`;
-    fetch(url).then(async (res) => {
+    const params = new URLSearchParams();
+    if (activeTab !== "ALL") params.set("status", activeTab);
+    if (activeBusinessId) params.set("businessId", activeBusinessId);
+    const query = params.toString();
+    fetch(`/api/posts${query ? `?${query}` : ""}`).then(async (res) => {
       if (res.ok && !cancelled) setPosts((await res.json()).posts);
       if (!cancelled) setIsLoading(false);
     }).catch(() => {
       if (!cancelled) setIsLoading(false);
     });
     return () => { cancelled = true; };
-  }, [view, activeTab]);
+  }, [view, activeTab, activeBusinessId]);
 
   useEffect(() => {
-    if (view !== "calendar") return;
+    if (view !== "calendar" || calMode !== "month") return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsCalLoading(true);
-    fetch(`/api/posts/calendar?year=${calYear}&month=${calMonth}`).then(async (res) => {
+    const params = new URLSearchParams({ year: String(calYear), month: String(calMonth) });
+    if (activeBusinessId) params.set("businessId", activeBusinessId);
+    fetch(`/api/posts/calendar?${params.toString()}`).then(async (res) => {
       if (res.ok && !cancelled) setCalPosts(await res.json());
       if (!cancelled) setIsCalLoading(false);
     }).catch(() => {
       if (!cancelled) setIsCalLoading(false);
     });
     return () => { cancelled = true; };
-  }, [view, calYear, calMonth]);
+  }, [view, calMode, calYear, calMonth, activeBusinessId]);
+
+  useEffect(() => {
+    if (view !== "calendar" || calMode !== "week") return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsWeekLoading(true);
+    const weekEnd = new Date(Date.UTC(
+      weekStart.getUTCFullYear(), weekStart.getUTCMonth(), weekStart.getUTCDate() + 7
+    ));
+    const params = new URLSearchParams({
+      startDate: weekStart.toISOString(),
+      endDate: weekEnd.toISOString(),
+    });
+    if (activeBusinessId) params.set("businessId", activeBusinessId);
+    fetch(`/api/posts/calendar?${params.toString()}`).then(async (res) => {
+      if (res.ok && !cancelled) setWeekPosts(await res.json());
+      if (!cancelled) setIsWeekLoading(false);
+    }).catch(() => {
+      if (!cancelled) setIsWeekLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [view, calMode, weekStart, activeBusinessId]);
 
   async function handleDelete(id: string) {
     const res = await fetch(`/api/posts?id=${id}`, { method: "DELETE" });
@@ -92,9 +131,51 @@ export default function PostsPage() {
     setCalMonth(month);
   }
 
+  const handleWeekNavigate = useCallback((newWeekStart: Date) => {
+    setWeekStart(newWeekStart);
+  }, []);
+
+  async function handleReschedule(postId: string, newDate: Date): Promise<boolean> {
+    const newScheduledAt = newDate.toISOString();
+
+    // Optimistic update for both month and week views
+    const updatePosts = (setter: React.Dispatch<React.SetStateAction<Post[]>>, original: Post[]) => {
+      const post = original.find((p) => p.id === postId);
+      if (!post) return null;
+      setter((prev) =>
+        prev.map((p) => (p.id === postId ? { ...p, scheduledAt: newScheduledAt } : p))
+      );
+      return post;
+    };
+
+    const originalMonth = updatePosts(setCalPosts, calPosts);
+    const originalWeek = updatePosts(setWeekPosts, weekPosts);
+    const original = originalMonth ?? originalWeek;
+    if (!original) return false;
+
+    try {
+      const res = await fetch(`/api/posts/${postId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduledAt: newScheduledAt }),
+      });
+      if (!res.ok) {
+        // Rollback
+        if (originalMonth) setCalPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, scheduledAt: originalMonth.scheduledAt } : p)));
+        if (originalWeek) setWeekPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, scheduledAt: originalWeek.scheduledAt } : p)));
+        return false;
+      }
+      return true;
+    } catch {
+      if (originalMonth) setCalPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, scheduledAt: originalMonth.scheduledAt } : p)));
+      if (originalWeek) setWeekPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, scheduledAt: originalWeek.scheduledAt } : p)));
+      return false;
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-zinc-50">Posts</h1>
           <p className="text-zinc-400 mt-1">Manage your scheduled and published posts.</p>
@@ -138,16 +219,54 @@ export default function PostsPage() {
       </div>
 
       {view === "calendar" ? (
-        <div>
-          {isCalLoading ? (
-            <div className="py-12 text-center text-zinc-500">Loading calendar…</div>
+        <div className="space-y-4">
+          {/* Month / Week sub-toggle */}
+          <div className="flex gap-1">
+            <button
+              onClick={() => setCalMode("month")}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                calMode === "month"
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+              }`}
+            >
+              Month
+            </button>
+            <button
+              onClick={() => setCalMode("week")}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                calMode === "week"
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+              }`}
+            >
+              Week
+            </button>
+          </div>
+
+          {calMode === "month" ? (
+            isCalLoading ? (
+              <div className="py-12 text-center text-zinc-500">Loading calendar…</div>
+            ) : (
+              <ContentCalendar
+                posts={calPosts}
+                year={calYear}
+                month={calMonth}
+                onNavigate={handleCalendarNavigate}
+                onReschedule={handleReschedule}
+              />
+            )
           ) : (
-            <ContentCalendar
-              posts={calPosts}
-              year={calYear}
-              month={calMonth}
-              onNavigate={handleCalendarNavigate}
-            />
+            isWeekLoading ? (
+              <div className="py-12 text-center text-zinc-500">Loading week…</div>
+            ) : (
+              <WeekCalendar
+                posts={weekPosts}
+                weekStart={weekStart}
+                onNavigate={handleWeekNavigate}
+                onReschedule={handleReschedule}
+              />
+            )
           )}
         </div>
       ) : (

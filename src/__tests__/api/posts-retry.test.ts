@@ -37,7 +37,10 @@ describe("POST /api/posts/[id]/retry", () => {
     expect(res.status).toBe(404);
     expect(prismaMock.post.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: "post-1", userId: mockSession.user.id }),
+        where: expect.objectContaining({
+          id: "post-1",
+          business: { members: { some: { userId: mockSession.user.id } } },
+        }),
       })
     );
   });

@@ -11,76 +11,108 @@ npm run lint          # ESLint
 npm run test          # Run all tests
 npm run test:watch    # Watch mode
 npm run test:coverage # Run tests + check coverage thresholds
+npm run ci:check      # Lint + typecheck + coverage (mirrors CI exactly)
 
 # Run a single test file
 npx jest src/__tests__/api/posts.test.ts
 
-# Prisma (always run generate after schema changes)
-npx prisma generate
+# Prisma (always run migrate dev after schema changes — not just generate)
 npx prisma migrate dev --name <name>
-npx prisma db push    # Push schema without migration file
+
+# Local dev database (Docker)
+docker compose up -d db
 ```
 
-**Important:** `npm run build` will fail if any env vars from `src/env.ts` are missing. `npm run dev` uses lazy loading so missing vars only fail when routes are hit.
+**Important:** `npm run build` will fail if any env vars from `src/env.ts` are missing. `npm run dev` uses lazy loading so missing vars only fail when routes are hit. A Husky pre-push hook runs `ci:check` automatically on every `git push`.
+
+## Workflow
+
+### Task Orchestration (compound-engineering)
+- `/ce:brainstorm` — Explore requirements before planning (exploratory/ambiguous tasks)
+- `/ce:plan` — Structured implementation plans with research (3+ steps or architectural decisions)
+- `/ce:work` — Execute plans with incremental commits and verification
+- `/ce:review` — Multi-agent code review (TypeScript, security, performance, architecture)
+- `/ce:compound` — Document solved problems in docs/solutions/ for future reference
+
+### When to Use What
+- **Trivial fix** (one file, obvious change): just do it, run tests, done
+- **Moderate task** (2-3 files, clear approach): `/ce:plan` -> `/ce:work`
+- **Complex/ambiguous** (architectural, multi-system): `/ce:brainstorm` -> `/ce:plan` -> `/ce:work` -> `/ce:review`
+- **Bug fix**: diagnose autonomously, fix it, run tests — stop before committing
+- **After any correction**: update auto-memory with the pattern to prevent recurrence
+
+### Hard Rules
+- **Never commit or push automatically** — always wait for explicit user request
+- **TDD** — write tests first, then implementation. No exceptions.
+- **Run `npm run ci:check` before every push** — lint + typecheck + coverage (mirrors CI)
+- **Run E2E tests locally before pushing** — catches selector/UI issues without waiting for CI
+- **Verification before done** — never mark complete without proving it works (tests pass, no regressions)
+- **Always branch from `origin/staging`** — run `git fetch origin` first, then `git checkout -b <branch> origin/staging` or `git worktree add ... origin/staging`. Never branch from the current HEAD or another feature branch. Before creating a PR, run `git fetch origin && git merge origin/staging` to surface conflicts locally.
+- **If stuck, re-plan** — don't keep pushing when something goes sideways
+- **Every `schema.prisma` change MUST have a migration** — run `npx prisma migrate dev --name <name>`, never just `npx prisma generate`. CI enforces this with `prisma migrate diff --exit-code`.
+
+### Branching & Worktrees
+- **Always branch from `staging`** — run `git fetch origin staging` then branch from `origin/staging`. PRs target `staging`, not `main`.
+- **Worktree creation** — use `git worktree add .claude/worktrees/<name> -b <branch> origin/staging` to create worktrees with the correct base in one step.
+- **Never stash across bases** — do not `git stash` on one branch and pop on a branch with a different base. This causes merge conflicts. Instead, commit WIP on the current branch, create a new branch from the correct base, and cherry-pick or re-apply changes.
+- **Verify before PR** — run `git merge-base --is-ancestor origin/staging HEAD` to confirm your branch descends from staging before pushing.
+
+### Core Principles
+- **Simplicity first** — make every change as simple as possible, minimal code impact
+- **No laziness** — find root causes, no temporary fixes, senior developer standards
+- **Minimal impact** — only touch what's necessary, avoid introducing bugs
 
 ## Architecture
 
 ### Request lifecycle
-Every API route follows the same pattern: call `getServerSession(authOptions)` → reject if no session → scope all DB queries to `session.user.id`. The NextAuth JWT strategy puts the DB user ID in `token.sub`, which is forwarded to `session.user.id` via callbacks in `src/lib/auth.ts`.
+Every API route: `getServerSession(authOptions)` -> reject if no session -> scope DB queries to `session.user.id`. NextAuth JWT puts DB user ID in `token.sub`, forwarded to `session.user.id` via callbacks in `src/lib/auth.ts`.
 
-Middleware (`src/middleware.ts`) protects all routes via `withAuth`, exempting only `/api/auth/*`, `/auth/signin`, and static assets.
+Middleware (`src/middleware.ts`) protects all routes via `withAuth`, exempting `/api/auth/*`, `/auth/signin`, `/api/test/*`, and static assets. Access restricted to `ALLOWED_EMAILS` env var.
 
-Access is restricted to emails listed in the `ALLOWED_EMAILS` env var (comma-separated), enforced in the `signIn` callback in `src/lib/auth.ts`.
-
-### Env validation
-`src/env.ts` runs a synchronous Zod parse of `process.env` at import time. Any missing var crashes the process immediately with a clear error. All required vars: `DATABASE_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET`, `META_APP_ID`, `META_APP_SECRET`, `ANTHROPIC_API_KEY`, `ALLOWED_EMAILS`.
-
-### Database (Prisma 7 + pg.Pool)
-`src/lib/db.ts` creates a `PrismaClient` using the `PrismaPg` adapter backed by a `pg.Pool`. The `datasource` block in `prisma/schema.prisma` has **no `url` field** — the URL is set only in `prisma.config.ts` (for CLI migrations) and at runtime via `DATABASE_URL` env var. SSL is automatically disabled when `sslmode=disable` appears in the connection string; otherwise it connects with `rejectUnauthorized: false` (required for Railway's proxy cert).
+### Database (Prisma 7 + dual adapter)
+`src/lib/db.ts` selects adapter by connection string: `neon.tech` -> `@prisma/adapter-neon` (Lambda); otherwise `@prisma/adapter-pg` (local/CI). No `url` field in schema.prisma — URL set in `prisma.config.ts` and at runtime via `DATABASE_URL`. After schema changes, run `npx prisma migrate dev --name <name>` (creates migration + regenerates client).
 
 ### Scheduler
-`src/instrumentation.ts` (Next.js instrumentation hook) starts the cron scheduler on server boot in Node.js runtime only. Two cron jobs run:
-- Every minute: `runScheduler()` — publishes due SCHEDULED posts via platform APIs, marks them PUBLISHED or FAILED
-- Every hour: `runMetricsRefresh()` — fetches engagement metrics for PUBLISHED posts
+Two EventBridge Lambda crons (not in-process):
+- `src/cron/publish.ts` — every minute, publishes due SCHEDULED posts
+- `src/cron/metrics.ts` — every hour, refreshes metrics for up to 50 PUBLISHED posts
 
-Token refresh happens in `src/lib/token.ts` (`ensureValidToken`). Twitter tokens are refreshed via OAuth; Meta page tokens never expire.
+**Do not change cron rates** — publisher has `concurrency: 1`, metrics capped at 50 for rate limits.
 
-### Platform integrations
-- `src/lib/platforms/twitter/index.ts` — Twitter API v2 (OAuth 2.0 PKCE flow via `/api/connect/twitter`)
-- `src/lib/platforms/instagram/index.ts` — Instagram Graph API (Meta OAuth via `/api/connect/meta`)
-- `src/lib/platforms/facebook/index.ts` — Facebook Graph API (same Meta OAuth flow)
-
-### AI
-`src/lib/ai/index.ts` uses `@anthropic-ai/sdk` with `claude-sonnet-4-6`. `generatePostContent()` generates platform-aware post copy. `suggestOptimalTimes()` returns hardcoded defaults (placeholder for future analytics-based logic).
+### Platform integrations (Blotato)
+Unified publishing via `src/lib/blotato/`. Connect flows in `src/app/api/connect/`. Token refresh via `ensureValidToken` in `src/lib/token.ts`. OAuth tokens AES-256-GCM encrypted via `src/lib/crypto.ts`. All server-side media fetches must call `assertSafeMediaUrl()` (SSRF guard: validates URL starts with `env.AWS_S3_PUBLIC_URL`).
 
 ### File uploads
-`src/lib/storage.ts` wraps AWS S3. Upload endpoint at `/api/upload`.
+`src/lib/storage.ts` wraps AWS S3. Two upload paths: direct server-side via `POST /api/upload` and browser-direct via presigned URL from `GET /api/upload/presigned`.
+
+### AI
+`src/lib/ai/index.ts` uses `claude-sonnet-4-6`. `generatePostContent()` generates platform-aware post copy.
+
+### Infrastructure (SST v3 Ion)
+`sst.config.ts`: Next.js on Lambda/CloudFront, S3 bucket, two EventBridge crons, 14 SST secrets from SSM Parameter Store. Secrets mapped to Lambda env vars explicitly (not via `link`).
 
 ## Testing
 
-Tests live in `src/__tests__/` mirroring the `src/` structure. All tests are in `node` environment (not jsdom).
+Tests in `src/__tests__/` mirroring `src/` structure, `node` environment. Coverage: 75% statements/lines/branches, 70% functions. Always create/update tests when modifying covered code. See `.claude/rules/testing.md` for coverage exclusions and setup details.
 
-**Prisma mocking pattern** — copy this exactly:
+**Prisma mock pattern** — copy this exactly:
 ```ts
 import { prismaMock } from "@/__tests__/mocks/prisma";
-
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 beforeEach(() => mockReset(prismaMock));
 ```
 
 **HTTP mocking:** spy on `global.fetch` — do not use `msw` or other interceptors.
 
-**Setup:** `src/__tests__/setup.ts` runs via `setupFiles` (before any module import) to populate all env vars so `src/env.ts`'s Zod parse doesn't throw.
-
-**Coverage thresholds** (enforced in CI): 75% statements/lines/branches, 70% functions. Excluded: components, pages, layouts, `src/lib/auth.ts`, `src/lib/db.ts`, `src/lib/storage.ts`, `src/lib/utils.ts`, shadcn/ui, providers, types. Always create/update tests when adding or modifying covered code.
-
-`schedulePostPublisher` (dynamic `node-cron` import) is intentionally not unit-tested.
-
 ## Deployment
 
-- `main` branch → production Railway environment (triggered by CI after tests pass)
-- `staging` branch → staging Railway environment
+`staging` branch -> staging | `main` branch -> production. See `.claude/rules/deployment.md` for CI pipeline, E2E setup, and SST details.
 
-CI pipeline: `.github/workflows/ci.yml` — runs tests → deploys via Railway CLI if on `main` or `staging`.
+## Design System
+- Dark mode: `class="dark"` on `<html>`
+- Colors: bg-zinc-950 (page), bg-zinc-900 (sidebar), bg-zinc-800 (cards), violet-600 (accent)
+- Platforms: Twitter=sky-400, Instagram=pink-500, Facebook=blue-500, TikTok=zinc-100, YouTube=red-500
+- Status: emerald=published, amber=scheduled, red=failed, zinc=draft
 
-**Do not change the metrics/scheduler cron to run more frequently than hourly** — it caused a Railway Postgres connection storm previously.
+## Project Config
+project_tracker: github

@@ -12,9 +12,13 @@ export default async function EditPostPage({ params }: Props) {
   if (!session) redirect("/auth/signin");
 
   const { id } = await params;
+  const userId = session.user.id;
 
   const post = await prisma.post.findFirst({
-    where: { id, userId: session.user.id },
+    where: {
+      id,
+      business: { members: { some: { userId } } },
+    },
     include: { socialAccount: { select: { platform: true, username: true } } },
   });
 

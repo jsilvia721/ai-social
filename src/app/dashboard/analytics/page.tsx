@@ -25,9 +25,15 @@ export default async function AnalyticsPage() {
   if (!session) redirect("/auth/signin");
 
   const userId = session.user.id;
+  const { activeBusinessId, isAdmin } = session.user;
+
+  const memberFilter = {
+    ...(isAdmin ? {} : { business: { members: { some: { userId } } } }),
+    ...(activeBusinessId ? { businessId: activeBusinessId } : {}),
+  };
 
   const posts = await prisma.post.findMany({
-    where: { userId, status: "PUBLISHED" },
+    where: { ...memberFilter, status: "PUBLISHED" },
     include: { socialAccount: { select: { platform: true, username: true } } },
     orderBy: { publishedAt: "desc" },
   });
@@ -76,7 +82,7 @@ export default async function AnalyticsPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-zinc-50">Analytics</h1>
-        <p className="text-zinc-400 mt-1">Engagement metrics across all published posts.</p>
+        <p className="text-zinc-400 mt-1">Engagement metrics for this workspace&apos;s published posts.</p>
       </div>
 
       {/* Summary stat cards */}
@@ -129,7 +135,7 @@ export default async function AnalyticsPage() {
           <Card className="bg-zinc-800 border-zinc-700">
             <div className="divide-y divide-zinc-700">
               {topPosts.map((post) => (
-                <div key={post.id} className="flex items-center gap-4 px-6 py-4">
+                <div key={post.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4 sm:px-6 sm:py-4">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-zinc-200 truncate">{post.content}</p>
                     <p className={`text-xs mt-1 ${PLATFORM_COLOR[post.socialAccount.platform as Platform]}`}>
