@@ -1,17 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Trash2, Loader2, Calendar, CheckCircle2, XCircle, FileText, Pencil, RefreshCw, Heart, MessageCircle, Repeat2, Eye, Bookmark, TrendingUp } from "lucide-react";
+import { Trash2, Loader2, Calendar, CheckCircle2, XCircle, FileText, Pencil, RefreshCw, Heart, MessageCircle, Repeat2, Eye, Bookmark, TrendingUp, Copy } from "lucide-react";
 import type { PostStatus, Platform } from "@/types";
 
 const STATUS_CONFIG: Record<PostStatus, { label: string; icon: React.ElementType; className: string }> = {
   DRAFT: { label: "Draft", icon: FileText, className: "bg-zinc-700 text-zinc-300 border-zinc-600" },
   SCHEDULED: { label: "Scheduled", icon: Calendar, className: "bg-amber-900/50 text-amber-400 border-amber-800" },
+  PUBLISHING: { label: "Publishing", icon: Loader2, className: "bg-sky-900/50 text-sky-400 border-sky-800" },
   PUBLISHED: { label: "Published", icon: CheckCircle2, className: "bg-emerald-900/50 text-emerald-400 border-emerald-800" },
   FAILED: { label: "Failed", icon: XCircle, className: "bg-red-900/50 text-red-400 border-red-800" },
+  PENDING_REVIEW: { label: "Pending Review", icon: FileText, className: "bg-violet-900/50 text-violet-400 border-violet-800" },
+  RETRYING: { label: "Retrying", icon: RefreshCw, className: "bg-orange-900/50 text-orange-400 border-orange-800" },
 };
 
 const PLATFORM_COLOR: Record<Platform, string> = {
@@ -106,133 +110,182 @@ interface PostCardProps {
 }
 
 export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isRetrying, setIsRetrying] = useState(false);
+  const router = useRouter();
+  const [activeOp, setActiveOp] = useState<"idle" | "deleting" | "retrying" | "repurposing">("idle");
+  const isBusy = activeOp !== "idle";
+  const repurposeInFlight = useRef(false);
   const statusConfig = STATUS_CONFIG[post.status];
   const StatusIcon = statusConfig.icon;
   const platformColor = PLATFORM_COLOR[post.socialAccount.platform];
   const PlatformIcon = PLATFORM_ICONS[post.socialAccount.platform];
 
   async function handleDelete() {
-    setIsDeleting(true);
+    if (isBusy) return;
+    setActiveOp("deleting");
     try {
       await onDelete(post.id);
     } finally {
-      setIsDeleting(false);
+      setActiveOp("idle");
     }
   }
 
   async function handleRetry() {
-    if (!onRetry) return;
-    setIsRetrying(true);
+    if (!onRetry || isBusy) return;
+    setActiveOp("retrying");
     try {
       await onRetry(post.id);
     } finally {
-      setIsRetrying(false);
+      setActiveOp("idle");
     }
   }
 
-  const canEdit = post.status === "DRAFT" || post.status === "SCHEDULED";
+  async function handleRepurpose() {
+    if (repurposeInFlight.current || isBusy) return;
+    repurposeInFlight.current = true;
+    setActiveOp("repurposing");
+    try {
+      const res = await fetch("/api/posts/repurpose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceContent: post.content }),
+      });
+      if (!res.ok) return;
+      const { repurposeGroupId } = await res.json();
+      router.push(`/dashboard/posts/repurpose/${repurposeGroupId}`);
+    } catch {
+      // silently fail
+    } finally {
+      setActiveOp("idle");
+      repurposeInFlight.current = false;
+    }
+  }
+
+  const canEdit = post.status !== "PUBLISHED";
   const canRetry = post.status === "FAILED" && !!onRetry;
 
   return (
-    <div className="flex items-start gap-4 rounded-lg border border-zinc-700 bg-zinc-800 p-4">
-      {/* Platform icon */}
-      <div className={`mt-0.5 shrink-0 ${platformColor}`}>
-        <PlatformIcon className="h-5 w-5" />
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0 space-y-2">
-        <p className="text-sm text-zinc-200 line-clamp-2">{post.content}</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`text-xs font-medium ${platformColor}`}>
-            @{post.socialAccount.username}
-          </span>
-          {post.scheduledAt && (
-            <span className="text-xs text-zinc-500">
-              · {new Date(post.scheduledAt).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-          )}
+    <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4">
+      <div className="flex items-start gap-3 sm:gap-4">
+        {/* Platform icon */}
+        <div className={`mt-0.5 shrink-0 ${platformColor}`}>
+          <PlatformIcon className="h-5 w-5" />
         </div>
-        {post.status === "FAILED" && post.errorMessage && (
-          <p className="text-xs text-red-400 truncate" title={post.errorMessage}>
-            {post.errorMessage}
-          </p>
-        )}
-        {post.status === "PUBLISHED" && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-zinc-700/50">
-            <MetricPill icon={Heart}          label="Likes"       value={fmt(post.metricsLikes)} />
-            <MetricPill icon={MessageCircle}  label="Comments"    value={fmt(post.metricsComments)} />
-            <MetricPill icon={Repeat2}        label="Shares"      value={fmt(post.metricsShares)} />
-            <MetricPill icon={Eye}            label="Impressions" value={fmt(post.metricsImpressions)} />
-            {post.metricsReach != null && (
-              <MetricPill icon={TrendingUp} label="Reach" value={fmt(post.metricsReach)} />
-            )}
-            {post.metricsSaves != null && (
-              <MetricPill icon={Bookmark} label="Saves" value={fmt(post.metricsSaves)} />
+
+        {/* Content */}
+        <div className="flex-1 min-w-0 space-y-2">
+          <p className="text-sm text-zinc-200 line-clamp-2">{post.content}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`text-xs font-medium ${platformColor}`}>
+              @{post.socialAccount.username}
+            </span>
+            {post.scheduledAt && (
+              <span className="text-xs text-zinc-500">
+                · {new Date(post.scheduledAt).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
             )}
           </div>
-        )}
+          {post.status === "FAILED" && post.errorMessage && (
+            <p className="text-xs text-red-400 truncate" title={post.errorMessage}>
+              {post.errorMessage}
+            </p>
+          )}
+          {post.status === "PUBLISHED" && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-zinc-700/50">
+              <MetricPill icon={Heart}          label="Likes"       value={fmt(post.metricsLikes)} />
+              <MetricPill icon={MessageCircle}  label="Comments"    value={fmt(post.metricsComments)} />
+              <MetricPill icon={Repeat2}        label="Shares"      value={fmt(post.metricsShares)} />
+              <MetricPill icon={Eye}            label="Impressions" value={fmt(post.metricsImpressions)} />
+              {post.metricsReach != null && (
+                <MetricPill icon={TrendingUp} label="Reach" value={fmt(post.metricsReach)} />
+              )}
+              {post.metricsSaves != null && (
+                <MetricPill icon={Bookmark} label="Saves" value={fmt(post.metricsSaves)} />
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Status badge - always visible */}
+        <Badge variant="outline" className={`gap-1 shrink-0 ${statusConfig.className}`}>
+          <StatusIcon className="h-3 w-3" />
+          <span className="hidden sm:inline">{statusConfig.label}</span>
+        </Badge>
       </div>
 
-      {/* Status + actions */}
-      <div className="flex items-center gap-2 shrink-0">
-        <Badge variant="outline" className={`gap-1 ${statusConfig.className}`}>
+      {/* Actions - below content on mobile, inline on desktop */}
+      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-zinc-700/50 sm:mt-0 sm:pt-0 sm:border-t-0 sm:justify-end">
+        <Badge variant="outline" className={`gap-1 sm:hidden ${statusConfig.className}`}>
           <StatusIcon className="h-3 w-3" />
           {statusConfig.label}
         </Badge>
+        <div className="flex items-center gap-1 ml-auto">
+          {canEdit && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-zinc-600 hover:text-violet-400 hover:bg-violet-950/50"
+              aria-label="Edit post"
+              asChild
+            >
+              <Link href={`/dashboard/posts/${post.id}/edit`}>
+                <Pencil className="h-4 w-4" />
+              </Link>
+            </Button>
+          )}
 
-        {canEdit && (
           <Button
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-zinc-600 hover:text-violet-400 hover:bg-violet-950/50"
-            aria-label="Edit post"
-            asChild
+            onClick={handleRepurpose}
+            disabled={isBusy}
+            aria-label="Repurpose to all platforms"
+            title="Repurpose to all platforms"
           >
-            <Link href={`/dashboard/posts/${post.id}/edit`}>
-              <Pencil className="h-4 w-4" />
-            </Link>
+            {activeOp === "repurposing" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Copy className="h-4 w-4" />
+            )}
           </Button>
-        )}
 
-        {canRetry && (
+          {canRetry && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-zinc-600 hover:text-amber-400 hover:bg-amber-950/50"
+              onClick={handleRetry}
+              disabled={isBusy}
+              aria-label="Retry post"
+            >
+              {activeOp === "retrying" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+            </Button>
+          )}
+
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-zinc-600 hover:text-amber-400 hover:bg-amber-950/50"
-            onClick={handleRetry}
-            disabled={isRetrying}
-            aria-label="Retry post"
+            className="h-8 w-8 text-zinc-600 hover:text-red-400 hover:bg-red-950/50"
+            onClick={handleDelete}
+            disabled={isBusy}
+            aria-label="Delete post"
           >
-            {isRetrying ? (
+            {activeOp === "deleting" ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="h-4 w-4" />
+              <Trash2 className="h-4 w-4" />
             )}
           </Button>
-        )}
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-zinc-600 hover:text-red-400 hover:bg-red-950/50"
-          onClick={handleDelete}
-          disabled={isDeleting}
-          aria-label="Delete post"
-        >
-          {isDeleting ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Trash2 className="h-4 w-4" />
-          )}
-        </Button>
+        </div>
       </div>
     </div>
   );

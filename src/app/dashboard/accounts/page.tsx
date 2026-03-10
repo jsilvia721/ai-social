@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { Suspense } from "react";
 import { AccountCard } from "@/components/accounts/AccountCard";
 import type { Platform } from "@/types";
@@ -12,51 +13,33 @@ interface Account {
   id: string;
   platform: Platform;
   username: string;
-  expiresAt: string | null;
+  businessId: string;
 }
 
 function AccountsContent() {
   const searchParams = useSearchParams();
+  const { data: session } = useSession();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [notification, setNotification] = useState<{
     type: "success" | "error";
     message: string;
   } | null>(null);
 
+  const activeBusinessId = (session?.user as { id: string; activeBusinessId?: string | null })
+    ?.activeBusinessId;
+
   const successParam = searchParams.get("success");
   const errorParam = searchParams.get("error");
 
   useEffect(() => {
     if (successParam) {
-      const messages: Record<string, string> = {
-        twitter_connected: "Twitter account connected successfully.",
-        meta_connected: "Facebook and Instagram accounts connected successfully.",
-        tiktok_connected: "TikTok account connected successfully.",
-        youtube_connected: "YouTube channel connected successfully.",
-      };
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setNotification({
-        type: "success",
-        message: messages[successParam] ?? "Account connected successfully.",
-      });
+      setNotification({ type: "success", message: "Account connected successfully." });
     } else if (errorParam) {
       const errorMessages: Record<string, string> = {
-        meta_denied: "You denied the Meta permissions request.",
-        state_mismatch: "OAuth state mismatch — please try again (cookie issue).",
-        meta_token_failed: "Failed to exchange Meta auth code for a token. Check that your redirect URI is whitelisted in the Meta app settings.",
-        meta_long_token_failed: "Failed to get long-lived Meta token.",
-        meta_pages_failed: "Failed to fetch your Facebook Pages.",
-        no_pages_found: "No Facebook Pages found. You must have at least one Facebook Page to connect Instagram/Facebook.",
-        tiktok_denied: "You denied the TikTok permissions request.",
-        tiktok_state_missing: "TikTok OAuth state missing — please try again.",
-        tiktok_state_invalid: "TikTok OAuth state invalid — please try again.",
-        tiktok_state_mismatch: "TikTok OAuth state mismatch — please try again (cookie issue).",
-        tiktok_token_failed: "Failed to exchange TikTok auth code. Ensure your redirect URI is registered in the TikTok developer portal.",
-        youtube_denied: "You denied the YouTube permissions request.",
-        youtube_state_mismatch: "YouTube OAuth state mismatch — please try again (cookie issue).",
-        youtube_token_failed: "Failed to exchange YouTube auth code for a token.",
-        youtube_channel_failed: "Failed to fetch your YouTube channel info.",
-        youtube_no_channel: "No YouTube channel found on this Google account.",
+        connect: "Failed to connect account. Please try again.",
+        state_mismatch: "OAuth state mismatch — please try again.",
+        account_claimed: "This account is already connected to another workspace.",
       };
       setNotification({
         type: "error",
@@ -66,12 +49,13 @@ function AccountsContent() {
   }, [successParam, errorParam]);
 
   const fetchAccounts = useCallback(async () => {
-    const res = await fetch("/api/accounts");
+    if (!activeBusinessId) return;
+    const res = await fetch(`/api/accounts?businessId=${activeBusinessId}`);
     if (res.ok) {
       const data = await res.json();
       setAccounts(data);
     }
-  }, []);
+  }, [activeBusinessId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -91,11 +75,30 @@ function AccountsContent() {
   const getAccount = (platform: Platform) =>
     accounts.find((a) => a.platform === platform);
 
+  if (!activeBusinessId) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-50">Accounts</h1>
+          <p className="text-zinc-400 mt-1">Connect your social media accounts to start posting.</p>
+        </div>
+        <div className="rounded-lg border border-zinc-700 bg-zinc-800 px-6 py-8 text-center">
+          <p className="text-zinc-400">
+            No workspace selected.{" "}
+            <a href="/dashboard/businesses/new" className="text-violet-400 hover:underline">
+              Create a workspace first.
+            </a>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-zinc-50">Accounts</h1>
-        <p className="text-zinc-400 mt-1">Connect your social media accounts to start posting.</p>
+        <p className="text-zinc-400 mt-1">Connect social media accounts to this workspace via Blotato.</p>
       </div>
 
       {notification && (
@@ -115,14 +118,12 @@ function AccountsContent() {
           <AccountCard
             key={platform}
             platform={platform}
+            businessId={activeBusinessId}
             account={
               getAccount(platform)
                 ? {
                     id: getAccount(platform)!.id,
                     username: getAccount(platform)!.username,
-                    expiresAt: getAccount(platform)!.expiresAt
-                      ? new Date(getAccount(platform)!.expiresAt!)
-                      : null,
                   }
                 : undefined
             }
@@ -132,8 +133,8 @@ function AccountsContent() {
       </div>
 
       <p className="text-xs text-zinc-600">
-        Instagram and Facebook use the same Meta OAuth connection. Connecting Meta will link both platforms.
-        TikTok requires business API approval — your account will connect but posting may be unavailable until approved.
+        Accounts are connected via Blotato, which manages OAuth tokens on your behalf.
+        To connect an account, click &quot;Connect&quot; and follow the Blotato authorization flow.
       </p>
     </div>
   );

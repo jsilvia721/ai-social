@@ -2,21 +2,18 @@ import { mockAuthenticated, mockUnauthenticated, mockSession } from "@/__tests__
 
 jest.mock("@/lib/storage", () => ({
   uploadFile: jest.fn(),
-  ensureBucket: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock("next-auth/next");
 jest.mock("@/lib/auth", () => ({ authOptions: {} }));
 
 import { POST } from "@/app/api/upload/route";
 import { NextRequest } from "next/server";
-import { uploadFile, ensureBucket } from "@/lib/storage";
+import { uploadFile } from "@/lib/storage";
 
 const mockUploadFile = uploadFile as jest.Mock;
-const mockEnsureBucket = ensureBucket as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockEnsureBucket.mockResolvedValue(undefined);
 });
 
 function makeUploadRequest(
@@ -77,6 +74,8 @@ describe("POST /api/upload", () => {
     const res = await POST(req);
 
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("presigned");
     expect(mockUploadFile).not.toHaveBeenCalled();
   });
 
@@ -109,15 +108,13 @@ describe("POST /api/upload", () => {
     expect(key).toMatch(/\.jpg$/);
   });
 
-  it("returns 200 for a valid video/mp4", async () => {
+  it("returns 400 for video/mp4 (videos must use presigned upload)", async () => {
     mockAuthenticated();
-    mockUploadFile.mockResolvedValue(
-      "http://example.com/storage/ai-social/uploads/user-test-id/vid.mp4"
-    );
 
     const req = makeUploadRequest(new Uint8Array([0x00, 0x00]), "clip.mp4", "video/mp4");
     const res = await POST(req);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
+    expect(mockUploadFile).not.toHaveBeenCalled();
   });
 });

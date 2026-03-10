@@ -6,18 +6,21 @@ datasource db {
   provider = "postgresql"
 }
 
+// ── NextAuth models ───────────────────────────────────────────────────────────
+
 model User {
-  id             String          @id @default(cuid())
-  email          String          @unique
-  emailVerified  DateTime?
-  name           String?
-  image          String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  accounts       Account[]
-  sessions       Session[]
-  socialAccounts SocialAccount[]
-  posts          Post[]
+  id               String           @id @default(cuid())
+  email            String           @unique
+  emailVerified    DateTime?
+  name             String?
+  image            String?
+  isAdmin          Boolean          @default(false) // global admin — bypasses workspace membership checks
+  activeBusinessId String?          // denormalized JWT cache — validated on session hydration
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  accounts         Account[]
+  sessions         Session[]
+  businesses       BusinessMember[]
 }
 
 model Account {
@@ -54,49 +57,119 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+// ── Business workspace models ─────────────────────────────────────────────────
+
+model Business {
+  id                String            @id @default(cuid())
+  name              String
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  members           BusinessMember[]
+  socialAccounts    SocialAccount[]
+  posts             Post[]
+  contentStrategy   ContentStrategy?
+  researchSummaries ResearchSummary[]
+  contentBriefs     ContentBrief[]
+  strategyDigests   StrategyDigest[]
+}
+
+model BusinessMember {
+  id         String       @id @default(cuid())
+  businessId String
+  userId     String
+  role       BusinessRole @default(MEMBER)
+  joinedAt   DateTime     @default(now())
+  business   Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@index([userId])
+}
+
+model ContentStrategy {
+  id                  String   @id @default(cuid())
+  businessId          String   @unique
+  industry            String
+  targetAudience      String
+  contentPillars      String[]
+  brandVoice          String   @db.Text
+  optimizationGoal    String
+  reviewWindowEnabled Boolean  @default(false)
+  reviewWindowHours   Int      @default(24)
+  postingCadence      Json?    // e.g., { "TWITTER": 5, "INSTAGRAM": 3 } — posts per platform per week
+  researchSources     Json?    // e.g., { rssFeeds: ["https://..."], subreddits: ["r/..."] }
+  formatMix           Json?    // e.g., { "TEXT": 0.2, "IMAGE": 0.3, "VIDEO": 0.5 } — target format distribution
+  optimalTimeWindows  Json?    // e.g., { "TWITTER": ["09:00-11:00", "17:00-19:00"] }
+  lastOptimizedAt     DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// ── Social accounts & posts ───────────────────────────────────────────────────
+
 model SocialAccount {
-  id           String    @id @default(cuid())
-  userId       String
-  platform     Platform
-  platformId   String
-  username     String
-  accessToken  String    @db.Text
-  refreshToken String?   @db.Text
-  expiresAt    DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  posts        Post[]
+  id               String    @id @default(cuid())
+  businessId       String
+  platform         Platform
+  platformId       String
+  username         String
+  blotatoAccountId String    @unique
+  // Release 3: drop these columns once all code fully uses blotatoAccountId
+  accessToken      String?   @db.Text
+  refreshToken     String?   @db.Text
+  expiresAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  business         Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  posts            Post[]
 
   @@unique([platform, platformId])
+  @@index([businessId])
 }
 
 model Post {
-  id              String        @id @default(cuid())
-  userId          String
-  socialAccountId String
-  content         String        @db.Text
-  mediaUrls       String[]
-  status          PostStatus    @default(DRAFT)
-  scheduledAt     DateTime?
-  publishedAt     DateTime?
-  platformPostId      String?
-  errorMessage        String?
-  metricsLikes        Int?
-  metricsComments     Int?
-  metricsShares       Int?
-  metricsImpressions  Int?
-  metricsReach        Int?
-  metricsSaves        Int?
-  metricsUpdatedAt    DateTime?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  socialAccount   SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  id                    String        @id @default(cuid())
+  businessId            String
+  socialAccountId       String
+  content               String        @db.Text
+  mediaUrls             String[]
+  status                PostStatus    @default(DRAFT)
+  retryCount            Int           @default(0)
+  retryAt               DateTime?
+  scheduledAt           DateTime?
+  publishedAt           DateTime?
+  reviewWindowExpiresAt DateTime?
+  blotatoPostId         String?
+  errorMessage          String?
+  briefId               String?       @unique
+  repurposeGroupId      String?   // cuid linking variant posts from a single repurpose operation
+  topicPillar           String?   // which content pillar this maps to
+  tone                  String?   // "educational" | "entertaining" | "promotional" | "community"
+  metricsLikes          Int?
+  metricsComments       Int?
+  metricsShares         Int?
+  metricsImpressions    Int?
+  metricsReach          Int?
+  metricsSaves          Int?
+  metricsUpdatedAt      DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  business              Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  socialAccount         SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  contentBrief          ContentBrief?
 
-  @@index([userId, status, scheduledAt])
-  @@index([userId, scheduledAt])
+  @@index([status, scheduledAt])
+  @@index([status, retryAt])
+  @@index([status, metricsUpdatedAt])
+  @@index([status, reviewWindowExpiresAt])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@index([businessId, publishedAt])
+  @@index([repurposeGroupId])
 }
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
 
 enum Platform {
   TWITTER
@@ -111,4 +184,87 @@ enum PostStatus {
   SCHEDULED
   PUBLISHED
   FAILED
+  PENDING_REVIEW
+  RETRYING
+  PUBLISHING
+}
+
+enum BusinessRole {
+  OWNER
+  MEMBER
+}
+
+// ── Content Intelligence (M2) ────────────────────────────────────────────────
+
+model ResearchSummary {
+  id                String   @id @default(cuid())
+  businessId        String
+  sourceItems       Json     // raw items from Google Trends, RSS, Reddit
+  synthesizedThemes String   @db.Text // Claude's thematic synthesis
+  sourcesUsed       String[] // ["google_trends", "rss", "reddit"]
+  createdAt         DateTime @default(now())
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+}
+
+model ContentBrief {
+  id                String      @id @default(cuid())
+  businessId        String
+  researchSummaryId String?
+  topic             String
+  rationale         String      @db.Text
+  suggestedCaption  String      @db.Text
+  aiImagePrompt     String?     @db.Text
+  contentGuidance   String?     @db.Text
+  recommendedFormat BriefFormat
+  platform          Platform
+  scheduledFor      DateTime
+  status            BriefStatus @default(PENDING)
+  weekOf            DateTime
+  sortOrder         Int         @default(0)
+  retryCount        Int         @default(0)
+  errorMessage      String?     @db.Text
+  postId            String?     @unique
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  business          Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  post              Post?       @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, status])
+  @@index([businessId, scheduledFor])
+  @@index([status, weekOf])
+  @@index([status, scheduledFor])
+}
+
+enum BriefFormat {
+  TEXT
+  IMAGE
+  CAROUSEL
+  VIDEO
+}
+
+enum BriefStatus {
+  PENDING
+  FULFILLING
+  FULFILLED
+  FAILED
+  EXPIRED
+  CANCELLED
+}
+
+// ── Strategy Optimizer (M3) ─────────────────────────────────────────────────
+
+model StrategyDigest {
+  id         String   @id @default(cuid())
+  businessId String
+  weekOf     DateTime
+  summary    String   @db.Text // plain-language digest for partner
+  patterns   Json     // { topPerformers: [...], insights: [...] }
+  changes    Json     // { formatMix: {...}, cadence: {...}, ... }
+  createdAt  DateTime @default(now())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, weekOf])
+  @@index([businessId, createdAt])
 }

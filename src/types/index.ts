@@ -1,5 +1,5 @@
 export type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK" | "TIKTOK" | "YOUTUBE";
-export type PostStatus = "DRAFT" | "SCHEDULED" | "PUBLISHED" | "FAILED";
+export type PostStatus = "DRAFT" | "SCHEDULED" | "PUBLISHING" | "PUBLISHED" | "FAILED" | "PENDING_REVIEW" | "RETRYING";
 
 export interface SocialAccount {
   id: string;

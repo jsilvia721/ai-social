@@ -19,12 +19,17 @@ const STATUS_BADGE: Record<PostStatus, { label: string; className: string }> = {
   SCHEDULED: { label: "Scheduled", className: "bg-amber-900/50 text-amber-400 border-amber-800" },
   PUBLISHED: { label: "Published", className: "bg-emerald-900/50 text-emerald-400 border-emerald-800" },
   FAILED: { label: "Failed", className: "bg-red-900/50 text-red-400 border-red-800" },
+  PENDING_REVIEW: { label: "Pending Review", className: "bg-violet-900/50 text-violet-400 border-violet-800" },
+  RETRYING: { label: "Retrying", className: "bg-orange-900/50 text-orange-400 border-orange-800" },
+  PUBLISHING: { label: "Publishing", className: "bg-sky-900/50 text-sky-400 border-sky-800" },
 };
 
 const PLATFORM_COLOR: Record<string, string> = {
   TWITTER: "text-sky-400",
   INSTAGRAM: "text-pink-500",
   FACEBOOK: "text-blue-500",
+  TIKTOK: "text-zinc-100",
+  YOUTUBE: "text-red-500",
 };
 
 export default async function DashboardPage() {
@@ -32,21 +37,26 @@ export default async function DashboardPage() {
   if (!session) redirect("/auth/signin");
 
   const userId = session.user.id;
+  const { activeBusinessId, isAdmin } = session.user;
+  const memberFilter = {
+    ...(isAdmin ? {} : { business: { members: { some: { userId } } } }),
+    ...(activeBusinessId ? { businessId: activeBusinessId } : {}),
+  };
 
   const [totalPosts, scheduledCount, publishedCount, connectedAccounts, recentPosts, totalLikesAgg, totalImpressionsAgg] =
     await Promise.all([
-      prisma.post.count({ where: { userId } }),
-      prisma.post.count({ where: { userId, status: "SCHEDULED" } }),
-      prisma.post.count({ where: { userId, status: "PUBLISHED" } }),
-      prisma.socialAccount.count({ where: { userId } }),
+      prisma.post.count({ where: memberFilter }),
+      prisma.post.count({ where: { ...memberFilter, status: "SCHEDULED" } }),
+      prisma.post.count({ where: { ...memberFilter, status: "PUBLISHED" } }),
+      prisma.socialAccount.count({ where: memberFilter }),
       prisma.post.findMany({
-        where: { userId },
+        where: memberFilter,
         orderBy: { createdAt: "desc" },
         take: 5,
         include: { socialAccount: { select: { platform: true, username: true } } },
       }),
-      prisma.post.aggregate({ where: { userId, status: "PUBLISHED" }, _sum: { metricsLikes: true } }),
-      prisma.post.aggregate({ where: { userId, status: "PUBLISHED" }, _sum: { metricsImpressions: true } }),
+      prisma.post.aggregate({ where: { ...memberFilter, status: "PUBLISHED" }, _sum: { metricsLikes: true } }),
+      prisma.post.aggregate({ where: { ...memberFilter, status: "PUBLISHED" }, _sum: { metricsImpressions: true } }),
     ]);
 
   const stats = [
@@ -54,8 +64,8 @@ export default async function DashboardPage() {
     { label: "Scheduled", value: scheduledCount, icon: Clock, color: "text-amber-400" },
     { label: "Published", value: publishedCount, icon: CheckCircle2, color: "text-emerald-400" },
     { label: "Connected Accounts", value: connectedAccounts, icon: Link2, color: "text-violet-400" },
-    { label: "Total Likes", value: totalLikesAgg._sum.metricsLikes ?? 0, icon: Heart, color: "text-pink-400" },
-    { label: "Impressions", value: totalImpressionsAgg._sum.metricsImpressions ?? 0, icon: Eye, color: "text-sky-400" },
+    { label: "Total Likes", value: totalLikesAgg._sum?.metricsLikes ?? 0, icon: Heart, color: "text-pink-400" },
+    { label: "Impressions", value: totalImpressionsAgg._sum?.metricsImpressions ?? 0, icon: Eye, color: "text-sky-400" },
   ];
 
   return (
@@ -92,20 +102,22 @@ export default async function DashboardPage() {
         ) : (
           <Card className="bg-zinc-800 border-zinc-700">
             <div className="divide-y divide-zinc-700">
-              {(recentPosts as RecentPost[]).map((post) => {
+              {(recentPosts as unknown as RecentPost[]).map((post) => {
                 const status = STATUS_BADGE[post.status as PostStatus];
                 const platformColor = PLATFORM_COLOR[post.socialAccount.platform] ?? "text-zinc-400";
                 return (
-                  <div key={post.id} className="flex items-center gap-4 px-6 py-4">
+                  <div key={post.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4 sm:px-6 sm:py-4">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-zinc-200 truncate">{post.content}</p>
                       <p className={`text-xs mt-1 ${platformColor}`}>
                         @{post.socialAccount.username} · {post.socialAccount.platform}
                       </p>
                     </div>
-                    <Badge variant="outline" className={`shrink-0 ${status.className}`}>
-                      {status.label}
-                    </Badge>
+                    {status && (
+                      <Badge variant="outline" className={`shrink-0 ${status.className}`}>
+                        {status.label}
+                      </Badge>
+                    )}
                   </div>
                 );
               })}

@@ -1,3 +1,12 @@
+import { shouldMockExternalApis } from "@/lib/mocks/config";
+import {
+  mockFetchTwitterMetrics,
+  mockFetchFacebookMetrics,
+  mockFetchTikTokMetrics,
+  mockFetchYouTubeMetrics,
+  mockFetchInstagramMetrics,
+} from "@/lib/mocks/fetchers";
+
 const TIKTOK_VIDEO_URL = "https://open.tiktokapis.com/v2/video/query/";
 
 export interface FetchedMetrics {
@@ -14,6 +23,7 @@ export async function fetchTwitterMetrics(
   accessToken: string,
   tweetId: string
 ): Promise<FetchedMetrics | null> {
+  if (shouldMockExternalApis()) return mockFetchTwitterMetrics();
   try {
     const res = await fetch(
       `https://api.twitter.com/2/tweets/${tweetId}?tweet.fields=public_metrics`,
@@ -41,6 +51,7 @@ export async function fetchFacebookMetrics(
   accessToken: string,
   postId: string
 ): Promise<FetchedMetrics | null> {
+  if (shouldMockExternalApis()) return mockFetchFacebookMetrics();
   try {
     const url = new URL(`https://graph.facebook.com/v19.0/${postId}`);
     url.searchParams.set(
@@ -82,6 +93,7 @@ export async function fetchTikTokMetrics(
   accessToken: string,
   publishId: string
 ): Promise<FetchedMetrics | null> {
+  if (shouldMockExternalApis()) return mockFetchTikTokMetrics();
   try {
     const res = await fetch(
       `${TIKTOK_VIDEO_URL}?fields=like_count,comment_count,share_count,view_count`,
@@ -116,6 +128,7 @@ export async function fetchYouTubeMetrics(
   accessToken: string,
   videoId: string
 ): Promise<FetchedMetrics | null> {
+  if (shouldMockExternalApis()) return mockFetchYouTubeMetrics();
   try {
     const url = new URL("https://www.googleapis.com/youtube/v3/videos");
     url.searchParams.set("part", "statistics");
@@ -145,6 +158,7 @@ export async function fetchInstagramMetrics(
   accessToken: string,
   mediaId: string
 ): Promise<FetchedMetrics | null> {
+  if (shouldMockExternalApis()) return mockFetchInstagramMetrics();
   try {
     const url = new URL(`https://graph.facebook.com/v19.0/${mediaId}/insights`);
     url.searchParams.set("metric", "impressions,reach,likes,comments,saves");
