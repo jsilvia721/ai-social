@@ -140,6 +140,7 @@ export async function runBriefGeneration(
         researchThemes,
         recentPostTopics,
         formatMix,
+        { accountType: strategy.accountType, visualStyle: strategy.visualStyle },
       );
 
       // 6. Store ContentBrief records

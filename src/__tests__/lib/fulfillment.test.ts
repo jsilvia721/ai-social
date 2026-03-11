@@ -54,6 +54,8 @@ function makeBrief(overrides: Record<string, unknown> = {}) {
         researchSources: null,
         formatMix: null,
         optimalTimeWindows: null,
+        accountType: "BUSINESS",
+        visualStyle: null,
         lastOptimizedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -161,7 +163,9 @@ describe("runFulfillment", () => {
 
     expect(result.processed).toBe(1);
     expect(result.created).toBe(1);
-    expect(mockGenerateImage).toHaveBeenCalledWith("A futuristic marketing dashboard");
+    expect(mockGenerateImage).toHaveBeenCalledWith(
+      expect.stringContaining("A futuristic marketing dashboard")
+    );
     expect(mockUploadBuffer).toHaveBeenCalled();
   });
 
@@ -402,7 +406,9 @@ describe("runFulfillment", () => {
 
     await runFulfillment();
 
-    expect(mockGenerateImage).toHaveBeenCalledWith("A futuristic marketing dashboard");
+    expect(mockGenerateImage).toHaveBeenCalledWith(
+      expect.stringContaining("A futuristic marketing dashboard")
+    );
     expect(mockUploadBuffer).toHaveBeenCalledWith(
       expect.any(Buffer),
       expect.stringContaining("media/biz-1/brief-1"),

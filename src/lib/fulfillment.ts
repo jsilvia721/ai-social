@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db";
 import { generateImage } from "@/lib/media";
 import { uploadBuffer } from "@/lib/storage";
 import { sendFailureAlert } from "@/lib/alerts";
+import { buildImagePrompt } from "@/lib/ai/prompts";
 import type { BriefFormat, ContentBrief, ContentStrategy, SocialAccount } from "@prisma/client";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -176,7 +177,16 @@ async function fulfillOneBrief(
     // Generate media based on format
     let mediaUrls: string[] = [];
     const handler = formatHandlers[brief.recommendedFormat];
-    const media = await handler(brief.aiImagePrompt ?? brief.topic);
+    // Augment IMAGE prompts with Creative Profile context
+    const basePrompt = brief.aiImagePrompt ?? brief.topic;
+    const augmentedPrompt =
+      brief.recommendedFormat === "IMAGE"
+        ? buildImagePrompt(basePrompt, {
+            accountType: strategy.accountType,
+            visualStyle: strategy.visualStyle,
+          })
+        : basePrompt;
+    const media = await handler(augmentedPrompt);
     if (media) {
       const key = `media/${brief.businessId}/${brief.id}.${media.mimeType.split("/")[1] || "png"}`;
       const url = await uploadBuffer(media.buffer, key, media.mimeType);

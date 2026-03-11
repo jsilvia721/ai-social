@@ -73,7 +73,7 @@ describe("generatePostContent", () => {
   it("includes tone in the prompt when provided", async () => {
     mockCreate.mockResolvedValue(makeTextResponse("professional post"));
 
-    await generatePostContent("product launch", "TWITTER", "professional");
+    await generatePostContent("product launch", "TWITTER", { tone: "professional" });
 
     const prompt = mockCreate.mock.calls[0][0].messages[0].content as string;
     expect(prompt).toContain("professional");

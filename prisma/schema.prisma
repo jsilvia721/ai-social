@@ -100,6 +100,8 @@ model ContentStrategy {
   researchSources     Json?    // e.g., { rssFeeds: ["https://..."], subreddits: ["r/..."] }
   formatMix           Json?    // e.g., { "TEXT": 0.2, "IMAGE": 0.3, "VIDEO": 0.5 } — target format distribution
   optimalTimeWindows  Json?    // e.g., { "TWITTER": ["09:00-11:00", "17:00-19:00"] }
+  accountType         String   @default("BUSINESS") // BUSINESS | INFLUENCER | MEME
+  visualStyle         String?  @db.Text             // "clean minimalist", "chaotic meme energy"
   lastOptimizedAt     DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

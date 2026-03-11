@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { STRATEGY_SELECT } from "@/lib/strategy/constants";
 import { StrategyClient } from "./strategy-client";
 
 export const dynamic = "force-dynamic";
@@ -35,21 +36,7 @@ export default async function StrategyPage() {
         }),
     prisma.contentStrategy.findUnique({
       where: { businessId: activeBusinessId },
-      select: {
-        industry: true,
-        targetAudience: true,
-        contentPillars: true,
-        brandVoice: true,
-        optimizationGoal: true,
-        reviewWindowEnabled: true,
-        reviewWindowHours: true,
-        postingCadence: true,
-        formatMix: true,
-        researchSources: true,
-        optimalTimeWindows: true,
-        lastOptimizedAt: true,
-        updatedAt: true,
-      },
+      select: STRATEGY_SELECT,
     }),
   ]);
 

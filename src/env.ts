@@ -11,6 +11,7 @@ const serverSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   // External API keys: required in production, optional when mocked
   ANTHROPIC_API_KEY: isMocked ? z.string().default("mock-key") : z.string().min(1),
+  REPLICATE_API_TOKEN: isMocked ? z.string().default("mock-key") : z.string().min(1),
   BLOTATO_API_KEY: isMocked ? z.string().default("mock-key") : z.string().min(1),
   SES_FROM_EMAIL: z.string().email().optional(),
   ALLOWED_EMAILS: z.string().min(1),

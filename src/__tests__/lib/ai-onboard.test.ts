@@ -43,6 +43,8 @@ describe("extractContentStrategy", () => {
     optimizationGoal: "ENGAGEMENT",
     reviewWindowEnabled: false,
     reviewWindowHours: 24,
+    accountType: "BUSINESS",
+    visualStyle: "",
   };
 
   it("calls Anthropic with tool_use and pinned tool_choice", async () => {
