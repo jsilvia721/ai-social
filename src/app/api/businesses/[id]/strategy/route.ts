@@ -3,24 +3,9 @@ import { prisma } from "@/lib/db";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 import { StrategyPatchSchema } from "@/lib/strategy/schemas";
+import { STRATEGY_SELECT } from "@/lib/strategy/constants";
 
 type Params = { params: Promise<{ id: string }> };
-
-const STRATEGY_SELECT = {
-  industry: true,
-  targetAudience: true,
-  contentPillars: true,
-  brandVoice: true,
-  optimizationGoal: true,
-  reviewWindowEnabled: true,
-  reviewWindowHours: true,
-  postingCadence: true,
-  formatMix: true,
-  researchSources: true,
-  optimalTimeWindows: true,
-  lastOptimizedAt: true,
-  updatedAt: true,
-} as const;
 
 /** GET /api/businesses/[id]/strategy — returns full content strategy */
 export async function GET(req: NextRequest, { params }: Params) {

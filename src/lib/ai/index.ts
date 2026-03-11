@@ -56,6 +56,8 @@ const ContentStrategyInputSchema = z.object({
   optimizationGoal: z.enum(["ENGAGEMENT", "REACH", "CONVERSIONS", "BRAND_AWARENESS"]),
   reviewWindowEnabled: z.boolean(),
   reviewWindowHours: z.number().int().positive(),
+  accountType: z.enum(["BUSINESS", "INFLUENCER", "MEME"]).optional().default("BUSINESS"),
+  visualStyle: z.string().optional().default(""),
 });
 
 export type ContentStrategyInput = z.infer<typeof ContentStrategyInputSchema>;
@@ -96,6 +98,15 @@ const contentStrategyTool: Anthropic.Tool = {
       reviewWindowHours: {
         type: "number",
         description: "Hours the human has to review before auto-publishing (typically 24)",
+      },
+      accountType: {
+        type: "string",
+        enum: ["BUSINESS", "INFLUENCER", "MEME"],
+        description: "The type of social media account: BUSINESS for companies/brands, INFLUENCER for personal brands/creators, MEME for humor/entertainment accounts",
+      },
+      visualStyle: {
+        type: "string",
+        description: "Free-text description of the desired visual aesthetic for generated images (e.g., 'clean minimalist', 'bold and colorful', 'chaotic meme energy')",
       },
     },
     required: [

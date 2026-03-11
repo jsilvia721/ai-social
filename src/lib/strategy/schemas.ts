@@ -124,6 +124,8 @@ export const StrategyPatchSchema = z
     postingCadence: PostingCadenceSchema.optional(),
     formatMix: PlatformFormatMixSchema.optional(),
     researchSources: ResearchSourcesSchema.optional(),
+    accountType: z.enum(["BUSINESS", "INFLUENCER", "MEME"]).optional(),
+    visualStyle: z.string().max(500).nullable().optional(),
   })
   .strict();
 

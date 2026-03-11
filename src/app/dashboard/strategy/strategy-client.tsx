@@ -18,7 +18,7 @@ import { PLATFORM_FORMATS } from "@/lib/strategy/schemas";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-type SectionKey = "core" | "publishing" | "research";
+type SectionKey = "core" | "publishing" | "research" | "creative";
 type SectionState = "viewing" | "editing" | "saving" | "error";
 
 interface Strategy {
@@ -35,6 +35,8 @@ interface Strategy {
   optimalTimeWindows: Prisma.JsonValue;
   lastOptimizedAt: string | null;
   updatedAt: string;
+  accountType: string;
+  visualStyle: string | null;
 }
 
 interface Props {
@@ -127,6 +129,7 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
     core: "viewing",
     publishing: "viewing",
     research: "viewing",
+    creative: "viewing",
   });
 
   // Per-section error messages
@@ -134,6 +137,7 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
     core: null,
     publishing: null,
     research: null,
+    creative: null,
   });
 
   // Draft state for each section (populated when editing)
@@ -154,11 +158,17 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
 
   const [resDraft, setResDraft] = useState(asResearchSources(committed.researchSources));
 
+  const [creativeDraft, setCreativeDraft] = useState({
+    accountType: committed.accountType,
+    visualStyle: committed.visualStyle ?? "",
+  });
+
   // Double-click guards (refs, not state)
   const saveInFlight = useRef<Record<SectionKey, boolean>>({
     core: false,
     publishing: false,
     research: false,
+    creative: false,
   });
 
   // ── Section transitions ──────────────────────────────────────────────────
@@ -181,8 +191,13 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
         postingCadence: { ...asCadenceRecord(committed.postingCadence) },
         formatMix: structuredClone(asFormatMixRecord(committed.formatMix)),
       });
-    } else {
+    } else if (section === "research") {
       setResDraft({ ...asResearchSources(committed.researchSources) });
+    } else {
+      setCreativeDraft({
+        accountType: committed.accountType,
+        visualStyle: committed.visualStyle ?? "",
+      });
     }
     setSectionStates((s) => ({ ...s, [section]: "editing" }));
     setErrors((e) => ({ ...e, [section]: null }));
@@ -206,8 +221,13 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
         patchData = { ...coreDraft };
       } else if (section === "publishing") {
         patchData = { ...pubDraft };
-      } else {
+      } else if (section === "research") {
         patchData = { researchSources: resDraft };
+      } else {
+        patchData = {
+          accountType: creativeDraft.accountType,
+          visualStyle: creativeDraft.visualStyle || null,
+        };
       }
 
       try {
@@ -249,7 +269,7 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
         saveInFlight.current[section] = false;
       }
     },
-    [businessId, committed.updatedAt, coreDraft, pubDraft, resDraft]
+    [businessId, committed.updatedAt, coreDraft, pubDraft, resDraft, creativeDraft]
   );
 
   // ── Render helpers ─────────────────────────────────────────────────────
@@ -878,6 +898,82 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
     );
   }
 
+  // ── Section: Creative Profile ──────────────────────────────────────────
+
+  const creativeEditing = sectionStates.creative !== "viewing";
+
+  const ACCOUNT_TYPE_OPTIONS = [
+    { value: "BUSINESS", label: "Business", description: "Companies, brands, and professional services" },
+    { value: "INFLUENCER", label: "Influencer", description: "Personal brands, creators, and thought leaders" },
+    { value: "MEME", label: "Meme", description: "Humor, entertainment, and internet culture" },
+  ];
+
+  function CreativeSection() {
+    return (
+      <Card className="bg-zinc-800 border-zinc-700">
+        <SectionHeader title="Creative Profile" section="creative" />
+        <ErrorBanner section="creative" />
+        <CardContent className="space-y-5">
+          <Field
+            label="Account Type"
+            description="Shapes the tone and aesthetic of AI-generated images and content."
+          >
+            {creativeEditing ? (
+              <div className="space-y-2">
+                {ACCOUNT_TYPE_OPTIONS.map((opt) => (
+                  <label
+                    key={opt.value}
+                    className={`flex items-start gap-2.5 cursor-pointer rounded-lg border p-3 transition-colors ${
+                      creativeDraft.accountType === opt.value
+                        ? "border-violet-600 bg-violet-600/10"
+                        : "border-zinc-700 hover:bg-zinc-700/30"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="accountType"
+                      checked={creativeDraft.accountType === opt.value}
+                      onChange={() => setCreativeDraft((d) => ({ ...d, accountType: opt.value }))}
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-zinc-200">{opt.label}</p>
+                      <p className="text-xs text-zinc-500">{opt.description}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p className="text-zinc-300">
+                {ACCOUNT_TYPE_OPTIONS.find((o) => o.value === committed.accountType)?.label ?? committed.accountType}
+              </p>
+            )}
+          </Field>
+
+          <Field
+            label="Visual Style"
+            description="Describes the desired visual aesthetic for AI-generated images. Leave blank to use account type defaults."
+          >
+            {creativeEditing ? (
+              <Textarea
+                value={creativeDraft.visualStyle}
+                onChange={(e) => setCreativeDraft((d) => ({ ...d, visualStyle: e.target.value }))}
+                maxLength={500}
+                rows={3}
+                placeholder="e.g., clean minimalist, bold and colorful, chaotic meme energy"
+                className="bg-zinc-700 border-zinc-600 resize-none"
+              />
+            ) : (
+              <p className="text-zinc-300">
+                {committed.visualStyle || <span className="text-zinc-500">Not set — using account type defaults</span>}
+              </p>
+            )}
+          </Field>
+        </CardContent>
+      </Card>
+    );
+  }
+
   // ── Main render ────────────────────────────────────────────────────────
 
   return (
@@ -898,6 +994,7 @@ export function StrategyClient({ initialStrategy, businessId, isOwner }: Props) 
 
       <div className="space-y-6">
         <CoreSection />
+        <CreativeSection />
         <PublishingSection />
         <ResearchSection />
       </div>

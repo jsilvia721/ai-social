@@ -54,6 +54,8 @@ export function mockExtractContentStrategy(
     optimizationGoal: "ENGAGEMENT",
     reviewWindowEnabled: true,
     reviewWindowHours: 24,
+    accountType: "BUSINESS",
+    visualStyle: "",
   };
 }
 
