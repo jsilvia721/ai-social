@@ -37,6 +37,8 @@ const FULL_STRATEGY = {
   optimalTimeWindows: null,
   lastOptimizedAt: null,
   updatedAt: UPDATED_AT,
+  accountType: "BUSINESS",
+  visualStyle: null,
 };
 
 function mockOwner() {
@@ -317,5 +319,50 @@ describe("PATCH /api/businesses/[id]/strategy", () => {
     );
 
     expect(res.status).toBe(404);
+  });
+
+  it("accepts Creative Profile fields (accountType and visualStyle)", async () => {
+    mockOwner();
+    (prismaMock.contentStrategy.findUnique as jest.Mock).mockResolvedValue({
+      updatedAt: UPDATED_AT,
+    });
+    (prismaMock.contentStrategy.update as jest.Mock).mockResolvedValue({
+      ...FULL_STRATEGY,
+      accountType: "MEME",
+      visualStyle: "chaotic meme energy",
+    });
+
+    const res = await PATCH(
+      makeReq("PATCH", {
+        updatedAt: UPDATED_AT.toISOString(),
+        accountType: "MEME",
+        visualStyle: "chaotic meme energy",
+      }),
+      mockParams
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.accountType).toBe("MEME");
+    expect(body.visualStyle).toBe("chaotic meme energy");
+    expect(prismaMock.contentStrategy.update).toHaveBeenCalledWith({
+      where: { businessId: BUSINESS_ID },
+      data: { accountType: "MEME", visualStyle: "chaotic meme energy" },
+      select: expect.objectContaining({ accountType: true, visualStyle: true }),
+    });
+  });
+
+  it("rejects invalid accountType", async () => {
+    mockOwner();
+
+    const res = await PATCH(
+      makeReq("PATCH", {
+        updatedAt: UPDATED_AT.toISOString(),
+        accountType: "INVALID",
+      }),
+      mockParams
+    );
+
+    expect(res.status).toBe(400);
   });
 });
