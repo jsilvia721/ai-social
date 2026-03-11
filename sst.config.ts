@@ -22,7 +22,8 @@ export default $config({
       metaAppId:           new sst.Secret("MetaAppId"),
       metaAppSecret:       new sst.Secret("MetaAppSecret"),
       anthropicKey:        new sst.Secret("AnthropicApiKey"),
-      replicateApiToken:   new sst.Secret("ReplicateApiToken"),
+      // Replicate: optional — set ReplicateApiToken secret to enable image generation
+      replicateApiToken:   null,
       tiktokClientId:      new sst.Secret("TiktokClientId"),
       tiktokClientSecret:  new sst.Secret("TiktokClientSecret"),
       tokenEncryptionKey:  new sst.Secret("TokenEncryptionKey"),
@@ -72,7 +73,7 @@ export default $config({
       META_APP_ID:           secrets.metaAppId.value,
       META_APP_SECRET:       secrets.metaAppSecret.value,
       ANTHROPIC_API_KEY:     secrets.anthropicKey.value,
-      REPLICATE_API_TOKEN:   secrets.replicateApiToken.value,
+      // Replicate: image generation disabled until ReplicateApiToken secret is configured
       TIKTOK_CLIENT_ID:      secrets.tiktokClientId.value,
       TIKTOK_CLIENT_SECRET:  secrets.tiktokClientSecret.value,
       TOKEN_ENCRYPTION_KEY:  secrets.tokenEncryptionKey.value,
