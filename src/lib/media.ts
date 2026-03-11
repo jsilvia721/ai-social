@@ -30,7 +30,7 @@ function getReplicateClient(): Replicate {
  * Returns raw buffer + mimeType so the caller doesn't assume format.
  */
 export async function generateImage(prompt: string): Promise<GeneratedImage> {
-  if (shouldMockExternalApis()) {
+  if (shouldMockExternalApis() || !env.REPLICATE_API_TOKEN) {
     return mockGenerateImage();
   }
 

@@ -50,6 +50,7 @@ docker compose up -d db
 - **Always branch from `origin/staging`** — run `git fetch origin` first, then `git checkout -b <branch> origin/staging` or `git worktree add ... origin/staging`. Never branch from the current HEAD or another feature branch. Before creating a PR, run `git fetch origin && git merge origin/staging` to surface conflicts locally.
 - **If stuck, re-plan** — don't keep pushing when something goes sideways
 - **Every `schema.prisma` change MUST have a migration** — run `npx prisma migrate dev --name <name>`, never just `npx prisma generate`. CI enforces this with `prisma migrate diff --exit-code`.
+- **New SST secrets require environment setup** — when adding a `new sst.Secret()` to `sst.config.ts`, the PR description MUST list every new secret and the exact `npx sst secret set <Name> "<value>" --stage staging` and `--stage production` commands. If the secret isn't ready, make it optional (set to `null` in sst.config.ts, `z.string().optional()` in env.ts) following the BlotatoApiKey pattern. See `docs/solutions/deployment-issues/sst-secret-not-set-causes-deploy-failure.md`.
 
 ### Branching & Worktrees
 - **Always branch from `staging`** — run `git fetch origin staging` then branch from `origin/staging`. PRs target `staging`, not `main`.
