@@ -47,16 +47,16 @@ docker compose up -d db
 - **Run `npm run ci:check` before every push** — lint + typecheck + coverage (mirrors CI)
 - **Run E2E tests locally before pushing** — catches selector/UI issues without waiting for CI
 - **Verification before done** — never mark complete without proving it works (tests pass, no regressions)
-- **Always branch from `origin/staging`** — run `git fetch origin` first, then `git checkout -b <branch> origin/staging` or `git worktree add ... origin/staging`. Never branch from the current HEAD or another feature branch. Before creating a PR, run `git fetch origin && git merge origin/staging` to surface conflicts locally.
+- **Always branch from `origin/main`** — run `git fetch origin` first, then `git checkout -b <branch> origin/main` or `git worktree add ... origin/main`. Never branch from the current HEAD or another feature branch. Before creating a PR, run `git fetch origin && git merge origin/main` to surface conflicts locally.
 - **If stuck, re-plan** — don't keep pushing when something goes sideways
 - **Every `schema.prisma` change MUST have a migration** — run `npx prisma migrate dev --name <name>`, never just `npx prisma generate`. CI enforces this with `prisma migrate diff --exit-code`.
 - **New SST secrets require environment setup** — when adding a `new sst.Secret()` to `sst.config.ts`, the PR description MUST list every new secret and the exact `npx sst secret set <Name> "<value>" --stage staging` and `--stage production` commands. If the secret isn't ready, make it optional (set to `null` in sst.config.ts, `z.string().optional()` in env.ts) following the BlotatoApiKey pattern. See `docs/solutions/deployment-issues/sst-secret-not-set-causes-deploy-failure.md`.
 
 ### Branching & Worktrees
-- **Always branch from `staging`** — run `git fetch origin staging` then branch from `origin/staging`. PRs target `staging`, not `main`.
-- **Worktree creation** — use `git worktree add .claude/worktrees/<name> -b <branch> origin/staging` to create worktrees with the correct base in one step.
+- **Always branch from `main`** — run `git fetch origin main` then branch from `origin/main`. PRs target `main`.
+- **Worktree creation** — use `git worktree add .claude/worktrees/<name> -b <branch> origin/main` to create worktrees with the correct base in one step.
 - **Never stash across bases** — do not `git stash` on one branch and pop on a branch with a different base. This causes merge conflicts. Instead, commit WIP on the current branch, create a new branch from the correct base, and cherry-pick or re-apply changes.
-- **Verify before PR** — run `git merge-base --is-ancestor origin/staging HEAD` to confirm your branch descends from staging before pushing.
+- **Verify before PR** — run `git merge-base --is-ancestor origin/main HEAD` to confirm your branch descends from main before pushing.
 
 ### Core Principles
 - **Simplicity first** — make every change as simple as possible, minimal code impact
@@ -107,7 +107,7 @@ beforeEach(() => mockReset(prismaMock));
 
 ## Deployment
 
-`staging` branch -> staging | `main` branch -> production. See `.claude/rules/deployment.md` for CI pipeline, E2E setup, and SST details.
+PRs target `main`. Merges to `main` auto-deploy to staging; production deploy requires manual approval. See `.claude/rules/deployment.md` for CI pipeline, E2E setup, and SST details.
 
 ## Design System
 - Dark mode: `class="dark"` on `<html>`
