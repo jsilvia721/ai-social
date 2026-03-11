@@ -8,6 +8,7 @@ process.env.NEXTAUTH_URL = "http://localhost:3000";
 process.env.GOOGLE_CLIENT_ID = "test-google-client-id";
 process.env.GOOGLE_CLIENT_SECRET = "test-google-client-secret";
 process.env.ANTHROPIC_API_KEY = "test-anthropic-api-key";
+process.env.GOOGLE_AI_API_KEY = "test-google-ai-api-key";
 process.env.BLOTATO_API_KEY = "test-blotato-api-key";
 process.env.SES_FROM_EMAIL = "noreply@example.com";
 process.env.ALLOWED_EMAILS = "test@example.com";

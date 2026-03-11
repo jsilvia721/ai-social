@@ -14,7 +14,10 @@ const client = new Anthropic();
 export async function generatePostContent(
   topic: string,
   platform: Platform,
-  tone?: string
+  options?: {
+    tone?: string;
+    creative?: { accountType?: string; visualStyle?: string | null };
+  }
 ): Promise<string> {
   if (shouldMockExternalApis()) {
     return mockGeneratePostContent(topic, platform);
@@ -27,6 +30,14 @@ export async function generatePostContent(
     YOUTUBE: "Write a compelling video description. Include keywords naturally in the first 2 sentences.",
   };
 
+  // Build personality hint from Creative Profile
+  let personalityHint = "";
+  if (options?.creative?.accountType === "MEME") {
+    personalityHint = "Write in a casual, funny tone. Use internet slang and meme references where appropriate.";
+  } else if (options?.creative?.accountType === "INFLUENCER") {
+    personalityHint = "Write in a personal, authentic tone. Use storytelling and include a call to action.";
+  }
+
   const message = await client.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 1024,
@@ -34,7 +45,8 @@ export async function generatePostContent(
       {
         role: "user",
         content: `Write a social media post for ${platform} about: ${topic}.
-${tone ? `Tone: ${tone}.` : ""}
+${options?.tone ? `Tone: ${options.tone}.` : ""}
+${personalityHint ? `Personality: ${personalityHint}` : ""}
 ${platformGuide[platform]}
 Return only the post text, no explanation.`,
       },

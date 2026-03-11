@@ -99,6 +99,7 @@ export async function generateBriefs(
   researchThemes: string,
   recentPostTopics: string[],
   formatMix?: Record<string, number> | null,
+  creative?: { accountType?: string; visualStyle?: string | null },
 ): Promise<BriefGenerationResult> {
   if (shouldMockExternalApis()) {
     return mockGenerateBriefs(connectedPlatforms, cadencePerPlatform);
@@ -131,6 +132,12 @@ export async function generateBriefs(
           `Recent Research Themes:\n${researchThemes}\n\n` +
           (formatMix && Object.keys(formatMix).length > 0
             ? `Target format distribution (learned from performance data — weight your format choices accordingly):\n${Object.entries(formatMix).map(([f, pct]) => `  ${f}: ${(pct * 100).toFixed(0)}%`).join("\n")}\n\n`
+            : "") +
+          (creative?.accountType
+            ? `Account type: ${creative.accountType}. Adjust content style accordingly — BUSINESS is professional, INFLUENCER is personal/authentic, MEME is casual/humorous.\n`
+            : "") +
+          (creative?.visualStyle
+            ? `Visual style direction for image prompts: "${creative.visualStyle}"\n`
             : "") +
           (recentPostTopics.length > 0
             ? `Recent post topics (avoid repeating):\n${recentPostTopics.join("\n")}\n`
