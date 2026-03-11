@@ -50,11 +50,25 @@ export async function POST(request: Request) {
       })
     : prompt;
 
-  const { buffer, mimeType } = await generateImage(finalPrompt);
+  try {
+    const { buffer, mimeType } = await generateImage(finalPrompt);
 
-  const ext = mimeType === "image/png" ? "png" : "jpg";
-  const key = `media/${businessId}/composer/${randomUUID()}.${ext}`;
-  const url = await uploadBuffer(buffer, key, mimeType);
+    let url: string;
+    const ext = mimeType === "image/png" ? "png" : "jpg";
+    const key = `media/${businessId}/composer/${randomUUID()}.${ext}`;
+    try {
+      url = await uploadBuffer(buffer, key, mimeType);
+    } catch {
+      // S3/MinIO unavailable (local dev) — return inline data URL
+      url = `data:${mimeType};base64,${buffer.toString("base64")}`;
+    }
 
-  return NextResponse.json({ url });
+    return NextResponse.json({ url });
+  } catch (err) {
+    console.error("[generate-image] Error:", err);
+    return NextResponse.json(
+      { error: "Image generation failed" },
+      { status: 500 }
+    );
+  }
 }

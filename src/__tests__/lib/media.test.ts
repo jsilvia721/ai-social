@@ -1,16 +1,14 @@
 jest.mock("@/lib/mocks/config");
 jest.mock("@/env", () => ({
-  env: { GOOGLE_AI_API_KEY: "test-key" },
+  env: { REPLICATE_API_TOKEN: "test-token" },
 }));
-
 // Use a global holder to avoid hoisting issues with jest.mock factory
-// The factory is hoisted above const declarations, so we need a global reference
-const holder: { generateImages: jest.Mock } = { generateImages: jest.fn() };
-jest.mock("@google/genai", () => ({
-  GoogleGenAI: class {
-    models = { generateImages: (...args: unknown[]) => holder.generateImages(...args) };
-  },
-}));
+const holder: { run: jest.Mock } = { run: jest.fn() };
+jest.mock("replicate", () => {
+  return jest.fn().mockImplementation(() => ({
+    run: (...args: unknown[]) => holder.run(...args),
+  }));
+});
 
 import { generateImage } from "@/lib/media";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
@@ -21,7 +19,7 @@ const mockShouldMock = shouldMockExternalApis as jest.MockedFunction<
 
 beforeEach(() => {
   jest.clearAllMocks();
-  holder.generateImages = jest.fn();
+  holder.run = jest.fn();
 });
 
 describe("generateImage", () => {
@@ -36,7 +34,7 @@ describe("generateImage", () => {
       expect(result.mimeType).toBe("image/png");
       expect(result.buffer).toBeInstanceOf(Buffer);
       expect(result.buffer.length).toBeGreaterThan(0);
-      expect(holder.generateImages).not.toHaveBeenCalled();
+      expect(holder.run).not.toHaveBeenCalled();
     });
   });
 
@@ -45,75 +43,111 @@ describe("generateImage", () => {
       mockShouldMock.mockReturnValue(false);
     });
 
-    it("calls Gemini Imagen 4 and returns the image buffer", async () => {
-      const fakeBase64 = Buffer.from("fake-image-data").toString("base64");
-      holder.generateImages.mockResolvedValue({
-        generatedImages: [
-          { image: { imageBytes: fakeBase64 } },
-        ],
-      });
+    it("calls Replicate Flux 1.1 Pro and returns the image buffer (URL output)", async () => {
+      const fakeImageData = Buffer.from("fake-image-data");
+      // Replicate returns a URL string for Flux
+      holder.run.mockResolvedValue("https://replicate.delivery/fake-image.webp");
 
-      const result = await generateImage("a beautiful sunset");
+      // Mock fetch for the image URL
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(fakeImageData.buffer),
+      }) as unknown as typeof fetch;
 
-      expect(holder.generateImages).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: "imagen-4.0-generate-001",
-          prompt: "a beautiful sunset",
-          config: expect.objectContaining({
-            numberOfImages: 1,
-            aspectRatio: "1:1",
-          }),
-        })
-      );
-      expect(result.mimeType).toBe("image/png");
-      expect(result.buffer).toEqual(Buffer.from(fakeBase64, "base64"));
+      try {
+        const result = await generateImage("a beautiful sunset");
+
+        expect(holder.run).toHaveBeenCalledWith(
+          "black-forest-labs/flux-1.1-pro",
+          expect.objectContaining({
+            input: expect.objectContaining({
+              prompt: "a beautiful sunset",
+              aspect_ratio: "1:1",
+            }),
+          })
+        );
+        expect(result.mimeType).toBe("image/webp");
+        expect(result.buffer).toBeInstanceOf(Buffer);
+        expect(result.buffer.length).toBeGreaterThan(0);
+      } finally {
+        global.fetch = originalFetch;
+      }
     });
 
-    it("throws when Gemini returns no image data", async () => {
-      holder.generateImages.mockResolvedValue({
-        generatedImages: [],
+    it("handles ReadableStream output", async () => {
+      const fakeData = new Uint8Array([1, 2, 3, 4]);
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(fakeData);
+          controller.close();
+        },
       });
+      holder.run.mockResolvedValue(stream);
+
+      const result = await generateImage("test stream");
+
+      expect(result.mimeType).toBe("image/webp");
+      expect(result.buffer).toEqual(Buffer.from(fakeData));
+    });
+
+    it("throws when Replicate returns unexpected output", async () => {
+      holder.run.mockResolvedValue(42);
 
       await expect(generateImage("test")).rejects.toThrow(
-        "Gemini returned no image data"
+        "Replicate returned unexpected output format"
       );
     });
 
-    it("throws when generatedImages is null/undefined", async () => {
-      holder.generateImages.mockResolvedValue({
-        generatedImages: null,
+    it("throws when image data is empty", async () => {
+      const emptyStream = new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
       });
+      holder.run.mockResolvedValue(emptyStream);
 
       await expect(generateImage("test")).rejects.toThrow(
-        "Gemini returned no image data"
+        "Replicate returned empty image data"
       );
     });
 
     it("sanitizes prompt: strips control characters", async () => {
-      const fakeBase64 = Buffer.from("data").toString("base64");
-      holder.generateImages.mockResolvedValue({
-        generatedImages: [{ image: { imageBytes: fakeBase64 } }],
+      const fakeData = new Uint8Array([1, 2, 3]);
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(fakeData);
+          controller.close();
+        },
       });
+      holder.run.mockResolvedValue(stream);
 
       await generateImage("hello\x00world\x1Ftest");
 
-      expect(holder.generateImages).toHaveBeenCalledWith(
+      expect(holder.run).toHaveBeenCalledWith(
+        "black-forest-labs/flux-1.1-pro",
         expect.objectContaining({
-          prompt: "helloworldtest",
+          input: expect.objectContaining({
+            prompt: "helloworldtest",
+          }),
         })
       );
     });
 
     it("sanitizes prompt: truncates to 1900 chars", async () => {
-      const fakeBase64 = Buffer.from("data").toString("base64");
-      holder.generateImages.mockResolvedValue({
-        generatedImages: [{ image: { imageBytes: fakeBase64 } }],
+      const fakeData = new Uint8Array([1, 2, 3]);
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(fakeData);
+          controller.close();
+        },
       });
+      holder.run.mockResolvedValue(stream);
 
       const longPrompt = "a".repeat(3000);
       await generateImage(longPrompt);
 
-      const calledPrompt = holder.generateImages.mock.calls[0][0].prompt;
+      const calledPrompt = holder.run.mock.calls[0][1].input.prompt;
       expect(calledPrompt.length).toBe(1900);
     });
   });
