@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X, Film, Copy } from "lucide-react";
+import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X, Film, Copy, Wand2 } from "lucide-react";
 import type { Platform } from "@/types";
 
 const CHAR_LIMITS: Partial<Record<Platform, number>> = {
@@ -84,8 +84,11 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
   const [mediaUrls, setMediaUrls] = useState<string[]>(editPost?.mediaUrls ?? []);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [imagePrompt, setImagePrompt] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
+  const imageAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (isEditMode) return; // don't fetch accounts in edit mode
@@ -200,6 +203,39 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
   function abortUpload() {
     if (xhrRef.current) {
       xhrRef.current.abort();
+    }
+  }
+
+  async function handleGenerateImage() {
+    if (!imagePrompt.trim() || !activeBusinessId) return;
+    setIsGeneratingImage(true);
+    setError(null);
+    const controller = new AbortController();
+    imageAbortRef.current = controller;
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: imagePrompt.trim(), businessId: activeBusinessId }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Image generation failed");
+      }
+      const { url } = await res.json();
+      setMediaUrls((prev) => {
+        const images = prev.filter((u) => !isVideoUrl(u));
+        if (images.length >= 4) return prev; // respect limit
+        return [...prev, url];
+      });
+      setImagePrompt("");
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      setError(err instanceof Error ? err.message : "Image generation failed.");
+    } finally {
+      setIsGeneratingImage(false);
+      imageAbortRef.current = null;
     }
   }
 
@@ -426,6 +462,46 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
               )}
               {isUploading ? "Uploading…" : "Add media"}
             </Button>
+          </div>
+
+          {/* AI Image Generation */}
+          <div className="flex gap-2">
+            <Input
+              value={imagePrompt}
+              onChange={(e) => setImagePrompt(e.target.value)}
+              placeholder="Describe an image to generate…"
+              className="bg-zinc-800 border-zinc-700 text-zinc-200 placeholder:text-zinc-600"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleGenerateImage();
+                }
+              }}
+              disabled={isGeneratingImage || isUploading}
+            />
+            {isGeneratingImage ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => imageAbortRef.current?.abort()}
+                className="border-red-700 text-red-400 hover:bg-red-950 shrink-0"
+              >
+                <X className="h-3 w-3 mr-1" />
+                Cancel
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleGenerateImage}
+                disabled={!imagePrompt.trim() || !activeBusinessId || isUploading || (mediaUrls.length >= 4 && !hasVideo)}
+                className="bg-violet-600 hover:bg-violet-700 text-white shrink-0"
+              >
+                <Wand2 className="h-3 w-3 mr-1" />
+                Generate
+              </Button>
+            )}
           </div>
 
           {/* Upload progress bar */}
