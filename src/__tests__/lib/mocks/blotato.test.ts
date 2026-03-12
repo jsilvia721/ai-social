@@ -6,12 +6,19 @@ import {
 } from "@/lib/mocks/blotato";
 
 describe("Blotato mock data", () => {
-  it("mockListAccounts returns multiple accounts with lowercase platform names", () => {
+  it("mockListAccounts returns all supported platforms with lowercase names", () => {
     const accounts = mockListAccounts();
-    expect(accounts.length).toBeGreaterThanOrEqual(1);
+    expect(accounts).toHaveLength(6);
+    const platforms = accounts.map((a) => a.platform);
+    expect(platforms).toContain("twitter");
+    expect(platforms).toContain("instagram");
+    expect(platforms).toContain("facebook");
+    expect(platforms).toContain("tiktok");
+    expect(platforms).toContain("youtube");
+    // Includes a second Twitter account for multi-account testing
+    expect(platforms.filter((p) => p === "twitter")).toHaveLength(2);
     for (const account of accounts) {
       expect(account.id).toBeTruthy();
-      expect(account.platform).toBeTruthy();
       expect(account.platform).toBe(account.platform.toLowerCase());
       expect(account.username).toBeTruthy();
     }
