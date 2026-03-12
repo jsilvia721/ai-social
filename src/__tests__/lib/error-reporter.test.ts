@@ -281,8 +281,8 @@ describe("error-reporter", () => {
     it("sends different error messages", () => {
       initReporter({ debounceMs: 100 });
 
-      reportError(new Error("error 1"));
-      reportError(new Error("error 2"));
+      reportError(new Error("TypeError: failed"));
+      reportError(new Error("RangeError: overflow"));
 
       jest.advanceTimersByTime(100);
 
@@ -315,8 +315,21 @@ describe("error-reporter", () => {
     it("stops reporting after 100 unique errors", () => {
       initReporter({ debounceMs: 100 });
 
+      // Use messages that remain unique after normalization (no numbers)
+      const errorTypes = [
+        "TypeError", "RangeError", "SyntaxError", "ReferenceError", "URIError",
+        "EvalError", "NetworkError", "AbortError", "TimeoutError", "AuthError",
+      ];
+      const actions = [
+        "reading", "writing", "loading", "parsing", "rendering",
+        "fetching", "saving", "deleting", "updating", "creating",
+      ];
+
       for (let i = 0; i < 105; i++) {
-        reportError(new Error(`error ${i}`));
+        const type = errorTypes[i % errorTypes.length];
+        const action = actions[Math.floor(i / errorTypes.length) % actions.length];
+        const suffix = i >= 100 ? " overflow" : "";
+        reportError(new Error(`${type}: failed ${action} item-${String.fromCharCode(65 + (i % 26))}${suffix}`));
       }
 
       jest.advanceTimersByTime(100);
@@ -329,8 +342,8 @@ describe("error-reporter", () => {
     it("batches errors within debounce window", () => {
       initReporter({ debounceMs: 500 });
 
-      reportError(new Error("batch 1"));
-      reportError(new Error("batch 2"));
+      reportError(new Error("TypeError: batch failed"));
+      reportError(new Error("RangeError: batch overflow"));
 
       // Not flushed yet
       expect(mockFetch).not.toHaveBeenCalled();

@@ -3,6 +3,7 @@ import { z } from "zod";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
+import { normalizeMessage } from "@/lib/normalize-error";
 
 const errorReportSchema = z.object({
   message: z.string().min(1).max(1000),
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
 
   const fingerprint = crypto
     .createHash("sha256")
-    .update(source + ":" + message)
+    .update(source + ":" + normalizeMessage(message))
     .digest("hex");
 
   try {
