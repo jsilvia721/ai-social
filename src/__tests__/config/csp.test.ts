@@ -1,25 +1,34 @@
 /**
  * Tests for Content Security Policy headers in next.config.ts
+ *
+ * The test setup (setup.ts) sets AWS_S3_PUBLIC_URL="https://storage.example.com",
+ * so the default test environment simulates production where the specific bucket
+ * hostname is known.
  */
 
-// We need to test the CSP header generation from next.config.ts.
-// Since next.config.ts exports a NextConfig object with an async headers() function,
-// we can import it and call headers() directly.
+async function loadCsp(): Promise<string> {
+  const { default: config } = await import("../../../next.config");
+  const headerGroups = await config.headers!();
+  const csp =
+    headerGroups[0].headers.find((h) => h.key === "Content-Security-Policy")
+      ?.value ?? "";
+  return csp;
+}
 
-describe("CSP headers", () => {
+/**
+ * Extract the value of a specific CSP directive from the full CSP string
+ */
+function extractDirective(csp: string, directive: string): string {
+  const directives = csp.split(";").map((d) => d.trim());
+  const match = directives.find((d) => d.startsWith(directive));
+  return match ?? "";
+}
+
+describe("CSP headers (common)", () => {
   let cspValue: string;
 
   beforeAll(async () => {
-    // Import the config and extract CSP header
-    const { default: nextConfig } = await import("../../../next.config");
-    const headerGroups = await nextConfig.headers!();
-    const globalHeaders = headerGroups.find(
-      (group) => group.source === "/(.*)"
-    );
-    const cspHeader = globalHeaders?.headers.find(
-      (h) => h.key === "Content-Security-Policy"
-    );
-    cspValue = cspHeader?.value ?? "";
+    cspValue = await loadCsp();
   });
 
   it("should have a CSP header defined", () => {
@@ -31,21 +40,13 @@ describe("CSP headers", () => {
     expect(connectSrc).toContain("'self'");
   });
 
-  it("should allow S3 presigned upload domains in connect-src", () => {
-    const connectSrc = extractDirective(cspValue, "connect-src");
-    // Must allow S3 regional and legacy URL patterns
-    expect(connectSrc).toContain("https://*.s3.us-east-1.amazonaws.com");
-    expect(connectSrc).toContain("https://*.s3.amazonaws.com");
-  });
-
   it("should allow CloudFront domains in connect-src", () => {
     const connectSrc = extractDirective(cspValue, "connect-src");
     expect(connectSrc).toContain("https://*.cloudfront.net");
   });
 
-  it("should NOT use wildcard * in connect-src", () => {
+  it("should NOT use bare wildcard * in connect-src", () => {
     const connectSrc = extractDirective(cspValue, "connect-src");
-    // Should not have a bare wildcard (allowing all origins)
     const tokens = connectSrc.split(/\s+/);
     expect(tokens).not.toContain("*");
   });
@@ -56,7 +57,7 @@ describe("CSP headers", () => {
   });
 });
 
-describe("CSP connect-src with AWS_S3_PUBLIC_URL", () => {
+describe("CSP connect-src with AWS_S3_PUBLIC_URL set (production)", () => {
   const originalEnv = process.env.AWS_S3_PUBLIC_URL;
 
   afterEach(() => {
@@ -65,39 +66,46 @@ describe("CSP connect-src with AWS_S3_PUBLIC_URL", () => {
     } else {
       delete process.env.AWS_S3_PUBLIC_URL;
     }
-    // Clear module cache so next.config.ts re-evaluates
     jest.resetModules();
   });
 
-  it("should include specific bucket hostname when AWS_S3_PUBLIC_URL is set", async () => {
-    process.env.AWS_S3_PUBLIC_URL = "https://my-bucket.s3.us-east-1.amazonaws.com";
-    const { default: config } = await import("../../../next.config");
-    const headerGroups = await config.headers!();
-    const csp = headerGroups[0].headers.find(
-      (h) => h.key === "Content-Security-Policy"
-    )?.value ?? "";
+  it("should include specific bucket hostname", async () => {
+    process.env.AWS_S3_PUBLIC_URL =
+      "https://my-bucket.s3.us-east-1.amazonaws.com";
+    const csp = await loadCsp();
     const connectSrc = extractDirective(csp, "connect-src");
-    expect(connectSrc).toContain("https://my-bucket.s3.us-east-1.amazonaws.com");
+    expect(connectSrc).toContain(
+      "https://my-bucket.s3.us-east-1.amazonaws.com"
+    );
   });
 
-  it("should still include wildcard patterns even when specific URL is set", async () => {
-    process.env.AWS_S3_PUBLIC_URL = "https://my-bucket.s3.us-east-1.amazonaws.com";
-    const { default: config } = await import("../../../next.config");
-    const headerGroups = await config.headers!();
-    const csp = headerGroups[0].headers.find(
-      (h) => h.key === "Content-Security-Policy"
-    )?.value ?? "";
+  it("should omit S3 wildcard patterns when specific URL is set", async () => {
+    process.env.AWS_S3_PUBLIC_URL =
+      "https://my-bucket.s3.us-east-1.amazonaws.com";
+    const csp = await loadCsp();
+    const connectSrc = extractDirective(csp, "connect-src");
+    expect(connectSrc).not.toContain("https://*.s3.us-east-1.amazonaws.com");
+    expect(connectSrc).not.toContain("https://*.s3.amazonaws.com");
+  });
+});
+
+describe("CSP connect-src without AWS_S3_PUBLIC_URL (local dev)", () => {
+  const originalEnv = process.env.AWS_S3_PUBLIC_URL;
+
+  afterEach(() => {
+    if (originalEnv !== undefined) {
+      process.env.AWS_S3_PUBLIC_URL = originalEnv;
+    } else {
+      delete process.env.AWS_S3_PUBLIC_URL;
+    }
+    jest.resetModules();
+  });
+
+  it("should fall back to S3 wildcard patterns", async () => {
+    delete process.env.AWS_S3_PUBLIC_URL;
+    const csp = await loadCsp();
     const connectSrc = extractDirective(csp, "connect-src");
     expect(connectSrc).toContain("https://*.s3.us-east-1.amazonaws.com");
     expect(connectSrc).toContain("https://*.s3.amazonaws.com");
   });
 });
-
-/**
- * Extract the value of a specific CSP directive from the full CSP string
- */
-function extractDirective(csp: string, directive: string): string {
-  const directives = csp.split(";").map((d) => d.trim());
-  const match = directives.find((d) => d.startsWith(directive));
-  return match ?? "";
-}
