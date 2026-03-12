@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 
 const errorReportSchema = z.object({
   message: z.string().min(1),
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
       stack,
       source,
       url,
-      metadata,
+      metadata: metadata as Prisma.InputJsonValue | undefined,
     },
     update: {
       count: { increment: 1 },
