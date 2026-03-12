@@ -224,11 +224,31 @@ fi
 echo ""
 echo "Script flag parsing:"
 
-# Test that --help / bad flags exit with error
+# Test that bad flags exit with error
 if bash "$REPO_ROOT/scripts/bug-monitor.sh" -x 2>/dev/null; then
   fail "invalid flag exits with error" "exit 1" "exit 0"
 else
   pass "invalid flag exits with error"
+fi
+
+# Test that invalid poll interval is rejected
+if bash "$REPO_ROOT/scripts/bug-monitor.sh" -i 0 2>/dev/null; then
+  fail "zero poll interval rejected" "exit 1" "exit 0"
+else
+  pass "zero poll interval rejected"
+fi
+
+if bash "$REPO_ROOT/scripts/bug-monitor.sh" -i abc 2>/dev/null; then
+  fail "non-numeric poll interval rejected" "exit 1" "exit 0"
+else
+  pass "non-numeric poll interval rejected"
+fi
+
+# Test that invalid severity is rejected
+if bash "$REPO_ROOT/scripts/bug-monitor.sh" -s debug 2>/dev/null; then
+  fail "invalid severity rejected" "exit 1" "exit 0"
+else
+  pass "invalid severity rejected"
 fi
 
 # Test that shellcheck passes

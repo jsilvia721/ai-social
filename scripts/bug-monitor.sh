@@ -50,6 +50,11 @@ if [ "$SEVERITY" != "error" ] && [ "$SEVERITY" != "warn" ]; then
   exit 1
 fi
 
+if ! [[ "$POLL_INTERVAL" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Error: -i must be a positive integer" >&2
+  exit 1
+fi
+
 # --- Setup --------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
@@ -62,6 +67,12 @@ source "scripts/lib/cloudwatch-query.sh"
 PID_FILE="$LOG_DIR/.bug-monitor.pid"
 COOLDOWN_FILE="$LOG_DIR/.cooldown_cache"
 LAST_POLL_FILE="$LOG_DIR/.last_poll_time"
+
+# Check for existing running instance
+if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  echo "Error: bug-monitor already running (PID $(cat "$PID_FILE"))" >&2
+  exit 1
+fi
 
 # Write our PID
 echo $$ > "$PID_FILE"
@@ -209,7 +220,7 @@ ${error_message}
 \`\`\`
 
 ## Source
-${source}
+\`${source}\`
 
 $(if [ -n "$stack_trace" ]; then
   echo "## Stack Trace"
@@ -219,7 +230,7 @@ $(if [ -n "$stack_trace" ]; then
 fi)
 
 ## URL/Route
-${url:-Unknown}
+\`${url:-Unknown}\`
 
 ## Frequency
 - **Count:** ${count}
@@ -445,7 +456,7 @@ poll_error_reports() {
   ) t;"
 
   local result
-  result=$(psql "$DATABASE_URL" -t -A -c "$query" 2>/dev/null || echo "null")
+  result=$(psql "$DATABASE_URL" -t -A -c "$query" 2>>"$LOG_DIR/daemon.log" || echo "null")
 
   if [ "$result" = "null" ] || [ -z "$result" ]; then
     log "No NEW error reports found"
@@ -479,11 +490,21 @@ poll_error_reports() {
       "$stack" "$url" "$first_seen" "$last_seen" "$metadata")
 
     if [ "$issue_number" != "0" ] && [ -n "$issue_number" ]; then
+      # Validate inputs before SQL interpolation (prevent injection)
+      if ! [[ "$issue_number" =~ ^[0-9]+$ ]]; then
+        log "Error: invalid issue_number '${issue_number}', skipping DB update"
+        continue
+      fi
+      if ! [[ "$fp" =~ ^[0-9a-f]{64}$ ]]; then
+        log "Error: invalid fingerprint '${fp}', skipping DB update"
+        continue
+      fi
+
       # Update ErrorReport status
       if [ "$DRY_RUN" = false ]; then
         psql "$DATABASE_URL" -c \
           "UPDATE \"ErrorReport\" SET status = 'ISSUE_CREATED', \"githubIssueNumber\" = ${issue_number} WHERE fingerprint = '${fp}';" \
-          2>/dev/null || log "Warning: failed to update ErrorReport for fingerprint ${fp}"
+          2>>"$LOG_DIR/daemon.log" || log "Warning: failed to update ErrorReport for fingerprint ${fp}"
       else
         log "[DRY RUN] Would update ErrorReport status to ISSUE_CREATED for fingerprint ${fp}"
       fi
