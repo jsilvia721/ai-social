@@ -87,20 +87,8 @@ export async function generateImage(prompt: string): Promise<GeneratedImage> {
   }
 }
 
-// --- Video URL utilities (shared with UI components) ---
-
-export const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
-
-export function isVideoUrl(url: string): boolean {
-  // Strip query params before extracting extension
-  const pathname = url.split("?")[0];
-  const ext = pathname.slice(pathname.lastIndexOf(".")).toLowerCase();
-  return VIDEO_EXTENSIONS.has(ext);
-}
-
-export function isVideoFile(file: File): boolean {
-  return file.type.startsWith("video/");
-}
+// Re-export video utilities for convenience (prefer importing from @/lib/media-utils directly in client components)
+export { VIDEO_EXTENSIONS, isVideoUrl, isVideoFile } from "@/lib/media-utils";
 
 /** Deterministic mock image for dev/staging/testing */
 function mockGenerateImage(): GeneratedImage {

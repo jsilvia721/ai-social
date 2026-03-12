@@ -17,7 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X, Film, Copy, Wand2 } from "lucide-react";
 import type { Platform } from "@/types";
 import { reportError } from "@/lib/error-reporter";
-import { isVideoUrl, isVideoFile, VIDEO_EXTENSIONS } from "@/lib/media";
+import { isVideoUrl, isVideoFile, VIDEO_EXTENSIONS } from "@/lib/media-utils";
 
 const CHAR_LIMITS: Partial<Record<Platform, number>> = {
   TWITTER: 280,

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X, Save, Clock, Image as ImageIcon, Film } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { isVideoUrl } from "@/lib/media";
+import { isVideoUrl } from "@/lib/media-utils";
 import type { Platform } from "@/types";
 
 const PLATFORM_COLORS: Record<Platform, string> = {

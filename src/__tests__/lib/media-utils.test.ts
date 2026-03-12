@@ -1,4 +1,4 @@
-import { isVideoUrl, isVideoFile, VIDEO_EXTENSIONS } from "@/lib/media";
+import { isVideoUrl, isVideoFile, VIDEO_EXTENSIONS } from "@/lib/media-utils";
 
 describe("VIDEO_EXTENSIONS", () => {
   it("contains mp4, mov, and webm", () => {

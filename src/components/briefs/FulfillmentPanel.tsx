@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Copy, Check, Upload, Calendar, Loader2, Film } from "lucide-react";
-import { isVideoUrl } from "@/lib/media";
+import { isVideoUrl } from "@/lib/media-utils";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { reportError } from "@/lib/error-reporter";
