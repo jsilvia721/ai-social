@@ -89,8 +89,16 @@ afterEach(() => {
 });
 
 describe("PostComposer video upload retry", () => {
-  it("retries once on XHR network error before failing", async () => {
-    // accounts fetch, then presigned URL (called twice for retry)
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("retries twice on XHR network error before failing (3 total attempts)", async () => {
+    // accounts fetch, then presigned URL (called 3 times: initial + 2 retries)
     (global.fetch as jest.Mock)
       .mockResolvedValueOnce({
         ok: true,
@@ -108,12 +116,21 @@ describe("PostComposer video upload retry", () => {
             publicUrl: "https://cdn.example.com/video.mp4",
           }),
       })
-      // Second presigned URL request (retry)
+      // Second presigned URL request (retry 1)
       .mockResolvedValueOnce({
         ok: true,
         json: () =>
           Promise.resolve({
             uploadUrl: "https://s3.example.com/upload2",
+            publicUrl: "https://cdn.example.com/video.mp4",
+          }),
+      })
+      // Third presigned URL request (retry 2)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            uploadUrl: "https://s3.example.com/upload3",
             publicUrl: "https://cdn.example.com/video.mp4",
           }),
       });
@@ -143,15 +160,29 @@ describe("PostComposer video upload retry", () => {
     // Simulate network error on first attempt
     MockXHR.instances[0].onerror?.();
 
+    // Advance past backoff delay (1s for first retry)
+    jest.advanceTimersByTime(1000);
+
     // Wait for retry - second XHR should be created
     await waitFor(() => {
       expect(MockXHR.instances.length).toBe(2);
     });
 
-    // Simulate network error on retry too
+    // Simulate network error on second attempt
     MockXHR.instances[1].onerror?.();
 
-    // Should now report the error (after exhausting retry)
+    // Advance past backoff delay (2s for second retry)
+    jest.advanceTimersByTime(2000);
+
+    // Wait for third XHR
+    await waitFor(() => {
+      expect(MockXHR.instances.length).toBe(3);
+    });
+
+    // Simulate network error on third attempt — should now exhaust retries
+    MockXHR.instances[2].onerror?.();
+
+    // Should now report the error (after exhausting retries)
     await waitFor(() => {
       expect(mockReportError).toHaveBeenCalledTimes(1);
     });
@@ -165,6 +196,94 @@ describe("PostComposer video upload retry", () => {
         }),
       })
     );
+  });
+
+  it("uses exponential backoff between retries", async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve([
+            { id: "acc-1", platform: "TWITTER", username: "test" },
+          ]),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            uploadUrl: "https://s3.example.com/upload1",
+            publicUrl: "https://cdn.example.com/video.mp4",
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            uploadUrl: "https://s3.example.com/upload2",
+            publicUrl: "https://cdn.example.com/video.mp4",
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            uploadUrl: "https://s3.example.com/upload3",
+            publicUrl: "https://cdn.example.com/video.mp4",
+          }),
+      });
+
+    render(<PostComposer />);
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    const fileInput = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement;
+
+    const file = new File(["videodata"], "test.mp4", { type: "video/mp4" });
+    Object.defineProperty(fileInput, "files", {
+      value: [file],
+      configurable: true,
+    });
+    fireEvent.change(fileInput);
+
+    await waitFor(() => {
+      expect(MockXHR.instances.length).toBe(1);
+    });
+
+    // First attempt fails
+    MockXHR.instances[0].onerror?.();
+
+    // After 500ms, retry should NOT have happened yet (backoff is 1000ms)
+    jest.advanceTimersByTime(500);
+    expect(MockXHR.instances.length).toBe(1);
+
+    // After another 500ms (total 1000ms), retry should happen
+    jest.advanceTimersByTime(500);
+    await waitFor(() => {
+      expect(MockXHR.instances.length).toBe(2);
+    });
+
+    // Second attempt fails
+    MockXHR.instances[1].onerror?.();
+
+    // After 1500ms, second retry should NOT have happened yet (backoff is 2000ms)
+    jest.advanceTimersByTime(1500);
+    expect(MockXHR.instances.length).toBe(2);
+
+    // After another 500ms (total 2000ms), second retry should happen
+    jest.advanceTimersByTime(500);
+    await waitFor(() => {
+      expect(MockXHR.instances.length).toBe(3);
+    });
+
+    // Third attempt succeeds
+    MockXHR.instances[2].status = 200;
+    MockXHR.instances[2].onload?.();
+
+    expect(mockReportError).not.toHaveBeenCalled();
   });
 
   it("succeeds on retry after first network error", async () => {
@@ -216,6 +335,9 @@ describe("PostComposer video upload retry", () => {
 
     // First attempt fails
     MockXHR.instances[0].onerror?.();
+
+    // Advance past backoff delay
+    jest.advanceTimersByTime(1000);
 
     // Wait for retry XHR
     await waitFor(() => {
@@ -327,6 +449,9 @@ describe("PostComposer video upload retry", () => {
     MockXHR.instances[0].status = 503;
     MockXHR.instances[0].onload?.();
 
+    // Advance past backoff delay
+    jest.advanceTimersByTime(1000);
+
     // Should retry — second XHR created
     await waitFor(() => {
       expect(MockXHR.instances.length).toBe(2);
@@ -409,12 +534,21 @@ describe("PostComposer video upload retry", () => {
             publicUrl: "https://cdn.example.com/video.mp4",
           }),
       })
-      // Retry presigned URL
+      // Retry 1 presigned URL
       .mockResolvedValueOnce({
         ok: true,
         json: () =>
           Promise.resolve({
             uploadUrl: "https://s3.example.com/upload2",
+            publicUrl: "https://cdn.example.com/video.mp4",
+          }),
+      })
+      // Retry 2 presigned URL
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            uploadUrl: "https://s3.example.com/upload3",
             publicUrl: "https://cdn.example.com/video.mp4",
           }),
       });
@@ -443,13 +577,27 @@ describe("PostComposer video upload retry", () => {
     // Simulate timeout on first attempt
     MockXHR.instances[0].ontimeout?.();
 
-    // Wait for retry
+    // Advance past backoff delay
+    jest.advanceTimersByTime(1000);
+
+    // Wait for first retry
     await waitFor(() => {
       expect(MockXHR.instances.length).toBe(2);
     });
 
-    // Timeout again on retry
+    // Timeout again on first retry
     MockXHR.instances[1].ontimeout?.();
+
+    // Advance past second backoff delay
+    jest.advanceTimersByTime(2000);
+
+    // Wait for second retry
+    await waitFor(() => {
+      expect(MockXHR.instances.length).toBe(3);
+    });
+
+    // Timeout on final attempt — exhausts retries
+    MockXHR.instances[2].ontimeout?.();
 
     await waitFor(() => {
       expect(screen.getByText(/Upload timed out/)).toBeInTheDocument();

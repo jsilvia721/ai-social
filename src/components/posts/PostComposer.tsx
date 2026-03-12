@@ -35,7 +35,8 @@ const VIDEO_PUBLISHING_PLATFORMS = new Set<Platform>(["TWITTER", "INSTAGRAM", "F
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
 
 const UPLOAD_TIMEOUT_MS = 300_000; // 5 minutes
-const UPLOAD_MAX_RETRIES = 1;
+const UPLOAD_MAX_RETRIES = 2;
+const UPLOAD_RETRY_BASE_DELAY_MS = 1000; // 1s, 2s exponential backoff
 
 function isVideoUrl(url: string): boolean {
   const ext = url.slice(url.lastIndexOf(".")).toLowerCase();
@@ -205,7 +206,10 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
           xhrRef.current = null;
           if (retryCount < UPLOAD_MAX_RETRIES) {
             setUploadProgress(null);
-            resolve(attemptUpload(retryCount + 1));
+            const delay = UPLOAD_RETRY_BASE_DELAY_MS * (retryCount + 1);
+            setTimeout(() => {
+              resolve(attemptUpload(retryCount + 1));
+            }, delay);
           } else {
             reject(new Error(errorMsg));
           }
