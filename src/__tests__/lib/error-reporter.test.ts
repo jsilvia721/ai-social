@@ -435,6 +435,102 @@ describe("error-reporter", () => {
     });
   });
 
+  describe("CSP violation capture", () => {
+    /** Helper to create a fake SecurityPolicyViolationEvent (not in JSDOM) */
+    function makeCspEvent(props: {
+      violatedDirective: string;
+      blockedURI: string;
+      documentURI: string;
+      effectiveDirective: string;
+      originalPolicy: string;
+    }): Event {
+      const event = new Event("securitypolicyviolation");
+      Object.assign(event, props);
+      return event;
+    }
+
+    it("captures securitypolicyviolation events as CLIENT errors", () => {
+      initReporter({ debounceMs: 100 });
+
+      document.dispatchEvent(
+        makeCspEvent({
+          violatedDirective: "script-src",
+          blockedURI: "https://evil.com/script.js",
+          documentURI: "http://localhost/",
+          effectiveDirective: "script-src",
+          originalPolicy: "script-src 'self'",
+        })
+      );
+
+      jest.advanceTimersByTime(100);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.message).toBe(
+        "CSP violation: script-src blocked https://evil.com/script.js on http://localhost/"
+      );
+      expect(body.source).toBe("CLIENT");
+    });
+
+    it("includes CSP metadata in the report", () => {
+      initReporter({ debounceMs: 100 });
+
+      document.dispatchEvent(
+        makeCspEvent({
+          violatedDirective: "img-src",
+          blockedURI: "https://tracker.com/pixel.gif",
+          documentURI: "http://localhost/dashboard",
+          effectiveDirective: "img-src",
+          originalPolicy: "img-src 'self' data:",
+        })
+      );
+
+      jest.advanceTimersByTime(100);
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.metadata).toEqual({
+        violatedDirective: "img-src",
+        blockedURI: "https://tracker.com/pixel.gif",
+        effectiveDirective: "img-src",
+        originalPolicy: "img-src 'self' data:",
+      });
+    });
+
+    it("deduplicates identical CSP violations", () => {
+      initReporter({ debounceMs: 100 });
+
+      const makeEvent = () =>
+        makeCspEvent({
+          violatedDirective: "script-src",
+          blockedURI: "https://evil.com/script.js",
+          documentURI: "http://localhost/",
+          effectiveDirective: "script-src",
+          originalPolicy: "script-src 'self'",
+        });
+
+      document.dispatchEvent(makeEvent());
+      document.dispatchEvent(makeEvent());
+      document.dispatchEvent(makeEvent());
+
+      jest.advanceTimersByTime(100);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("cleans up the securitypolicyviolation listener on cleanup", () => {
+      const removeSpy = jest.spyOn(document, "removeEventListener");
+      const cleanup = initErrorReporter({ debounceMs: 100 });
+      cleanup();
+
+      expect(removeSpy).toHaveBeenCalledWith(
+        "securitypolicyviolation",
+        expect.any(Function)
+      );
+
+      removeSpy.mockRestore();
+    });
+  });
+
   describe("cleanup", () => {
     it("prevents further error reporting via reportError after cleanup", () => {
       const cleanup = initErrorReporter({ debounceMs: 100 });
