@@ -186,9 +186,15 @@ export function initErrorReporter(
     console.error = (...args: unknown[]) => {
       try {
         originalConsoleError!(...args);
-        // Only capture Error instances to avoid noise
         if (args[0] instanceof Error) {
           reportError(args[0]);
+        } else if (
+          typeof args[0] === "string" &&
+          !args[0].startsWith("Warning:")
+        ) {
+          // Capture string errors but filter React dev warnings
+          const message = args.map(String).join(" ");
+          reportError(message);
         }
       } catch {
         // Safety
