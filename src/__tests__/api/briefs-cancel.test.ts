@@ -1,5 +1,5 @@
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
-import { mockAuthenticated, mockUnauthenticated } from "@/__tests__/mocks/auth";
+import { mockAuthenticated, mockAuthenticatedAsAdmin, mockUnauthenticated } from "@/__tests__/mocks/auth";
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("next-auth/next");
@@ -58,6 +58,22 @@ describe("PATCH /api/briefs/[id]", () => {
     const [req, ctx] = makeRequest("cb-1");
     const res = await PATCH(req, ctx);
     expect(res.status).toBe(400);
+  });
+
+  it("admin bypasses membership check", async () => {
+    mockAuthenticatedAsAdmin();
+    prismaMock.contentBrief.findUnique.mockResolvedValue({
+      id: "cb-1", businessId: "biz-1", status: "PENDING",
+    } as any);
+    prismaMock.contentBrief.update.mockResolvedValue({
+      id: "cb-1", status: "CANCELLED",
+    } as any);
+
+    const [req, ctx] = makeRequest("cb-1");
+    const res = await PATCH(req, ctx);
+    expect(res.status).toBe(200);
+    // Admin should NOT trigger membership lookup
+    expect(prismaMock.businessMember.findUnique).not.toHaveBeenCalled();
   });
 
   it("cancels PENDING brief and returns updated brief", async () => {

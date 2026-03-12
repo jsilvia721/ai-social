@@ -24,11 +24,14 @@ export async function PATCH(
     return NextResponse.json({ error: "Brief not found" }, { status: 404 });
   }
 
-  const membership = await prisma.businessMember.findUnique({
-    where: { businessId_userId: { businessId: brief.businessId, userId: session.user.id } },
-  });
-  if (!membership) {
-    return NextResponse.json({ error: "Not a member of this business" }, { status: 403 });
+  const isAdmin = session.user.isAdmin ?? false;
+  if (!isAdmin) {
+    const membership = await prisma.businessMember.findUnique({
+      where: { businessId_userId: { businessId: brief.businessId, userId: session.user.id } },
+    });
+    if (!membership) {
+      return NextResponse.json({ error: "Not a member of this business" }, { status: 403 });
+    }
   }
 
   if (brief.status !== "PENDING") {
