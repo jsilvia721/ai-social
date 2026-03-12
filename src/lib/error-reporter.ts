@@ -63,7 +63,10 @@ function sendViaFetch(payload: ErrorPayload): void {
 
 function sendViaBeacon(payload: ErrorPayload): void {
   try {
-    navigator.sendBeacon(API_ENDPOINT, JSON.stringify(payload));
+    const blob = new Blob([JSON.stringify(payload)], {
+      type: "application/json",
+    });
+    navigator.sendBeacon(API_ENDPOINT, blob);
   } catch {
     // Silently drop
   }
@@ -159,10 +162,9 @@ export function initErrorReporter(
   };
 
   // Unhandled rejection listener
-  const handleRejection = (event: PromiseRejectionEvent | Event): void => {
+  const handleRejection = (event: PromiseRejectionEvent): void => {
     try {
-      const reason = (event as PromiseRejectionEvent).reason;
-      reportError(reason);
+      reportError(event.reason);
     } catch {
       // Safety
     }

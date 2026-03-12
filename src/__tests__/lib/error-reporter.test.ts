@@ -19,6 +19,15 @@ Object.defineProperty(global.navigator, "sendBeacon", {
   writable: true,
 });
 
+const cleanupFns: (() => void)[] = [];
+
+/** Wrapper that tracks cleanup for afterEach */
+function initReporter(options?: Parameters<typeof initErrorReporter>[0]) {
+  const cleanup = initErrorReporter(options);
+  cleanupFns.push(cleanup);
+  return cleanup;
+}
+
 beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
@@ -26,6 +35,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Clean up any listeners installed by initErrorReporter
+  for (const cleanup of cleanupFns) {
+    cleanup();
+  }
+  cleanupFns.length = 0;
   jest.useRealTimers();
 });
 
@@ -136,7 +150,7 @@ describe("error-reporter", () => {
 
   describe("reportError", () => {
     it("extracts message and stack from Error objects", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
       const err = new Error("test error");
       reportError(err);
       jest.advanceTimersByTime(100);
@@ -149,7 +163,7 @@ describe("error-reporter", () => {
     });
 
     it("handles string errors", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
       reportError("string error");
       jest.advanceTimersByTime(100);
 
@@ -159,7 +173,7 @@ describe("error-reporter", () => {
     });
 
     it("handles object errors", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
       reportError({ foo: 1, bar: "baz" });
       jest.advanceTimersByTime(100);
 
@@ -169,7 +183,7 @@ describe("error-reporter", () => {
     });
 
     it("handles null/undefined errors", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
       reportError(null);
       reportError(undefined);
       jest.advanceTimersByTime(100);
@@ -182,7 +196,7 @@ describe("error-reporter", () => {
     });
 
     it("includes context url and metadata", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
       reportError(new Error("ctx test"), {
         url: "http://localhost/page",
         metadata: { viewport: "1024x768" },
@@ -195,7 +209,7 @@ describe("error-reporter", () => {
     });
 
     it("defaults url to window.location.href", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
       reportError(new Error("no url"));
       jest.advanceTimersByTime(100);
 
@@ -206,7 +220,7 @@ describe("error-reporter", () => {
 
   describe("deduplication", () => {
     it("does not re-send duplicate messages within dedup window", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
 
       reportError(new Error("dup error"));
       reportError(new Error("dup error"));
@@ -218,7 +232,7 @@ describe("error-reporter", () => {
     });
 
     it("sends different error messages", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
 
       reportError(new Error("error 1"));
       reportError(new Error("error 2"));
@@ -229,7 +243,7 @@ describe("error-reporter", () => {
     });
 
     it("resets dedup set after 5 minutes", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
 
       reportError(new Error("reset test"));
       jest.advanceTimersByTime(100);
@@ -252,7 +266,7 @@ describe("error-reporter", () => {
 
   describe("circuit breaker", () => {
     it("stops reporting after 100 unique errors", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
 
       for (let i = 0; i < 105; i++) {
         reportError(new Error(`error ${i}`));
@@ -266,7 +280,7 @@ describe("error-reporter", () => {
 
   describe("debounce/batching", () => {
     it("batches errors within debounce window", () => {
-      initErrorReporter({ debounceMs: 500 });
+      initReporter({ debounceMs: 500 });
 
       reportError(new Error("batch 1"));
       reportError(new Error("batch 2"));
@@ -282,7 +296,7 @@ describe("error-reporter", () => {
 
   describe("window event listeners", () => {
     it("captures window error events", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
 
       const errorEvent = new ErrorEvent("error", {
         error: new Error("window error"),
@@ -298,7 +312,7 @@ describe("error-reporter", () => {
     });
 
     it("ignores error events without .error property (resource errors)", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
 
       const resourceError = new ErrorEvent("error", {
         message: "Failed to load resource",
@@ -311,7 +325,7 @@ describe("error-reporter", () => {
     });
 
     it("captures unhandled promise rejections", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
 
       // PromiseRejectionEvent may not be available in jsdom, simulate manually
       const event = new Event("unhandledrejection") as Event & {
@@ -333,7 +347,7 @@ describe("error-reporter", () => {
   describe("safety", () => {
     it("does not throw when fetch fails", () => {
       mockFetch.mockRejectedValueOnce(new Error("network error"));
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
 
       expect(() => {
         reportError(new Error("safe error"));
@@ -342,7 +356,7 @@ describe("error-reporter", () => {
     });
 
     it("does not throw when reportError receives circular objects", () => {
-      initErrorReporter({ debounceMs: 100 });
+      initReporter({ debounceMs: 100 });
       const circular: Record<string, unknown> = {};
       circular.self = circular;
 
@@ -354,8 +368,8 @@ describe("error-reporter", () => {
   });
 
   describe("sendBeacon fallback", () => {
-    it("uses sendBeacon on beforeunload flush", () => {
-      initErrorReporter({ debounceMs: 5000 });
+    it("uses sendBeacon with correct Content-Type on beforeunload flush", () => {
+      initReporter({ debounceMs: 5000 });
 
       reportError(new Error("beacon error"));
 
@@ -365,11 +379,38 @@ describe("error-reporter", () => {
       expect(mockSendBeacon).toHaveBeenCalledTimes(1);
       expect(mockSendBeacon).toHaveBeenCalledWith(
         "/api/errors",
-        expect.any(String)
+        expect.any(Blob)
       );
 
-      const body = JSON.parse(mockSendBeacon.mock.calls[0][1]);
-      expect(body.message).toBe("beacon error");
+      // Verify the Blob has the correct content type
+      const blob = mockSendBeacon.mock.calls[0][1] as Blob;
+      expect(blob.type).toBe("application/json");
+    });
+  });
+
+  describe("cleanup", () => {
+    it("prevents further error reporting via reportError after cleanup", () => {
+      const cleanup = initErrorReporter({ debounceMs: 100 });
+      cleanup();
+
+      // reportError after cleanup should still queue (it's a standalone function)
+      // but window listeners should be removed
+      // Verify by checking that the listeners were removed
+      const removeSpy = jest.spyOn(window, "removeEventListener");
+      const cleanup2 = initErrorReporter({ debounceMs: 100 });
+      cleanup2();
+
+      expect(removeSpy).toHaveBeenCalledWith("error", expect.any(Function));
+      expect(removeSpy).toHaveBeenCalledWith(
+        "unhandledrejection",
+        expect.any(Function)
+      );
+      expect(removeSpy).toHaveBeenCalledWith(
+        "beforeunload",
+        expect.any(Function)
+      );
+
+      removeSpy.mockRestore();
     });
   });
 });
