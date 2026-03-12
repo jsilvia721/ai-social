@@ -1,0 +1,65 @@
+name: Claude Code Task
+description: A task for Claude Code to pick up and implement autonomously
+labels: ["claude-ready"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue will be picked up by Claude Code automatically.
+        Be specific — Claude will read this as its only instructions.
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What should be accomplished? Be specific about the desired end state.
+      placeholder: "Add a new API endpoint at POST /api/widgets that creates a widget record..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Relevant background, existing code to reference, or constraints.
+      placeholder: "The Widget model already exists in schema.prisma. Follow the same pattern as the Posts API..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: How will we know this is done? Be explicit — Claude uses these to verify its work.
+      placeholder: |
+        - [ ] API endpoint returns 201 with the created widget
+        - [ ] Validation rejects missing required fields with 400
+        - [ ] Tests cover happy path and error cases
+        - [ ] ci:check passes
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity-hint
+    attributes:
+      label: Complexity Hint
+      description: Optional hint to help Claude calibrate its approach. Leave as "Auto" to let Claude assess.
+      options:
+        - Auto
+        - Trivial
+        - Moderate
+        - Complex
+    validations:
+      required: false
+
+  - type: textarea
+    id: files-hint
+    attributes:
+      label: Relevant Files
+      description: Optional. Point Claude to specific files or directories to focus on.
+      placeholder: |
+        - src/app/api/widgets/route.ts (create this)
+        - src/lib/db.ts (existing DB helper)
+        - prisma/schema.prisma (Widget model)
+    validations:
+      required: false
