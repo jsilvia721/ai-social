@@ -36,7 +36,7 @@ const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
 
 const UPLOAD_TIMEOUT_MS = 300_000; // 5 minutes
 const UPLOAD_MAX_RETRIES = 2;
-const UPLOAD_RETRY_BASE_DELAY_MS = 1000; // 1s, 2s exponential backoff
+const UPLOAD_RETRY_BASE_DELAY_MS = 1000; // linear backoff: 1s, 2s
 
 function isVideoUrl(url: string): boolean {
   const ext = url.slice(url.lastIndexOf(".")).toLowerCase();
