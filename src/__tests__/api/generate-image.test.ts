@@ -113,4 +113,59 @@ describe("POST /api/ai/generate-image", () => {
     const body = await res.json();
     expect(body.url).toBe("https://storage.example.com/img.png");
   });
+
+  it("persists error to ErrorReport table when image generation fails", async () => {
+    mockAuthenticated();
+    prismaMock.businessMember.findUnique.mockResolvedValue({
+      id: "bm-1",
+      businessId: "biz-1",
+      userId: mockSession.user.id,
+      role: "OWNER",
+    } as never);
+    prismaMock.contentStrategy.findUnique.mockResolvedValue(null);
+    mockGenerateImage.mockRejectedValue(new Error("Replicate API down"));
+    prismaMock.errorReport.upsert.mockResolvedValue({} as never);
+
+    const res = await POST(makeRequest({ prompt: "a sunset", businessId: "biz-1" }));
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Image generation failed");
+
+    // Verify error was persisted
+    expect(prismaMock.errorReport.upsert).toHaveBeenCalledTimes(1);
+    expect(prismaMock.errorReport.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { fingerprint: expect.any(String) },
+        create: expect.objectContaining({
+          message: "Replicate API down",
+          source: "SERVER",
+          url: "/api/ai/generate-image",
+          stack: expect.any(String),
+        }),
+        update: expect.objectContaining({
+          count: { increment: 1 },
+        }),
+      })
+    );
+  });
+
+  it("does not break error response if error reporting fails", async () => {
+    mockAuthenticated();
+    prismaMock.businessMember.findUnique.mockResolvedValue({
+      id: "bm-1",
+      businessId: "biz-1",
+      userId: mockSession.user.id,
+      role: "OWNER",
+    } as never);
+    prismaMock.contentStrategy.findUnique.mockResolvedValue(null);
+    mockGenerateImage.mockRejectedValue(new Error("API down"));
+    prismaMock.errorReport.upsert.mockRejectedValue(new Error("DB down"));
+
+    const res = await POST(makeRequest({ prompt: "test", businessId: "biz-1" }));
+
+    // Should still return 500 even if error reporting fails
+    expect(res.status).toBe(500);
+    expect(prismaMock.errorReport.upsert).toHaveBeenCalledTimes(1);
+  });
 });

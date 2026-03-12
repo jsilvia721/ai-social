@@ -6,7 +6,7 @@ import { generateImage } from "@/lib/media";
 import { uploadBuffer } from "@/lib/storage";
 import { buildImagePrompt } from "@/lib/ai/prompts";
 import { z } from "zod";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 
 const bodySchema = z.object({
   prompt: z.string().min(1).max(1000),
@@ -66,6 +66,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ url });
   } catch (err) {
     console.error("[generate-image] Error:", err);
+
+    const errMessage = err instanceof Error ? err.message : String(err);
+    const fingerprint = createHash("sha256")
+      .update("SERVER:" + errMessage)
+      .digest("hex");
+    await prisma.errorReport
+      .upsert({
+        where: { fingerprint },
+        create: {
+          fingerprint,
+          message: errMessage,
+          stack: err instanceof Error ? err.stack : undefined,
+          source: "SERVER",
+          url: "/api/ai/generate-image",
+        },
+        update: {
+          count: { increment: 1 },
+          lastSeenAt: new Date(),
+          stack: err instanceof Error ? err.stack : undefined,
+        },
+      })
+      .catch(() => {}); // Don't let error reporting break the error response
+
     return NextResponse.json(
       { error: "Image generation failed" },
       { status: 500 }
