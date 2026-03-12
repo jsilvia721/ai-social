@@ -40,16 +40,18 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 mkdir -p "$LOG_DIR"
 
-ACTIVE_PIDS=()
+PID_FILE="$LOG_DIR/.active_pids"
+: > "$PID_FILE"  # truncate on start
 
 cleanup() {
   echo "[daemon] Shutting down..."
-  for pid in "${ACTIVE_PIDS[@]}"; do
+  while IFS= read -r pid; do
     if kill -0 "$pid" 2>/dev/null; then
       echo "[daemon] Stopping worker PID $pid"
       kill "$pid" 2>/dev/null || true
     fi
-  done
+  done < "$PID_FILE"
+  rm -f "$PID_FILE"
   exit 0
 }
 trap cleanup SIGINT SIGTERM
@@ -104,15 +106,19 @@ EOF
   fi
 }
 
-# --- Reap finished workers ----------------------------------------------------
-reap_workers() {
-  local still_active=()
-  for pid in "${ACTIVE_PIDS[@]}"; do
+# --- Worker tracking via PID file ---------------------------------------------
+active_worker_count() {
+  local count=0
+  local tmp
+  tmp=$(mktemp)
+  while IFS= read -r pid; do
     if kill -0 "$pid" 2>/dev/null; then
-      still_active+=("$pid")
+      echo "$pid" >> "$tmp"
+      count=$((count + 1))
     fi
-  done
-  ACTIVE_PIDS=("${still_active[@]+"${still_active[@]}"}")
+  done < "$PID_FILE"
+  mv "$tmp" "$PID_FILE"
+  echo "$count"
 }
 
 # --- Main loop ----------------------------------------------------------------
@@ -120,9 +126,8 @@ log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGE
 log "Watching for issues labeled '${LABEL_READY}'..."
 
 while true; do
-  reap_workers
-
-  available_slots=$(( MAX_WORKERS - ${#ACTIVE_PIDS[@]} ))
+  active=$(active_worker_count)
+  available_slots=$(( MAX_WORKERS - active ))
 
   if [ "$available_slots" -gt 0 ]; then
     # Fetch up to available_slots issues
@@ -131,10 +136,10 @@ while true; do
       --label "$LABEL_READY" \
       --limit "$available_slots" \
       --json number,title \
-      -q '.[]' 2>/dev/null || echo "")
+      -q '.[] | @json' 2>/dev/null || echo "")
 
     if [ -n "$issues" ]; then
-      echo "$issues" | while IFS= read -r issue_json; do
+      while IFS= read -r issue_json; do
         number=$(echo "$issue_json" | jq -r '.number')
         title=$(echo "$issue_json" | jq -r '.title')
 
@@ -146,9 +151,9 @@ while true; do
         fi
 
         run_worker "$number" "$title" &
-        ACTIVE_PIDS+=($!)
+        echo "$!" >> "$PID_FILE"
         log "Spawned worker PID $! for issue #${number}"
-      done
+      done <<< "$issues"
     fi
   else
     log "All $MAX_WORKERS worker slots occupied, waiting..."
