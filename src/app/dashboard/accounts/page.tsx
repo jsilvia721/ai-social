@@ -38,6 +38,8 @@ function AccountsContent() {
     } else if (errorParam) {
       const errorMessages: Record<string, string> = {
         connect: "Failed to connect account. Please try again.",
+        not_on_blotato: "No matching account found on Blotato. Please connect the account on blotato.com first, then try again.",
+        invalid_platform: "Unsupported platform returned by Blotato.",
         state_mismatch: "OAuth state mismatch — please try again.",
         account_claimed: "This account is already connected to another workspace.",
       };

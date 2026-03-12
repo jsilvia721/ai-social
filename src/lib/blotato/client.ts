@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { env } from "@/env";
 
-const BASE = "https://api.blotato.com/v1";
+const BASE = "https://backend.blotato.com/v2";
 const TIMEOUT_MS = 15_000;
 
 export class BlotatoApiError extends Error {
@@ -38,7 +38,7 @@ export async function blotatoFetch<S extends z.ZodTypeAny>(
       ...options,
       signal: controller.signal,
       headers: {
-        Authorization: `Bearer ${env.BLOTATO_API_KEY}`,
+        "blotato-api-key": env.BLOTATO_API_KEY,
         "Content-Type": "application/json",
         ...options.headers,
       },

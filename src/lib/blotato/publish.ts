@@ -7,6 +7,7 @@ import { mockPublishPost } from "@/lib/mocks/blotato";
 export async function publishPost(
   blotatoAccountId: string,
   content: string,
+  platform: string,
   mediaUrls: string[] = [],
 ): Promise<{ blotatoPostId: string }> {
   if (shouldMockExternalApis()) return mockPublishPost();
@@ -16,18 +17,26 @@ export async function publishPost(
     assertSafeMediaUrl(url);
   }
 
-  const body: Record<string, unknown> = {
-    accountId: blotatoAccountId,
-    content,
+  const blotatoPlatform = platform.toLowerCase();
+
+  const body = {
+    post: {
+      accountId: blotatoAccountId,
+      content: {
+        text: content,
+        mediaUrls,
+        platform: blotatoPlatform,
+      },
+      target: {
+        targetType: blotatoPlatform,
+      },
+    },
   };
-  if (mediaUrls.length > 0) {
-    body.mediaUrls = mediaUrls;
-  }
 
   const result = await blotatoFetch("/posts", BlotatoPublishResultSchema, {
     method: "POST",
     body: JSON.stringify(body),
   });
 
-  return { blotatoPostId: result.id };
+  return { blotatoPostId: result.postSubmissionId };
 }

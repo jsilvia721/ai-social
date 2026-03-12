@@ -12,55 +12,61 @@ describe("publishPost", () => {
     fetchSpy.mockRestore();
   });
 
-  function makeSuccessResponse(blotatoPostId = "blotato-post-123") {
+  function makeSuccessResponse(postSubmissionId = "blotato-post-123") {
     return {
       ok: true,
-      status: 200,
+      status: 201,
       headers: new Headers(),
-      json: async () => ({ id: blotatoPostId, status: "published" }),
+      json: async () => ({ postSubmissionId }),
     } as Response;
   }
 
   it("returns blotatoPostId from the API response", async () => {
     fetchSpy.mockResolvedValue(makeSuccessResponse("blotato-abc"));
 
-    const result = await publishPost("account-1", "Hello world!");
+    const result = await publishPost("account-1", "Hello world!", "TWITTER");
     expect(result.blotatoPostId).toBe("blotato-abc");
   });
 
-  it("sends accountId and content in request body", async () => {
+  it("sends nested post object with content and target matching Blotato v2 schema", async () => {
     fetchSpy.mockResolvedValue(makeSuccessResponse());
 
-    await publishPost("acct-xyz", "My content");
+    await publishPost("acct-xyz", "My content", "TWITTER");
 
     const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(options.body as string);
-    expect(body.accountId).toBe("acct-xyz");
-    expect(body.content).toBe("My content");
+    expect(body.post.accountId).toBe("acct-xyz");
+    expect(body.post.content.text).toBe("My content");
+    expect(body.post.content.platform).toBe("twitter");
+    expect(body.post.content.mediaUrls).toEqual([]);
+    expect(body.post.target.targetType).toBe("twitter");
   });
 
-  it("includes mediaUrls in request body when provided", async () => {
+  it("includes mediaUrls in content when provided", async () => {
     fetchSpy.mockResolvedValue(makeSuccessResponse());
 
     const mediaUrls = [
       "https://storage.example.com/img1.jpg",
       "https://storage.example.com/img2.jpg",
     ];
-    await publishPost("acct-xyz", "With media", mediaUrls);
+    await publishPost("acct-xyz", "With media", "INSTAGRAM", mediaUrls);
 
     const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(options.body as string);
-    expect(body.mediaUrls).toEqual(mediaUrls);
+    expect(body.post.content.mediaUrls).toEqual(mediaUrls);
+    expect(body.post.content.platform).toBe("instagram");
+    expect(body.post.target.targetType).toBe("instagram");
   });
 
-  it("omits mediaUrls field when not provided", async () => {
+  it("converts uppercase platform to lowercase for Blotato API", async () => {
     fetchSpy.mockResolvedValue(makeSuccessResponse());
 
-    await publishPost("acct-xyz", "No media");
+    await publishPost("acct-xyz", "Content", "FACEBOOK");
 
     const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(options.body as string);
-    expect(body).not.toHaveProperty("mediaUrls");
+    expect(body.post.content.platform).toBe("facebook");
+    expect(body.post.target.targetType).toBe("facebook");
   });
 
   it("throws BlotatoApiError on non-ok response", async () => {
@@ -71,7 +77,7 @@ describe("publishPost", () => {
       text: async () => "Internal error",
     } as Response);
 
-    await expect(publishPost("acct", "content")).rejects.toThrow(BlotatoApiError);
+    await expect(publishPost("acct", "content", "TWITTER")).rejects.toThrow(BlotatoApiError);
   });
 
   it("throws BlotatoRateLimitError on 429", async () => {
@@ -82,6 +88,6 @@ describe("publishPost", () => {
       text: async () => "Rate limited",
     } as Response);
 
-    await expect(publishPost("acct", "content")).rejects.toThrow(BlotatoRateLimitError);
+    await expect(publishPost("acct", "content", "TWITTER")).rejects.toThrow(BlotatoRateLimitError);
   });
 });
