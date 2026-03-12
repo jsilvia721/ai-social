@@ -12,17 +12,18 @@ import {
 function makeRow(
   overrides: Partial<ErrorReportRow> & { message: string; source: string }
 ): ErrorReportRow {
+  const { message, source, ...rest } = overrides;
   return {
     id: crypto.randomUUID(),
-    fingerprint: crypto.createHash("sha256").update("old:" + overrides.message).digest("hex"),
-    message: overrides.message,
-    source: overrides.source,
-    count: overrides.count ?? 1,
-    firstSeenAt: overrides.firstSeenAt ?? new Date("2026-01-01"),
-    lastSeenAt: overrides.lastSeenAt ?? new Date("2026-01-01"),
-    status: overrides.status ?? "NEW",
-    githubIssueNumber: overrides.githubIssueNumber ?? null,
-    ...overrides,
+    fingerprint: crypto.createHash("sha256").update("old:" + message).digest("hex"),
+    message,
+    source,
+    count: 1,
+    firstSeenAt: new Date("2026-01-01"),
+    lastSeenAt: new Date("2026-01-01"),
+    status: "NEW",
+    githubIssueNumber: null,
+    ...rest,
   };
 }
 
