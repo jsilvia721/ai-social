@@ -366,12 +366,9 @@ poll_cloudwatch() {
 
   log "Polling ${#groups[@]} CloudWatch log group(s)..."
 
-  # Collect all errors, group by fingerprint
-  declare -A cw_errors=()       # fingerprint -> message
-  declare -A cw_counts=()       # fingerprint -> count
-  declare -A cw_first_seen=()   # fingerprint -> first timestamp
-  declare -A cw_last_seen=()    # fingerprint -> last timestamp
-  declare -A cw_log_groups=()   # fingerprint -> log group
+  # Collect all errors, group by fingerprint (temp directory for Bash 3 compat)
+  local cw_tmp
+  cw_tmp=$(mktemp -d)
 
   for group in "${groups[@]}"; do
     while IFS= read -r event_json; do
@@ -386,16 +383,19 @@ poll_cloudwatch() {
       local fp
       fp=$(generate_fingerprint "SERVER" "$msg")
 
-      if [ -z "${cw_errors[$fp]+x}" ]; then
-        cw_errors[$fp]="$msg"
-        cw_counts[$fp]=1
-        cw_first_seen[$fp]="$ts"
-        cw_last_seen[$fp]="$ts"
-        cw_log_groups[$fp]="$group"
+      if [ ! -d "$cw_tmp/$fp" ]; then
+        mkdir -p "$cw_tmp/$fp"
+        printf '%s' "$msg" > "$cw_tmp/$fp/message"
+        echo "1" > "$cw_tmp/$fp/count"
+        echo "$ts" > "$cw_tmp/$fp/first_seen"
+        echo "$ts" > "$cw_tmp/$fp/last_seen"
+        echo "$group" > "$cw_tmp/$fp/log_group"
       else
-        cw_counts[$fp]=$(( ${cw_counts[$fp]} + 1 ))
-        if [ "$ts" -gt "${cw_last_seen[$fp]}" ] 2>/dev/null; then
-          cw_last_seen[$fp]="$ts"
+        local prev_count
+        prev_count=$(cat "$cw_tmp/$fp/count")
+        echo $((prev_count + 1)) > "$cw_tmp/$fp/count"
+        if [ "$ts" -gt "$(cat "$cw_tmp/$fp/last_seen")" ] 2>/dev/null; then
+          echo "$ts" > "$cw_tmp/$fp/last_seen"
         fi
       fi
     done < <(cloudwatch_query_errors "$since_ms" "$group" "$SEVERITY")
@@ -403,7 +403,11 @@ poll_cloudwatch() {
 
   # Process collected errors
   local count="$issues_created"
-  for fp in "${!cw_errors[@]}"; do
+  for fp_dir in "$cw_tmp"/*/; do
+    [ -d "$fp_dir" ] || continue
+    local fp
+    fp=$(basename "$fp_dir")
+
     if [ "$count" -ge "$MAX_ISSUES_PER_CYCLE" ]; then
       log "Max issues per cycle reached, stopping"
       break
@@ -412,18 +416,20 @@ poll_cloudwatch() {
     local result
     result=$(process_error \
       "$fp" \
-      "${cw_errors[$fp]}" \
-      "${cw_counts[$fp]}" \
+      "$(cat "$cw_tmp/$fp/message")" \
+      "$(cat "$cw_tmp/$fp/count")" \
       "SERVER" \
       "" \
-      "${cw_log_groups[$fp]}" \
-      "$(ms_to_human "${cw_first_seen[$fp]}")" \
-      "$(ms_to_human "${cw_last_seen[$fp]}")")
+      "$(cat "$cw_tmp/$fp/log_group")" \
+      "$(ms_to_human "$(cat "$cw_tmp/$fp/first_seen")")" \
+      "$(ms_to_human "$(cat "$cw_tmp/$fp/last_seen")")")
 
     if [ "$result" != "0" ]; then
       count=$((count + 1))
     fi
   done
+
+  rm -rf "$cw_tmp"
 
   echo "$count"
 }
