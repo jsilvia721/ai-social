@@ -17,7 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X, Film, Copy, Wand2 } from "lucide-react";
 import type { Platform } from "@/types";
 import { reportError } from "@/lib/error-reporter";
-import { isVideoUrl, isVideoFile, VIDEO_EXTENSIONS } from "@/lib/media-utils";
+import { isVideoUrl, isVideoFile, isMovUrl, getFilenameFromUrl, VIDEO_EXTENSIONS } from "@/lib/media-utils";
 
 const CHAR_LIMITS: Partial<Record<Platform, number>> = {
   TWITTER: 280,
@@ -563,11 +563,11 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
               {mediaUrls.map((url, i) =>
                 isVideoUrl(url) ? (
                   <div key={i} className="relative group col-span-2">
-                    {url.endsWith(".mov") ? (
+                    {isMovUrl(url) ? (
                       <div className="w-full rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center gap-2 py-8">
                         <Film className="h-6 w-6 text-zinc-500" />
                         <span className="text-sm text-zinc-400">
-                          {url.split("/").pop()}
+                          {getFilenameFromUrl(url)}
                         </span>
                       </div>
                     ) : (

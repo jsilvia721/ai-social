@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Copy, Check, Upload, Calendar, Loader2, Film } from "lucide-react";
-import { isVideoUrl } from "@/lib/media-utils";
+import { isVideoUrl, isMovUrl, getFilenameFromUrl } from "@/lib/media-utils";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { reportError } from "@/lib/error-reporter";
@@ -294,10 +294,10 @@ export function FulfillmentPanel({
               {mediaUrls.map((url, i) => (
                 <div key={i} className={`relative group ${isVideoUrl(url) ? "w-full" : ""}`}>
                   {isVideoUrl(url) ? (
-                    url.endsWith(".mov") ? (
+                    isMovUrl(url) ? (
                       <div className="w-full rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center gap-2 py-6">
                         <Film className="h-5 w-5 text-zinc-500" />
-                        <span className="text-xs text-zinc-400">{url.split("/").pop()}</span>
+                        <span className="text-xs text-zinc-400">{getFilenameFromUrl(url)}</span>
                       </div>
                     ) : (
                       <video

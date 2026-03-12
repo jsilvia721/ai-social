@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X, Save, Clock, Image as ImageIcon, Film } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { isVideoUrl } from "@/lib/media-utils";
+import { isVideoUrl, isMovUrl, getFilenameFromUrl } from "@/lib/media-utils";
 import type { Platform } from "@/types";
 
 const PLATFORM_COLORS: Record<Platform, string> = {
@@ -189,10 +189,10 @@ export function ReviewCard({ post }: { post: ReviewPost }) {
           {post.mediaUrls.map((url, i) =>
             isVideoUrl(url) ? (
               <div key={i} className="w-full shrink-0">
-                {url.endsWith(".mov") ? (
+                {isMovUrl(url) ? (
                   <div className="w-full rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center gap-2 py-6">
                     <Film className="h-5 w-5 text-zinc-500" />
-                    <span className="text-xs text-zinc-400">{url.split("/").pop()}</span>
+                    <span className="text-xs text-zinc-400">{getFilenameFromUrl(url)}</span>
                   </div>
                 ) : (
                   <video

@@ -87,9 +87,6 @@ export async function generateImage(prompt: string): Promise<GeneratedImage> {
   }
 }
 
-// Re-export video utilities for convenience (prefer importing from @/lib/media-utils directly in client components)
-export { VIDEO_EXTENSIONS, isVideoUrl, isVideoFile } from "@/lib/media-utils";
-
 /** Deterministic mock image for dev/staging/testing */
 function mockGenerateImage(): GeneratedImage {
   // 1x1 transparent PNG
