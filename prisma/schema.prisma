@@ -286,6 +286,7 @@ model ErrorReport {
   lastSeenAt        DateTime @default(now())
   status            String   @default("NEW")   // NEW, ISSUE_CREATED, RESOLVED, IGNORED
   githubIssueNumber Int?                        // Linked GitHub issue number
+  acknowledgedAt    DateTime?                    // When bug monitor last triaged this error
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
