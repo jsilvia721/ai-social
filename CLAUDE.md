@@ -115,5 +115,19 @@ PRs target `main`. Merges to `main` auto-deploy to staging; production deploy re
 - Platforms: Twitter=sky-400, Instagram=pink-500, Facebook=blue-500, TikTok=zinc-100, YouTube=red-500
 - Status: emerald=published, amber=scheduled, red=failed, zinc=draft
 
+## Verification Checklist
+
+Run these to validate work before marking complete:
+
+```bash
+npm run ci:check                    # Lint + typecheck + coverage (mirrors CI)
+npx playwright test                 # E2E tests (requires: docker compose up -d db)
+git merge-base --is-ancestor origin/main HEAD  # Branch ancestry check
+npx prisma migrate diff \
+  --from-migrations prisma/migrations \
+  --to-schema-datamodel prisma/schema.prisma \
+  --exit-code                       # No schema drift
+```
+
 ## Project Config
 project_tracker: github

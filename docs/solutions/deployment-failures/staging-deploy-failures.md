@@ -4,6 +4,9 @@ date: 2026-03-08
 severity: high
 problem_type: deployment_issue
 category: deployment-failures
+module: ci-cd / sst.config.ts / prisma
+symptom: "Staging deploys fail with SecretMissingError, Neon advisory lock timeout, or runtime ColumnNotFound after successful deploy"
+root_cause: "Three distinct issues — missing SST secrets in SSM, Neon pooler incompatible with advisory locks, and prisma generate used instead of prisma migrate dev"
 component:
   - ci-cd
   - prisma

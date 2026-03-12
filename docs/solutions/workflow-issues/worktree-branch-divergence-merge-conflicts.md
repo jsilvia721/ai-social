@@ -1,25 +1,27 @@
 ---
 title: "Worktree branch divergence causing PR merge conflicts"
 date: "2026-03-08"
-category: "workflow"
+category: workflow-issues
 severity: "high"
+module: git-branching
+symptom: "Merge conflicts on PR when target branch has diverged, or stash pop conflicts when switching branch base"
+root_cause: "New branches created from current HEAD or another feature branch instead of from origin/main"
 component: "git-branching"
 symptoms:
-  - "Merge conflicts on PR when target branch (staging) has diverged"
-  - "Merge conflicts when running git stash pop after branching from staging"
+  - "Merge conflicts on PR when target branch (main) has diverged"
+  - "Merge conflicts when running git stash pop after branching from main"
   - "Manual conflict resolution needed after switching branch base in worktree"
   - "Unrelated changes from source branch leak into new feature branch"
   - "Files missing imports or components present only on source branch"
   - "PR shows many more commits than expected (carrying parent branch history)"
 tags:
-  - "git"
-  - "worktree"
-  - "stash"
-  - "branch-management"
-  - "developer-workflow"
-  - "staging"
-  - "merge-conflicts"
-  - "pr-workflow"
+  - git
+  - worktree
+  - stash
+  - branch-management
+  - developer-workflow
+  - merge-conflicts
+  - pr-workflow
 related_issues: []
 ---
 

@@ -1,10 +1,10 @@
 ---
-title: PR opened without rebasing from origin/staging
+title: PR opened without rebasing from target branch
 category: workflow-issues
 tags: [git, branching, pr-workflow, worktrees, rebase]
 module: git-workflow
-symptom: PR created on a stale base, missing recent commits merged into staging
-root_cause: Skipped git fetch + rebase before pushing and creating the PR
+symptom: "PR created on a stale base, missing recent commits merged into target branch"
+root_cause: "Skipped git fetch + rebase before pushing and creating the PR"
 severity: medium
 date: 2026-03-08
 ---
