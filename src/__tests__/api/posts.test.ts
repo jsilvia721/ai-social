@@ -233,6 +233,37 @@ describe("POST /api/posts", () => {
     );
   });
 
+  it("creates a SCHEDULED post with scheduledAt near now for post-now flow", async () => {
+    mockAuthenticated();
+    prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1", businessId: "biz-1" } as any);
+    prismaMock.post.create.mockResolvedValue({
+      id: "post-now",
+      content: "Post now",
+      status: "SCHEDULED",
+      scheduledAt: new Date(),
+    } as any);
+
+    const now = new Date().toISOString();
+    const res = await POST(
+      makePostRequest({
+        content: "Post now",
+        socialAccountId: "acc-1",
+        businessId: "biz-1",
+        scheduledAt: now,
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(prismaMock.post.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "SCHEDULED" }),
+      })
+    );
+    // The scheduledAt should be set (not null)
+    const createCall = prismaMock.post.create.mock.calls[0][0];
+    expect(createCall.data.scheduledAt).toBeTruthy();
+  });
+
   it("uses businessId from the request body (never trusts implicit context)", async () => {
     mockAuthenticated();
     prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1", businessId: "biz-1" } as any);

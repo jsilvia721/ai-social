@@ -35,7 +35,7 @@ test.describe("New post composer (authenticated)", () => {
 
   test("submitting an empty form shows a validation error", async ({ page }) => {
     await page.goto("/dashboard/posts/new");
-    await page.getByRole("button", { name: /save as draft/i }).click();
+    await page.getByRole("button", { name: /^draft$/i }).click();
     // Should not navigate away — still on new post page
     await expect(page).toHaveURL(/posts\/new/);
   });

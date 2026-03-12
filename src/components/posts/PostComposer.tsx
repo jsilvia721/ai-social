@@ -42,6 +42,12 @@ function isVideoFile(file: File): boolean {
   return file.type.startsWith("video/");
 }
 
+/** Format a Date as YYYY-MM-DDTHH:mm in local time (for datetime-local inputs). */
+function toLocalDatetimeString(date: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 interface Account {
   id: string;
   platform: Platform;
@@ -68,12 +74,12 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
   const [selectedAccountId, setSelectedAccountId] = useState(editPost?.socialAccountId ?? "");
   const [content, setContent] = useState(editPost?.content ?? "");
   const [aiTopic, setAiTopic] = useState("");
-  const [scheduleMode, setScheduleMode] = useState<"draft" | "schedule">(
+  const [scheduleMode, setScheduleMode] = useState<"draft" | "schedule" | "now">(
     editPost?.scheduledAt || defaultScheduledAt ? "schedule" : "draft"
   );
   const [scheduledAt, setScheduledAt] = useState(
     editPost?.scheduledAt
-      ? new Date(editPost.scheduledAt).toISOString().slice(0, 16)
+      ? toLocalDatetimeString(new Date(editPost.scheduledAt))
       : defaultScheduledAt ?? ""
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -334,7 +340,9 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
         ...(activeBusinessId ? { businessId: activeBusinessId } : {}),
       };
 
-      if (scheduleMode === "schedule" && scheduledAt) {
+      if (scheduleMode === "now") {
+        body.scheduledAt = new Date().toISOString();
+      } else if (scheduleMode === "schedule" && scheduledAt) {
         body.scheduledAt = new Date(scheduledAt).toISOString();
       }
 
@@ -658,7 +666,7 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
             }`}
           >
             <Send className="h-4 w-4 inline-block mr-2 -mt-0.5" />
-            Save as Draft
+            Draft
           </button>
           <button
             type="button"
@@ -670,7 +678,19 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
             }`}
           >
             <Clock className="h-4 w-4 inline-block mr-2 -mt-0.5" />
-            Schedule for Later
+            Schedule
+          </button>
+          <button
+            type="button"
+            onClick={() => setScheduleMode("now")}
+            className={`flex-1 rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
+              scheduleMode === "now"
+                ? "border-violet-600 bg-violet-600/10 text-violet-300"
+                : "border-zinc-700 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300"
+            }`}
+          >
+            <Send className="h-4 w-4 inline-block mr-2 -mt-0.5" />
+            Post Now
           </button>
         </div>
 
@@ -679,7 +699,7 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
             type="datetime-local"
             value={scheduledAt}
             onChange={(e) => setScheduledAt(e.target.value)}
-            min={new Date().toISOString().slice(0, 16)}
+            min={toLocalDatetimeString(new Date())}
             className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-600"
             required={scheduleMode === "schedule"}
           />
@@ -695,12 +715,17 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
         {isSubmitting ? (
           <>
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            Saving…
+            {scheduleMode === "now" ? "Posting…" : "Saving…"}
           </>
         ) : scheduleMode === "schedule" ? (
           <>
             <Clock className="h-4 w-4 mr-2" />
             Schedule Post
+          </>
+        ) : scheduleMode === "now" ? (
+          <>
+            <Send className="h-4 w-4 mr-2" />
+            Post Now
           </>
         ) : (
           <>
