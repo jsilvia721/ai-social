@@ -1,0 +1,55 @@
+name: Auto-update PR branches
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-pr-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // List open, non-draft PRs targeting main
+            const { data: pullRequests } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              base: 'main',
+              per_page: 100
+            });
+
+            const prs = pullRequests.filter(pr => !pr.draft);
+
+            if (prs.length === 0) {
+              console.log('No open non-draft PRs targeting main. Nothing to update.');
+              return;
+            }
+
+            console.log(`Found ${prs.length} open non-draft PR(s) to update.`);
+
+            for (const pr of prs) {
+              try {
+                await github.rest.pulls.updateBranch({
+                  owner,
+                  repo,
+                  pull_number: pr.number
+                });
+                console.log(`Updated PR #${pr.number} (${pr.title})`);
+              } catch (error) {
+                console.log(`Warning: Failed to update PR #${pr.number} (${pr.title}): ${error.message}`);
+              }
+
+              // Short delay to avoid rate limiting
+              await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+
+            console.log('Done updating PR branches.');
