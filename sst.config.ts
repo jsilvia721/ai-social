@@ -28,8 +28,8 @@ export default $config({
       tiktokClientSecret:  new sst.Secret("TiktokClientSecret"),
       tokenEncryptionKey:  new sst.Secret("TokenEncryptionKey"),
       allowedEmails:       new sst.Secret("AllowedEmails"),
-      // Blotato: optional — set BlotatoApiKey secret to enable real API, otherwise mock mode
-      blotatoApiKey:       null,
+      // Blotato: set BlotatoApiKey secret per stage (real key for production, "mock" for staging)
+      blotatoApiKey:       new sst.Secret("BlotatoApiKey"),
       // SES_FROM_EMAIL: optional — set SesFromEmail secret to enable failure alert emails
       sesFromEmail:        null,
       // ADMIN_EMAILS: optional — comma-separated emails to auto-promote to admin on sign-in
@@ -78,9 +78,9 @@ export default $config({
       TIKTOK_CLIENT_SECRET:  secrets.tiktokClientSecret.value,
       TOKEN_ENCRYPTION_KEY:  secrets.tokenEncryptionKey.value,
       ALLOWED_EMAILS:        secrets.allowedEmails.value,
-      // Blotato: mock mode until real API key is configured
-      BLOTATO_MOCK:          "true",
-      BLOTATO_API_KEY:       "mock",
+      // Blotato: real API in production, mock in staging/dev
+      BLOTATO_MOCK:          $app.stage === "production" ? "false" : "true",
+      BLOTATO_API_KEY:       secrets.blotatoApiKey.value,
       // SES failure alerts: disabled until SesFromEmail secret is configured
       // Admin role bootstrap: optional, comma-separated emails granted isAdmin on sign-in
       ...(secrets.adminEmails ? { ADMIN_EMAILS: secrets.adminEmails.value } : {}),
