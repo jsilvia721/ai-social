@@ -68,9 +68,9 @@ For each issue (whether split or not), determine:
 
 | Strategy | When | Label |
 |----------|------|-------|
-| **Parallel** | No file overlap, no data dependency | `claude-ready` (all at once) |
-| **Sequential** | Issue B depends on Issue A's output | `claude-ready` on A only; note in B: "Depends on #N — label `claude-ready` after #N merges" |
-| **Single** | Keep as one issue | `claude-ready` |
+| **Parallel** | No file overlap, no data dependency | `needs-triage` (all at once) |
+| **Sequential** | Issue B depends on Issue A's output | `needs-triage` on A only; note in B: "Depends on #N — label `needs-triage` after #N merges" |
+| **Single** | Keep as one issue | `needs-triage` |
 
 ### 4. Assess Complexity (per issue)
 
@@ -135,8 +135,8 @@ ISSUE_EOF
 ```
 
 **Important:**
-- Use the `claude-plan-review` label, NOT `claude-ready`
-- Items with `Depends on: none` will get `claude-ready` when created by the plan-executor
+- Use the `claude-plan-review` label, NOT `claude-ready` or `needs-triage`
+- Items with `Depends on: none` will get `needs-triage` when created by the plan-executor (requires human approval to become `claude-ready`)
 - Items with dependencies will wait until their dependencies are merged
 - Include ALL detail the worker will need — the plan-executor preserves it verbatim
 

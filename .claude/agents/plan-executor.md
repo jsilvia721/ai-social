@@ -73,8 +73,8 @@ ISSUE_EOF
 ```
 
 **Labeling rules:**
-- Items with NO dependencies: label `claude-ready` (can start immediately)
-- Items WITH dependencies: do NOT add `claude-ready`. Instead, add a Dependencies section:
+- Items with NO dependencies: label `needs-triage` (requires human approval before work begins)
+- Items WITH dependencies: do NOT add `needs-triage`. Instead, add a Dependencies section:
 
 ```
 ### Dependencies
@@ -82,7 +82,7 @@ ISSUE_EOF
 > Do not start until the following issues are merged:
 > - #<actual issue number> — <title>
 >
-> Once all dependencies are merged, add the `claude-ready` label to this issue.
+> Once all dependencies are merged, this issue will be labeled `needs-triage` for human review.
 ```
 
 Use the **actual issue numbers** returned by `gh issue create`, not the position numbers from the plan.

@@ -317,6 +317,113 @@ assert_eq "iterates over all fingerprints" "2" "$fp_count"
 rm -rf "$cw_tmp"
 pass "temp directory cleanup succeeds"
 
+# --- Test normalize_message ---------------------------------------------------
+echo ""
+echo "=== normalize_message Tests ==="
+echo ""
+
+echo "UUID normalization:"
+result=$(normalize_message "Error for user 550e8400-e29b-41d4-a716-446655440000 failed")
+assert_eq "replaces UUID with <UUID>" "Error for user <UUID> failed" "$result"
+
+result=$(normalize_message "a]550e8400-e29b-41d4-a716-446655440000[b")
+assert_eq "replaces UUID in brackets" "a]<UUID>[b" "$result"
+
+result=$(normalize_message "Error for 550E8400-E29B-41D4-A716-446655440000")
+assert_eq "replaces uppercase UUID" "Error for <UUID>" "$result"
+
+echo ""
+echo "CUID/nanoid normalization:"
+result=$(normalize_message "Post clbzgxkja0000qwer12345678 not found")
+assert_eq "replaces CUID with <ID>" "Post <ID> not found" "$result"
+
+result=$(normalize_message "Session abcdefghijklmnopqrstuvwxy expired")
+assert_eq "replaces 25-char alphanum with <ID>" "Session <ID> expired" "$result"
+
+# Short IDs should NOT be replaced
+result=$(normalize_message "Error code abc123 found")
+assert_eq "preserves short IDs" "Error code abc123 found" "$result"
+
+echo ""
+echo "Timestamp normalization:"
+result=$(normalize_message "Error at 2024-01-15T10:30:00.000Z in handler")
+assert_eq "replaces ISO timestamp with <TIMESTAMP>" "Error at <TIMESTAMP> in handler" "$result"
+
+result=$(normalize_message "Error at 2024-01-15T10:30:00Z in handler")
+assert_eq "replaces ISO timestamp without ms" "Error at <TIMESTAMP> in handler" "$result"
+
+result=$(normalize_message "Since 2024-01-15 10:30:00 the service")
+assert_eq "replaces datetime string with <TIMESTAMP>" "Since <TIMESTAMP> the service" "$result"
+
+echo ""
+echo "Number normalization:"
+result=$(normalize_message "Failed after 42 retries")
+assert_eq "replaces standalone number with <N>" "Failed after <N> retries" "$result"
+
+result=$(normalize_message "Error 500 at line 123")
+assert_eq "replaces multiple numbers" "Error <N> at line <N>" "$result"
+
+result=$(normalize_message "Error 500 500 at line 10")
+assert_eq "replaces consecutive numbers" "Error <N> <N> at line <N>" "$result"
+
+# Numbers in identifiers should NOT be replaced
+result=$(normalize_message "TypeError: Cannot read property")
+assert_eq "preserves error type names" "TypeError: Cannot read property" "$result"
+
+result=$(normalize_message "Error in src/lib/auth.ts")
+assert_eq "preserves file paths with numbers" "Error in src/lib/auth.ts" "$result"
+
+echo ""
+echo "Query string normalization:"
+result=$(normalize_message "GET /api/posts?page=1&limit=20 failed")
+assert_eq "strips query strings" "GET /api/posts failed" "$result"
+
+echo ""
+echo "Whitespace normalization:"
+result=$(normalize_message "  Error   with   extra   spaces  ")
+assert_eq "collapses whitespace and trims" "Error with extra spaces" "$result"
+
+echo ""
+echo "Combined normalization:"
+result=$(normalize_message "Error for user 550e8400-e29b-41d4-a716-446655440000 at 2024-01-15T10:30:00.000Z after 5 retries")
+assert_eq "normalizes UUID + timestamp + number" "Error for user <UUID> at <TIMESTAMP> after <N> retries" "$result"
+
+echo ""
+echo "Preservation tests:"
+result=$(normalize_message "TypeError: Cannot read property 'foo' of null")
+assert_eq "preserves TypeError message" "TypeError: Cannot read property 'foo' of null" "$result"
+
+result=$(normalize_message "ReferenceError: x is not defined")
+assert_eq "preserves ReferenceError message" "ReferenceError: x is not defined" "$result"
+
+# --- Test generate_fingerprint with normalization -----------------------------
+echo ""
+echo "generate_fingerprint with normalization:"
+
+# Two messages differing only in UUID should produce the same fingerprint
+fp_a=$(echo -n "SERVER:$(normalize_message "Error for user 550e8400-e29b-41d4-a716-446655440000")" | sha256sum | awk '{print $1}')
+fp_b=$(echo -n "SERVER:$(normalize_message "Error for user 12345678-1234-1234-1234-123456789abc")" | sha256sum | awk '{print $1}')
+assert_eq "same fingerprint for messages differing only in UUID" "$fp_a" "$fp_b"
+
+# Two messages differing only in timestamps should produce the same fingerprint
+fp_c=$(echo -n "SERVER:$(normalize_message "Error at 2024-01-15T10:30:00.000Z")" | sha256sum | awk '{print $1}')
+fp_d=$(echo -n "SERVER:$(normalize_message "Error at 2025-12-31T23:59:59.999Z")" | sha256sum | awk '{print $1}')
+assert_eq "same fingerprint for messages differing only in timestamp" "$fp_c" "$fp_d"
+
+# Two messages differing only in numbers should produce the same fingerprint
+fp_e=$(echo -n "SERVER:$(normalize_message "Failed after 3 retries")" | sha256sum | awk '{print $1}')
+fp_f=$(echo -n "SERVER:$(normalize_message "Failed after 99 retries")" | sha256sum | awk '{print $1}')
+assert_eq "same fingerprint for messages differing only in numbers" "$fp_e" "$fp_f"
+
+# Different error types should produce different fingerprints
+fp_g=$(echo -n "SERVER:$(normalize_message "TypeError: foo")" | sha256sum | awk '{print $1}')
+fp_h=$(echo -n "SERVER:$(normalize_message "ReferenceError: foo")" | sha256sum | awk '{print $1}')
+if [ "$fp_g" != "$fp_h" ]; then
+  pass "different error types produce different fingerprints"
+else
+  fail "different error types produce different fingerprints" "different" "same"
+fi
+
 # Test that shellcheck passes
 echo ""
 echo "Shellcheck:"

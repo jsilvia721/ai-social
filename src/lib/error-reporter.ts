@@ -1,5 +1,7 @@
 "use client";
 
+import { normalizeMessage } from "@/lib/normalize-error";
+
 const DEDUP_RESET_MS = 5 * 60 * 1000; // 5 minutes
 const CIRCUIT_BREAKER_LIMIT = 100;
 const API_ENDPOINT = "/api/errors";
@@ -100,11 +102,12 @@ export function reportError(error: unknown, context?: ErrorContext): void {
 
     const { message, stack } = normalizeError(error);
 
-    // Deduplicate by message
-    if (reportedFingerprints.has(message)) {
+    // Deduplicate by normalized message
+    const normalized = normalizeMessage(message);
+    if (reportedFingerprints.has(normalized)) {
       return;
     }
-    reportedFingerprints.add(message);
+    reportedFingerprints.add(normalized);
 
     let url = context?.url;
     if (!url && typeof window !== "undefined") {
