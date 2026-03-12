@@ -105,11 +105,13 @@ ms_to_human() {
     echo "$ms"
 }
 
-# Matches the API algorithm: sha256(source + ':' + message)
+# Matches the API algorithm: sha256(source + ':' + normalizeMessage(message))
 generate_fingerprint() {
   local source="$1"
   local message="$2"
-  echo -n "${source}:${message}" | sha256sum | awk '{print $1}'
+  local normalized
+  normalized=$(normalize_message "$message")
+  echo -n "${source}:${normalized}" | sha256sum | awk '{print $1}'
 }
 
 # --- Cooldown check -----------------------------------------------------------

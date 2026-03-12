@@ -57,6 +57,35 @@ cloudwatch_query_errors() {
     '.[] | . + {logGroup: $lg}' 2>/dev/null || true
 }
 
+# Normalize a log message by replacing dynamic values with placeholders.
+# Produces identical output to the TypeScript normalizeMessage() for the same input.
+# Used before fingerprint hashing to ensure dedup across dynamic values.
+#
+# Rules (applied sequentially):
+#   1. UUIDs → <UUID>
+#   2. CUIDs/nanoids (25+ lowercase alphanum starting with letter) → <ID>
+#   3. ISO timestamps → <TIMESTAMP>
+#   4. Datetime strings (YYYY-MM-DD HH:MM:SS) → <TIMESTAMP>
+#   5. Standalone numbers → <N>
+#   6. Query strings → stripped
+#   7. Collapse whitespace + trim
+#
+# Arguments:
+#   $1 — raw message
+normalize_message() {
+  local msg="$1"
+  msg=$(echo "$msg" \
+    | sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<UUID>/g' \
+    | sed -E 's/(^|[^a-zA-Z0-9])([a-z][a-z0-9]{24,})([^a-zA-Z0-9]|$)/\1<ID>\3/g' \
+    | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z?/<TIMESTAMP>/g' \
+    | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}/<TIMESTAMP>/g' \
+    | sed -E 's/(^|[^a-zA-Z0-9_./:-])[0-9]+([^a-zA-Z0-9_./:-]|$)/\1<N>\2/g' \
+    | sed -E 's/\?[^ ]*//g' \
+    | sed -E 's/[[:space:]]+/ /g' \
+    | sed -E 's/^ //;s/ $//')
+  echo "$msg"
+}
+
 # Extract a concise error summary from a log message.
 # Strips timestamps, request IDs, and truncates to ~120 chars.
 #
