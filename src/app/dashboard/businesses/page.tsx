@@ -12,18 +12,49 @@ export default async function BusinessesPage() {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/auth/signin");
 
-  const memberships = await prisma.businessMember.findMany({
-    where: { userId: session.user.id },
-    include: {
-      business: {
-        include: {
-          _count: { select: { socialAccounts: true, posts: true } },
-          contentStrategy: true,
+  const isAdmin = session.user.isAdmin ?? false;
+
+  let businessCards: {
+    business: { id: string; name: string; contentStrategy: unknown; _count: { socialAccounts: number; posts: number } };
+    role: string;
+  }[];
+
+  if (isAdmin) {
+    const businesses = await prisma.business.findMany({
+      include: {
+        _count: { select: { socialAccounts: true, posts: true } },
+        contentStrategy: true,
+        members: {
+          where: { userId: session.user.id },
+          select: { role: true },
+          take: 1,
         },
       },
-    },
-    orderBy: { joinedAt: "asc" },
-  });
+      orderBy: { createdAt: "asc" },
+      take: 200,
+    });
+    businessCards = businesses.map((b) => ({
+      business: b,
+      role: b.members[0]?.role ?? "ADMIN",
+    }));
+  } else {
+    const memberships = await prisma.businessMember.findMany({
+      where: { userId: session.user.id },
+      include: {
+        business: {
+          include: {
+            _count: { select: { socialAccounts: true, posts: true } },
+            contentStrategy: true,
+          },
+        },
+      },
+      orderBy: { joinedAt: "asc" },
+    });
+    businessCards = memberships.map((m) => ({
+      business: m.business,
+      role: m.role,
+    }));
+  }
 
   return (
     <div className="space-y-6">
@@ -40,7 +71,7 @@ export default async function BusinessesPage() {
         </Button>
       </div>
 
-      {memberships.length === 0 ? (
+      {businessCards.length === 0 ? (
         <div className="rounded-lg border border-zinc-700 bg-zinc-800 px-6 py-12 text-center">
           <Building2 className="h-10 w-10 text-zinc-600 mx-auto mb-4" />
           <p className="text-zinc-400 mb-4">No workspaces yet.</p>
@@ -50,7 +81,7 @@ export default async function BusinessesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {memberships.map(({ business, role }) => (
+          {businessCards.map(({ business, role }) => (
             <Card key={business.id} className="bg-zinc-800 border-zinc-700">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">

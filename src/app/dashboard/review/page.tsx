@@ -19,18 +19,21 @@ export default async function ReviewPage() {
     );
   }
 
-  // Verify the user is a member of this business
-  const membership = await prisma.businessMember.findUnique({
-    where: {
-      businessId_userId: { businessId: activeBusinessId, userId: session.user.id },
-    },
-  });
-  if (!membership) {
-    return (
-      <div className="text-center py-16 text-zinc-400">
-        <p>You do not have access to this workspace.</p>
-      </div>
-    );
+  // Verify the user is a member of this business (admin bypasses)
+  const isAdmin = session.user.isAdmin ?? false;
+  if (!isAdmin) {
+    const membership = await prisma.businessMember.findUnique({
+      where: {
+        businessId_userId: { businessId: activeBusinessId, userId: session.user.id },
+      },
+    });
+    if (!membership) {
+      return (
+        <div className="text-center py-16 text-zinc-400">
+          <p>You do not have access to this workspace.</p>
+        </div>
+      );
+    }
   }
 
   const posts = await prisma.post.findMany({

@@ -13,13 +13,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const isAdmin = session.user.isAdmin ?? false;
   const businessId = req.nextUrl.searchParams.get("businessId");
   const status = req.nextUrl.searchParams.get("status") as string | null;
   const weekOfParam = req.nextUrl.searchParams.get("weekOf");
 
-  const where: Record<string, unknown> = {
-    business: { members: { some: { userId: session.user.id } } },
-  };
+  const where: Record<string, unknown> = isAdmin
+    ? {}
+    : { business: { members: { some: { userId: session.user.id } } } };
 
   if (businessId) where.businessId = businessId;
   if (status) where.status = status;
