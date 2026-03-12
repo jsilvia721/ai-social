@@ -276,6 +276,122 @@ describe("PostComposer video upload retry", () => {
     expect(MockXHR.instances[0].timeout).toBe(300000);
   });
 
+  it("retries on S3 5xx status error", async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve([
+            { id: "acc-1", platform: "TWITTER", username: "test" },
+          ]),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            uploadUrl: "https://s3.example.com/upload1",
+            publicUrl: "https://cdn.example.com/video.mp4",
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            uploadUrl: "https://s3.example.com/upload2",
+            publicUrl: "https://cdn.example.com/video.mp4",
+          }),
+      });
+
+    render(<PostComposer />);
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    const fileInput = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement;
+
+    const file = new File(["videodata"], "test.mp4", { type: "video/mp4" });
+    Object.defineProperty(fileInput, "files", {
+      value: [file],
+      configurable: true,
+    });
+    fireEvent.change(fileInput);
+
+    await waitFor(() => {
+      expect(MockXHR.instances.length).toBe(1);
+    });
+
+    // S3 returns 503 SlowDown
+    MockXHR.instances[0].status = 503;
+    MockXHR.instances[0].onload?.();
+
+    // Should retry — second XHR created
+    await waitFor(() => {
+      expect(MockXHR.instances.length).toBe(2);
+    });
+
+    // Second attempt succeeds
+    MockXHR.instances[1].status = 200;
+    MockXHR.instances[1].onload?.();
+
+    // No error reported
+    expect(mockReportError).not.toHaveBeenCalled();
+  });
+
+  it("does not retry on 4xx status error", async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve([
+            { id: "acc-1", platform: "TWITTER", username: "test" },
+          ]),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            uploadUrl: "https://s3.example.com/upload1",
+            publicUrl: "https://cdn.example.com/video.mp4",
+          }),
+      });
+
+    render(<PostComposer />);
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    const fileInput = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement;
+
+    const file = new File(["videodata"], "test.mp4", { type: "video/mp4" });
+    Object.defineProperty(fileInput, "files", {
+      value: [file],
+      configurable: true,
+    });
+    fireEvent.change(fileInput);
+
+    await waitFor(() => {
+      expect(MockXHR.instances.length).toBe(1);
+    });
+
+    // S3 returns 403 Forbidden — should NOT retry
+    MockXHR.instances[0].status = 403;
+    MockXHR.instances[0].onload?.();
+
+    // Wait for error to appear, no retry
+    await waitFor(() => {
+      expect(mockReportError).toHaveBeenCalledTimes(1);
+    });
+
+    // Only one XHR created — no retry for 4xx
+    expect(MockXHR.instances.length).toBe(1);
+  });
+
   it("shows timeout-specific error message on XHR timeout", async () => {
     (global.fetch as jest.Mock)
       .mockResolvedValueOnce({

@@ -34,6 +34,9 @@ const VIDEO_PUBLISHING_PLATFORMS = new Set<Platform>(["TWITTER", "INSTAGRAM", "F
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
 
+const UPLOAD_TIMEOUT_MS = 300_000; // 5 minutes
+const UPLOAD_MAX_RETRIES = 1;
+
 function isVideoUrl(url: string): boolean {
   const ext = url.slice(url.lastIndexOf(".")).toLowerCase();
   return VIDEO_EXTENSIONS.has(ext);
@@ -164,8 +167,6 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
   }
 
   function uploadViaPresigned(file: File): Promise<string> {
-    const UPLOAD_TIMEOUT_MS = 300_000; // 5 minutes
-    const MAX_RETRIES = 1;
 
     async function attemptUpload(retryCount: number): Promise<string> {
       const res = await fetch(
@@ -192,6 +193,9 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
           xhrRef.current = null;
           if (xhr.status >= 200 && xhr.status < 300) {
             resolve(publicUrl);
+          } else if (xhr.status >= 500) {
+            // S3 5xx errors (e.g. 503 SlowDown) are transient — retry
+            handleRetriableError(`Upload to storage failed (status ${xhr.status})`);
           } else {
             reject(new Error(`Upload to storage failed (status ${xhr.status})`));
           }
@@ -199,7 +203,7 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
 
         function handleRetriableError(errorMsg: string) {
           xhrRef.current = null;
-          if (retryCount < MAX_RETRIES) {
+          if (retryCount < UPLOAD_MAX_RETRIES) {
             setUploadProgress(null);
             resolve(attemptUpload(retryCount + 1));
           } else {
