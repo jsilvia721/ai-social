@@ -86,7 +86,7 @@ describe("PostComposer error reporting", () => {
       url: window.location.href,
       metadata: {
         type: "UPLOAD",
-        method: "presigned",
+        method: "server",
         fileType: "image/png",
         fileSize: 5,
       },

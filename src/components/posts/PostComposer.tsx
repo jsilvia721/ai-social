@@ -316,7 +316,11 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
         // Don't show error for intentional cancellation
       } else {
         const file = files[0];
-        reportError(err, { url: window.location.href, metadata: { type: "UPLOAD", method: "presigned", fileType: file?.type, fileSize: file?.size } });
+        const method = videos.length > 0 ? "presigned" : "server";
+        reportError(err, {
+          url: window.location.href,
+          metadata: { type: "UPLOAD", method, fileType: file?.type, fileSize: file?.size },
+        });
         setError(err instanceof Error ? err.message : "Upload failed.");
       }
     } finally {
