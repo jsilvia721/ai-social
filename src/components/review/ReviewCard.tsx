@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, Save, Clock, Image as ImageIcon } from "lucide-react";
+import { Check, X, Save, Clock, Image as ImageIcon, Film } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isVideoUrl, isMovUrl, getFilenameFromUrl } from "@/lib/media-utils";
 import type { Platform } from "@/types";
 
 const PLATFORM_COLORS: Record<Platform, string> = {
@@ -184,15 +185,32 @@ export function ReviewCard({ post }: { post: ReviewPost }) {
 
       {/* Media preview */}
       {post.mediaUrls.length > 0 ? (
-        <div className="mt-3 flex gap-2 overflow-x-auto">
-          {post.mediaUrls.map((url, i) => (
-            <img
-              key={i}
-              src={url}
-              alt={`Media ${i + 1}`}
-              className="h-20 w-20 rounded-lg object-cover border border-zinc-700 shrink-0"
-            />
-          ))}
+        <div className="mt-3 flex gap-2 overflow-x-auto flex-wrap">
+          {post.mediaUrls.map((url, i) =>
+            isVideoUrl(url) ? (
+              <div key={i} className="w-full shrink-0">
+                {isMovUrl(url) ? (
+                  <div className="w-full rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center gap-2 py-6">
+                    <Film className="h-5 w-5 text-zinc-500" />
+                    <span className="text-xs text-zinc-400">{getFilenameFromUrl(url)}</span>
+                  </div>
+                ) : (
+                  <video
+                    src={url}
+                    className="w-full rounded-lg max-h-40 border border-zinc-700"
+                    controls
+                  />
+                )}
+              </div>
+            ) : (
+              <img
+                key={i}
+                src={url}
+                alt={`Media ${i + 1}`}
+                className="h-20 w-20 rounded-lg object-cover border border-zinc-700 shrink-0"
+              />
+            )
+          )}
         </div>
       ) : (
         <div className="mt-3 flex items-center gap-2 text-xs text-zinc-600">

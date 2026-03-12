@@ -115,18 +115,18 @@ jobs:
               }
 
               if (allResolved) {
-                console.log(`#${depIssueNum}: all dependencies resolved! Adding claude-ready label.`);
+                console.log(`#${depIssueNum}: all dependencies resolved! Adding needs-triage label.`);
 
                 await github.rest.issues.addLabels({
                   owner, repo,
                   issue_number: depIssueNum,
-                  labels: ['claude-ready']
+                  labels: ['needs-triage']
                 });
 
                 await github.rest.issues.createComment({
                   owner, repo,
                   issue_number: depIssueNum,
-                  body: `All dependencies resolved (merged via PR #${pr.number}). Marking as \`claude-ready\` for the issue daemon to pick up.`
+                  body: `All dependencies resolved (merged via PR #${pr.number}). Marking as \`needs-triage\` for human review. Add \`claude-ready\` when approved.`
                 });
               }
             }
