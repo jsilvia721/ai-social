@@ -320,6 +320,12 @@ process_error() {
 
   # For DB re-triaged errors with a known GitHub issue, check if it's still open
   if [ -n "$existing_issue_number" ]; then
+    if ! [[ "$existing_issue_number" =~ ^[0-9]+$ ]]; then
+      log "Error: invalid existing issue number '${existing_issue_number}', skipping"
+      echo "0"
+      return
+    fi
+
     local issue_state
     issue_state=$(gh issue view "$existing_issue_number" --json state -q '.state' 2>/dev/null || echo "UNKNOWN")
 
