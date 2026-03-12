@@ -11,7 +11,7 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    reportError(error, { url: window.location.href });
+    reportError(error);
   }, [error]);
 
   return (
