@@ -10,20 +10,26 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const memberships = await prisma.businessMember.findMany({
-    where: { userId: session.user.id },
-    select: { businessId: true },
-  });
+  const isAdmin = session.user.isAdmin ?? false;
 
-  const businessIds = memberships.map((m) => m.businessId);
-  if (businessIds.length === 0) {
-    return NextResponse.json({});
+  let businessIdFilter: { in: string[] } | undefined;
+  if (!isAdmin) {
+    const memberships = await prisma.businessMember.findMany({
+      where: { userId: session.user.id },
+      select: { businessId: true },
+    });
+
+    const businessIds = memberships.map((m) => m.businessId);
+    if (businessIds.length === 0) {
+      return NextResponse.json({});
+    }
+    businessIdFilter = { in: businessIds };
   }
 
   const counts = await prisma.contentBrief.groupBy({
     by: ["businessId"],
     where: {
-      businessId: { in: businessIds },
+      ...(businessIdFilter ? { businessId: businessIdFilter } : {}),
       status: "PENDING",
     },
     _count: { id: true },
