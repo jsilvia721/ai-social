@@ -29,7 +29,7 @@ const PLATFORM_LABELS: Record<Platform, string> = {
   YOUTUBE: "YouTube",
 };
 
-const VIDEO_PUBLISHING_PLATFORMS = new Set<Platform>(["TIKTOK", "YOUTUBE"]);
+const VIDEO_PUBLISHING_PLATFORMS = new Set<Platform>(["TWITTER", "INSTAGRAM", "FACEBOOK", "TIKTOK", "YOUTUBE"]);
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
 
