@@ -122,9 +122,12 @@ export function FulfillmentPanel({
       for (const file of Array.from(files)) {
         // Get presigned URL
         const presignRes = await fetch(
-          `/api/upload/presigned?filename=${encodeURIComponent(file.name)}&contentType=${encodeURIComponent(file.type)}`
+          `/api/upload/presigned?mimeType=${encodeURIComponent(file.type)}&fileSize=${file.size}`
         );
-        if (!presignRes.ok) throw new Error("Failed to get upload URL");
+        if (!presignRes.ok) {
+          const data = await presignRes.json().catch(() => ({}));
+          throw new Error(data.error ?? "Failed to get upload URL");
+        }
         const { uploadUrl, publicUrl } = await presignRes.json();
 
         // Upload to S3

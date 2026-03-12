@@ -97,4 +97,59 @@ describe("FulfillmentPanel error reporting", () => {
       }
     );
   });
+
+  it("sends correct mimeType and fileSize query params to presigned endpoint", async () => {
+    // First call: accounts fetch. Second: presigned URL. Third: S3 PUT.
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([]),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            uploadUrl: "https://s3.example.com/upload",
+            publicUrl: "https://cdn.example.com/file.jpg",
+          }),
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    render(
+      <FulfillmentPanel
+        brief={baseBrief}
+        onClose={noop}
+        onFulfilled={noop}
+        onCancelled={noop}
+        onSkip={noop}
+      />
+    );
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    const fileInput = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement;
+
+    const file = new File(["pixel"], "test.jpg", { type: "image/jpeg" });
+    Object.defineProperty(fileInput, "files", {
+      value: [file],
+      configurable: true,
+    });
+    fireEvent.change(fileInput);
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    });
+
+    // Verify presigned URL request uses correct query params
+    const presignedCall = (global.fetch as jest.Mock).mock.calls[1][0];
+    expect(presignedCall).toContain("mimeType=image%2Fjpeg");
+    expect(presignedCall).toContain("fileSize=5");
+    // Should NOT use the old incorrect params
+    expect(presignedCall).not.toContain("filename=");
+    expect(presignedCall).not.toContain("contentType=");
+  });
 });

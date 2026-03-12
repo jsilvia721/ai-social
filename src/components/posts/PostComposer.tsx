@@ -34,6 +34,9 @@ const VIDEO_PUBLISHING_PLATFORMS = new Set<Platform>(["TWITTER", "INSTAGRAM", "F
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
 
+const UPLOAD_TIMEOUT_MS = 300_000; // 5 minutes
+const UPLOAD_MAX_RETRIES = 1;
+
 function isVideoUrl(url: string): boolean {
   const ext = url.slice(url.lastIndexOf(".")).toLowerCase();
   return VIDEO_EXTENSIONS.has(ext);
@@ -164,47 +167,70 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
   }
 
   function uploadViaPresigned(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      fetch(`/api/upload/presigned?mimeType=${encodeURIComponent(file.type)}&fileSize=${file.size}`)
-        .then((res) => {
-          if (!res.ok) return res.json().then((d) => Promise.reject(new Error(d.error ?? "Failed to get upload URL")));
-          return res.json();
-        })
-        .then(({ uploadUrl, publicUrl }) => {
-          const xhr = new XMLHttpRequest();
-          xhrRef.current = xhr;
 
-          xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-              setUploadProgress(Math.round((e.loaded / e.total) * 100));
-            }
-          };
+    async function attemptUpload(retryCount: number): Promise<string> {
+      const res = await fetch(
+        `/api/upload/presigned?mimeType=${encodeURIComponent(file.type)}&fileSize=${file.size}`
+      );
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error ?? "Failed to get upload URL");
+      }
+      const { uploadUrl, publicUrl } = await res.json();
 
-          xhr.onload = () => {
-            xhrRef.current = null;
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve(publicUrl);
-            } else {
-              reject(new Error("Upload to storage failed"));
-            }
-          };
+      return new Promise<string>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhrRef.current = xhr;
+        xhr.timeout = UPLOAD_TIMEOUT_MS;
 
-          xhr.onerror = () => {
-            xhrRef.current = null;
-            reject(new Error("Upload failed — check your connection"));
-          };
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setUploadProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        };
 
-          xhr.onabort = () => {
-            xhrRef.current = null;
-            reject(new Error("Upload cancelled"));
-          };
+        xhr.onload = () => {
+          xhrRef.current = null;
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(publicUrl);
+          } else if (xhr.status >= 500) {
+            // S3 5xx errors (e.g. 503 SlowDown) are transient — retry
+            handleRetriableError(`Upload to storage failed (status ${xhr.status})`);
+          } else {
+            reject(new Error(`Upload to storage failed (status ${xhr.status})`));
+          }
+        };
 
-          xhr.open("PUT", uploadUrl);
-          xhr.setRequestHeader("Content-Type", file.type);
-          xhr.send(file);
-        })
-        .catch(reject);
-    });
+        function handleRetriableError(errorMsg: string) {
+          xhrRef.current = null;
+          if (retryCount < UPLOAD_MAX_RETRIES) {
+            setUploadProgress(null);
+            resolve(attemptUpload(retryCount + 1));
+          } else {
+            reject(new Error(errorMsg));
+          }
+        }
+
+        xhr.onerror = () => {
+          handleRetriableError("Upload failed — check your connection and try again");
+        };
+
+        xhr.ontimeout = () => {
+          handleRetriableError("Upload timed out — try a smaller file or check your connection");
+        };
+
+        xhr.onabort = () => {
+          xhrRef.current = null;
+          reject(new Error("Upload cancelled"));
+        };
+
+        xhr.open("PUT", uploadUrl);
+        xhr.setRequestHeader("Content-Type", file.type);
+        xhr.send(file);
+      });
+    }
+
+    return attemptUpload(0);
   }
 
   function abortUpload() {
