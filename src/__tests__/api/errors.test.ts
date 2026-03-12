@@ -5,6 +5,7 @@ jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 import { POST } from "@/app/api/errors/route";
 import { NextRequest } from "next/server";
 import crypto from "crypto";
+import type { ErrorReport } from "@prisma/client";
 
 function makeRequest(body: unknown) {
   return new NextRequest("http://localhost/api/errors", {
@@ -21,6 +22,26 @@ function fingerprint(source: string, message: string) {
     .digest("hex");
 }
 
+function mockReport(overrides: Partial<ErrorReport> = {}): ErrorReport {
+  return {
+    id: "err-1",
+    fingerprint: "fp",
+    message: "error",
+    stack: null,
+    source: "CLIENT",
+    url: null,
+    metadata: null,
+    count: 1,
+    firstSeenAt: new Date(),
+    lastSeenAt: new Date(),
+    status: "NEW",
+    githubIssueNumber: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   resetPrismaMock();
   jest.clearAllMocks();
@@ -29,29 +50,17 @@ beforeEach(() => {
 describe("POST /api/errors", () => {
   const validPayload = {
     message: "Uncaught TypeError: Cannot read property 'foo' of undefined",
-    stack: "TypeError: Cannot read property 'foo' of undefined\n    at Object.<anonymous>",
+    stack:
+      "TypeError: Cannot read property 'foo' of undefined\n    at Object.<anonymous>",
     source: "CLIENT",
     url: "http://localhost:3000/dashboard",
   };
 
   it("creates a new error report and returns 201", async () => {
     const fp = fingerprint("CLIENT", validPayload.message);
-    prismaMock.errorReport.upsert.mockResolvedValue({
-      id: "err-1",
-      fingerprint: fp,
-      message: validPayload.message,
-      stack: validPayload.stack,
-      source: "CLIENT",
-      url: validPayload.url,
-      metadata: null,
-      count: 1,
-      firstSeenAt: new Date(),
-      lastSeenAt: new Date(),
-      status: "NEW",
-      githubIssueNumber: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    prismaMock.errorReport.upsert.mockResolvedValue(
+      mockReport({ id: "err-1", fingerprint: fp, count: 1 })
+    );
 
     const res = await POST(makeRequest(validPayload));
     expect(res.status).toBe(201);
@@ -81,22 +90,9 @@ describe("POST /api/errors", () => {
 
   it("returns 200 when duplicate fingerprint increments count", async () => {
     const fp = fingerprint("CLIENT", validPayload.message);
-    prismaMock.errorReport.upsert.mockResolvedValue({
-      id: "err-1",
-      fingerprint: fp,
-      message: validPayload.message,
-      stack: validPayload.stack,
-      source: "CLIENT",
-      url: validPayload.url,
-      metadata: null,
-      count: 5,
-      firstSeenAt: new Date(),
-      lastSeenAt: new Date(),
-      status: "NEW",
-      githubIssueNumber: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    prismaMock.errorReport.upsert.mockResolvedValue(
+      mockReport({ id: "err-1", fingerprint: fp, count: 5 })
+    );
 
     const res = await POST(makeRequest(validPayload));
     expect(res.status).toBe(200);
@@ -124,24 +120,23 @@ describe("POST /api/errors", () => {
     expect(body.error).toBeDefined();
   });
 
+  it("returns 400 for malformed JSON body", async () => {
+    const req = new NextRequest("http://localhost/api/errors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not valid json{{{",
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("Invalid JSON body");
+  });
+
   it("accepts SERVER source", async () => {
     const fp = fingerprint("SERVER", "server error");
-    prismaMock.errorReport.upsert.mockResolvedValue({
-      id: "err-2",
-      fingerprint: fp,
-      message: "server error",
-      stack: null,
-      source: "SERVER",
-      url: null,
-      metadata: null,
-      count: 1,
-      firstSeenAt: new Date(),
-      lastSeenAt: new Date(),
-      status: "NEW",
-      githubIssueNumber: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    prismaMock.errorReport.upsert.mockResolvedValue(
+      mockReport({ id: "err-2", fingerprint: fp, source: "SERVER", count: 1 })
+    );
 
     const res = await POST(
       makeRequest({ message: "server error", source: "SERVER" })
@@ -152,26 +147,11 @@ describe("POST /api/errors", () => {
   it("accepts optional metadata", async () => {
     const fp = fingerprint("CLIENT", validPayload.message);
     const metadata = { userAgent: "Mozilla/5.0", viewport: "1024x768" };
-    prismaMock.errorReport.upsert.mockResolvedValue({
-      id: "err-3",
-      fingerprint: fp,
-      message: validPayload.message,
-      stack: null,
-      source: "CLIENT",
-      url: null,
-      metadata,
-      count: 1,
-      firstSeenAt: new Date(),
-      lastSeenAt: new Date(),
-      status: "NEW",
-      githubIssueNumber: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const res = await POST(
-      makeRequest({ ...validPayload, metadata })
+    prismaMock.errorReport.upsert.mockResolvedValue(
+      mockReport({ id: "err-3", fingerprint: fp, metadata, count: 1 })
     );
+
+    const res = await POST(makeRequest({ ...validPayload, metadata }));
     expect(res.status).toBe(201);
 
     expect(prismaMock.errorReport.upsert).toHaveBeenCalledWith(
@@ -179,5 +159,16 @@ describe("POST /api/errors", () => {
         create: expect.objectContaining({ metadata }),
       })
     );
+  });
+
+  it("returns 500 when database fails", async () => {
+    prismaMock.errorReport.upsert.mockRejectedValue(
+      new Error("connection refused")
+    );
+
+    const res = await POST(makeRequest(validPayload));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Failed to record error report");
   });
 });
