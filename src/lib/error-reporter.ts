@@ -175,9 +175,32 @@ export function initErrorReporter(
     }
   };
 
+  // CSP violation listener (on document, not window)
+  const handleCspViolation = (
+    event: SecurityPolicyViolationEvent
+  ): void => {
+    try {
+      const message = `CSP violation: ${event.violatedDirective} blocked ${event.blockedURI} on ${event.documentURI}`;
+      reportError(message, {
+        metadata: {
+          violatedDirective: event.violatedDirective,
+          blockedURI: event.blockedURI,
+          effectiveDirective: event.effectiveDirective,
+          originalPolicy: event.originalPolicy,
+        },
+      });
+    } catch {
+      // Safety
+    }
+  };
+
   window.addEventListener("error", handleError);
   window.addEventListener("unhandledrejection", handleRejection);
   window.addEventListener("beforeunload", handleBeforeUnload);
+  document.addEventListener(
+    "securitypolicyviolation",
+    handleCspViolation
+  );
 
   // Console.error capture
   let originalConsoleError: typeof console.error | null = null;
@@ -207,6 +230,10 @@ export function initErrorReporter(
     window.removeEventListener("error", handleError);
     window.removeEventListener("unhandledrejection", handleRejection);
     window.removeEventListener("beforeunload", handleBeforeUnload);
+    document.removeEventListener(
+      "securitypolicyviolation",
+      handleCspViolation
+    );
 
     if (dedupResetTimer) {
       clearInterval(dedupResetTimer);
