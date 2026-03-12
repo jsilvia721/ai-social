@@ -34,6 +34,14 @@ docker compose up -d db
 - `/ce:review` — Multi-agent code review (TypeScript, security, performance, architecture)
 - `/ce:compound` — Document solved problems in docs/solutions/ for future reference
 
+### Visual UI Testing (Playwright MCP + agent-browser)
+- **Playwright MCP** — browser tools for navigating, clicking, and inspecting localhost (configured in `.mcp.json`)
+- **design-iterator** — N autonomous screenshot-analyze-improve cycles for UI polish
+- **design-implementation-reviewer** — compare live UI against Figma designs
+- **agent-browser** skill — CLI-based browser automation with ref-based element targeting
+
+See `.claude/rules/visual-testing.md` for usage patterns and requirements.
+
 ### When to Use What
 - **Trivial fix** (one file, obvious change): just do it, run tests, done
 - **Moderate task** (2-3 files, clear approach): `/ce:plan` -> `/ce:work`
@@ -94,7 +102,7 @@ Unified publishing via `src/lib/blotato/`. Connect flows in `src/app/api/connect
 
 ## Testing
 
-Tests in `src/__tests__/` mirroring `src/` structure, `node` environment. Coverage: 75% statements/lines/branches, 70% functions. Always create/update tests when modifying covered code. See `.claude/rules/testing.md` for mocking patterns, coverage exclusions, and setup details.
+Tests in `src/__tests__/` mirroring `src/` structure, `node` environment. Coverage: 75% statements/lines/branches, 70% functions. Always create/update tests when modifying covered code. See `.claude/rules/testing.md` for mocking patterns, coverage exclusions, and setup details. See `.claude/rules/visual-testing.md` for Playwright MCP and agent-browser visual testing.
 
 ## Deployment
 
