@@ -180,7 +180,9 @@ export function initErrorReporter(
     event: SecurityPolicyViolationEvent
   ): void => {
     try {
-      const message = `CSP violation: ${event.violatedDirective} blocked ${event.blockedURI} on ${event.documentURI}`;
+      const truncate = (s: string, n: number) =>
+        s.length > n ? s.slice(0, n) + "..." : s;
+      const message = `CSP violation: ${event.violatedDirective} blocked ${truncate(event.blockedURI, 200)} on ${truncate(event.documentURI, 200)}`;
       reportError(message, {
         metadata: {
           violatedDirective: event.violatedDirective,
