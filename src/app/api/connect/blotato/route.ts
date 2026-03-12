@@ -1,8 +1,8 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getConnectUrl } from "@/lib/blotato/accounts";
-import { env } from "@/env";
+import { listAccounts } from "@/lib/blotato/accounts";
+import { toPrismaPlatform } from "@/lib/blotato/types";
 import type { Platform } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Mock mode: skip Blotato OAuth, create a fake account directly ────────
+  // ── Mock mode: skip Blotato API, create a fake account directly ────────
   if (process.env.BLOTATO_MOCK === "true") {
     try {
       await prisma.socialAccount.upsert({
@@ -69,17 +69,55 @@ export async function GET(req: NextRequest) {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  const state = Buffer.from(
-    JSON.stringify({ userId: session.user.id, businessId })
-  ).toString("base64url");
-
-  const callbackUrl = `${env.NEXTAUTH_URL}/api/connect/blotato/callback`;
-
   try {
-    const { url } = await getConnectUrl(platform, callbackUrl, state);
-    return NextResponse.redirect(url, 302);
+    // Fetch all connected accounts from Blotato
+    const blotatoAccounts = await listAccounts();
+
+    // Find accounts matching the requested platform (Blotato uses lowercase names)
+    const blotatoPlatformName = platform.toLowerCase();
+    const matching = blotatoAccounts.filter((a) => a.platform === blotatoPlatformName);
+
+    if (matching.length === 0) {
+      return NextResponse.redirect(
+        new URL(`${ACCOUNTS_URL}?error=not_on_blotato`, req.url),
+        302,
+      );
+    }
+
+    // Import the first matching account
+    const account = matching[0];
+    const prismaPlatform = toPrismaPlatform(account.platform);
+
+    if (!prismaPlatform) {
+      return NextResponse.redirect(
+        new URL(`${ACCOUNTS_URL}?error=invalid_platform`, req.url),
+        302,
+      );
+    }
+
+    // Use Blotato's account id as platformId (Blotato doesn't expose the native platform ID)
+    const platformId = account.id;
+
+    await prisma.socialAccount.upsert({
+      where: {
+        platform_platformId: { platform: prismaPlatform, platformId },
+      },
+      create: {
+        businessId,
+        blotatoAccountId: account.id,
+        platform: prismaPlatform,
+        platformId,
+        username: account.username,
+      },
+      update: {
+        blotatoAccountId: account.id,
+        username: account.username,
+      },
+    });
   } catch (err) {
-    console.error("[blotato-connect] failed to get connect URL:", err);
+    console.error("[blotato-connect] failed to import account:", err);
     return NextResponse.redirect(new URL(`${ACCOUNTS_URL}?error=connect`, req.url), 302);
   }
+
+  return NextResponse.redirect(new URL(`${ACCOUNTS_URL}?success=true`, req.url), 302);
 }

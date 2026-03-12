@@ -1,5 +1,4 @@
 import {
-  mockGetConnectUrl,
   mockListAccounts,
   mockGetAccount,
   mockPublishPost,
@@ -7,18 +6,13 @@ import {
 } from "@/lib/mocks/blotato";
 
 describe("Blotato mock data", () => {
-  it("mockGetConnectUrl returns a URL with the platform", () => {
-    const result = mockGetConnectUrl("TWITTER");
-    expect(result.url).toContain("TWITTER");
-    expect(result.url).toContain("mock");
-  });
-
-  it("mockListAccounts returns multiple accounts", () => {
+  it("mockListAccounts returns multiple accounts with lowercase platform names", () => {
     const accounts = mockListAccounts();
     expect(accounts.length).toBeGreaterThanOrEqual(1);
     for (const account of accounts) {
       expect(account.id).toBeTruthy();
       expect(account.platform).toBeTruthy();
+      expect(account.platform).toBe(account.platform.toLowerCase());
       expect(account.username).toBeTruthy();
     }
   });
@@ -26,7 +20,7 @@ describe("Blotato mock data", () => {
   it("mockGetAccount returns matching account when ID matches", () => {
     const account = mockGetAccount("mock-twitter-001");
     expect(account.id).toBe("mock-twitter-001");
-    expect(account.platform).toBe("TWITTER");
+    expect(account.platform).toBe("twitter");
   });
 
   it("mockGetAccount returns fallback for unknown ID", () => {

@@ -28,7 +28,7 @@ describe("blotatoFetch", () => {
     expect(result).toEqual({ id: "post-1", url: "https://example.com/post-1" });
   });
 
-  it("sends Authorization Bearer header with api key", async () => {
+  it("sends blotato-api-key header with api key", async () => {
     fetchSpy.mockResolvedValue({
       ok: true,
       status: 200,
@@ -39,8 +39,8 @@ describe("blotatoFetch", () => {
     await blotatoFetch("/test", ResponseSchema);
 
     const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect((options.headers as Record<string, string>)["Authorization"]).toBe(
-      `Bearer ${process.env.BLOTATO_API_KEY}`
+    expect((options.headers as Record<string, string>)["blotato-api-key"]).toBe(
+      process.env.BLOTATO_API_KEY
     );
   });
 
@@ -55,7 +55,7 @@ describe("blotatoFetch", () => {
     await blotatoFetch("/some/path", ResponseSchema);
 
     const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://api.blotato.com/v1/some/path");
+    expect(url).toBe("https://backend.blotato.com/v2/some/path");
   });
 
   it("throws BlotatoApiError on non-ok response", async () => {

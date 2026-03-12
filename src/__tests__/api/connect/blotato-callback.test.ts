@@ -26,11 +26,11 @@ function makeRequest(params: Record<string, string> = {}) {
 
 const validState = encodeState({ userId: mockSession.user.id, businessId: "biz-1" });
 
+// Blotato API returns lowercase platform names
 const fakeBlotatoAccount = {
   id: "blotato-acct-123",
-  platform: "TWITTER",
+  platform: "twitter",
   username: "testuser",
-  platformId: "tw-123",
 };
 
 beforeEach(() => {
@@ -79,13 +79,13 @@ describe("GET /api/connect/blotato/callback", () => {
     const res = await GET(makeRequest({ state: validState, accountId: "blotato-acct-123" }));
 
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toMatch(/\/dashboard\/accounts$/);
+    expect(res.headers.get("location")).toContain("/dashboard/accounts?success=true");
     expect(prismaMock.socialAccount.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           platform_platformId: {
             platform: "TWITTER",
-            platformId: "tw-123",
+            platformId: "blotato-acct-123",
           },
         },
         create: expect.objectContaining({
@@ -93,7 +93,7 @@ describe("GET /api/connect/blotato/callback", () => {
           blotatoAccountId: "blotato-acct-123",
           platform: "TWITTER",
           username: "testuser",
-          platformId: "tw-123",
+          platformId: "blotato-acct-123",
         }),
         update: expect.objectContaining({
           blotatoAccountId: "blotato-acct-123",
@@ -103,35 +103,9 @@ describe("GET /api/connect/blotato/callback", () => {
     );
   });
 
-  it("uses platform from state if platformId is not returned by Blotato", async () => {
-    mockAuthenticated();
-    const stateWithPlatform = encodeState({
-      userId: mockSession.user.id,
-      businessId: "biz-1",
-    });
-    const accountWithoutPlatformId = { ...fakeBlotatoAccount, platformId: undefined };
-    mockGetAccount.mockResolvedValue(accountWithoutPlatformId);
-    prismaMock.socialAccount.upsert.mockResolvedValue({} as any);
-
-    const res = await GET(makeRequest({ state: stateWithPlatform, accountId: "blotato-acct-123" }));
-
-    expect(res.status).toBe(302);
-    // platformId falls back to blotatoAccountId when Blotato doesn't provide one
-    expect(prismaMock.socialAccount.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          platform_platformId: {
-            platform: "TWITTER",
-            platformId: "blotato-acct-123",
-          },
-        },
-      })
-    );
-  });
-
   it("redirects with error=invalid_platform when Blotato returns unknown platform", async () => {
     mockAuthenticated();
-    mockGetAccount.mockResolvedValue({ ...fakeBlotatoAccount, platform: "MASTODON" });
+    mockGetAccount.mockResolvedValue({ ...fakeBlotatoAccount, platform: "mastodon" });
 
     const res = await GET(makeRequest({ state: validState, accountId: "blotato-acct-123" }));
 

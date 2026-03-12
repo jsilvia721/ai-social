@@ -136,6 +136,7 @@ describe("runScheduler", () => {
     expect(mockPublishPost).toHaveBeenCalledWith(
       "blotato-acct-1",
       "Hello world",
+      "TWITTER",
       []
     );
     expect(prismaMock.post.update).toHaveBeenCalledWith(

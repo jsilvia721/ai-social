@@ -5,14 +5,14 @@ jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("next-auth/next");
 jest.mock("@/lib/auth", () => ({ authOptions: {} }));
 jest.mock("@/lib/blotato/accounts", () => ({
-  getConnectUrl: jest.fn(),
+  listAccounts: jest.fn(),
 }));
 
 import { GET } from "@/app/api/connect/blotato/route";
 import { NextRequest } from "next/server";
-import { getConnectUrl } from "@/lib/blotato/accounts";
+import { listAccounts } from "@/lib/blotato/accounts";
 
-const mockGetConnectUrl = getConnectUrl as jest.Mock;
+const mockListAccounts = listAccounts as jest.Mock;
 
 function makeRequest(params: Record<string, string> = {}) {
   const url = new URL("http://localhost/api/connect/blotato");
@@ -64,7 +64,7 @@ describe("GET /api/connect/blotato", () => {
     );
   });
 
-  it("redirects to the Blotato OAuth URL when user is a member", async () => {
+  it("fetches Blotato accounts and imports matching platform account", async () => {
     mockAuthenticated();
     prismaMock.businessMember.findFirst.mockResolvedValue({
       id: "mem-1",
@@ -73,12 +73,58 @@ describe("GET /api/connect/blotato", () => {
       role: "OWNER",
       joinedAt: new Date(),
     } as any);
-    mockGetConnectUrl.mockResolvedValue({ url: "https://app.blotato.com/connect/oauth" });
+    mockListAccounts.mockResolvedValue([
+      { id: "acct-123", platform: "twitter", username: "mytwitter" },
+      { id: "acct-456", platform: "instagram", username: "myinsta" },
+    ]);
+    prismaMock.socialAccount.upsert.mockResolvedValue({} as any);
 
     const res = await GET(makeRequest({ platform: "TWITTER", businessId: "biz-1" }));
 
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("https://app.blotato.com/connect/oauth");
+    expect(res.headers.get("location")).toContain("/dashboard/accounts?success=true");
+    expect(prismaMock.socialAccount.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          platform_platformId: {
+            platform: "TWITTER",
+            platformId: "acct-123",
+          },
+        },
+        create: expect.objectContaining({
+          businessId: "biz-1",
+          blotatoAccountId: "acct-123",
+          platform: "TWITTER",
+          username: "mytwitter",
+          platformId: "acct-123",
+        }),
+      })
+    );
+  });
+
+  it("redirects with error=not_on_blotato when no matching platform account found", async () => {
+    mockAuthenticated();
+    prismaMock.businessMember.findFirst.mockResolvedValue({ id: "mem-1" } as any);
+    mockListAccounts.mockResolvedValue([
+      { id: "acct-456", platform: "instagram", username: "myinsta" },
+    ]);
+
+    const res = await GET(makeRequest({ platform: "TWITTER", businessId: "biz-1" }));
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("error=not_on_blotato");
+    expect(prismaMock.socialAccount.upsert).not.toHaveBeenCalled();
+  });
+
+  it("redirects with error=connect when Blotato API call fails", async () => {
+    mockAuthenticated();
+    prismaMock.businessMember.findFirst.mockResolvedValue({ id: "mem-1" } as any);
+    mockListAccounts.mockRejectedValue(new Error("Blotato API error"));
+
+    const res = await GET(makeRequest({ platform: "TWITTER", businessId: "biz-1" }));
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("error=connect");
   });
 
   it("mock mode: creates a fake account and redirects to accounts page", async () => {
@@ -100,26 +146,6 @@ describe("GET /api/connect/blotato", () => {
         }),
       })
     );
-    expect(mockGetConnectUrl).not.toHaveBeenCalled();
-  });
-
-  it("calls getConnectUrl with encoded state containing userId and businessId", async () => {
-    mockAuthenticated();
-    prismaMock.businessMember.findFirst.mockResolvedValue({ id: "mem-1" } as any);
-    mockGetConnectUrl.mockResolvedValue({ url: "https://app.blotato.com/connect/oauth" });
-
-    await GET(makeRequest({ platform: "INSTAGRAM", businessId: "biz-42" }));
-
-    expect(mockGetConnectUrl).toHaveBeenCalledWith(
-      "INSTAGRAM",
-      expect.stringContaining("/api/connect/blotato/callback"),
-      expect.any(String),
-    );
-
-    // state should be decodable and contain userId + businessId
-    const [, , state] = mockGetConnectUrl.mock.calls[0] as [string, string, string];
-    const decoded = JSON.parse(Buffer.from(state, "base64url").toString());
-    expect(decoded.userId).toBe(mockSession.user.id);
-    expect(decoded.businessId).toBe("biz-42");
+    expect(mockListAccounts).not.toHaveBeenCalled();
   });
 });

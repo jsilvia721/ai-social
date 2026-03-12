@@ -2,10 +2,8 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getAccount } from "@/lib/blotato/accounts";
-import { Platform } from "@prisma/client";
+import { toPrismaPlatform } from "@/lib/blotato/types";
 import { NextRequest, NextResponse } from "next/server";
-
-const VALID_PLATFORMS = new Set(Object.values(Platform));
 
 const ACCOUNTS_URL = "/dashboard/accounts";
 
@@ -37,14 +35,16 @@ export async function GET(req: NextRequest) {
 
   try {
     const account = await getAccount(accountId);
-    if (!VALID_PLATFORMS.has(account.platform as Platform)) {
+    const platform = toPrismaPlatform(account.platform);
+
+    if (!platform) {
       return NextResponse.redirect(
         new URL(`${ACCOUNTS_URL}?error=invalid_platform`, req.url),
         302
       );
     }
-    const platform = account.platform as Platform;
-    const platformId = account.platformId ?? accountId;
+
+    const platformId = account.id;
 
     await prisma.socialAccount.upsert({
       where: {
@@ -70,5 +70,5 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  return NextResponse.redirect(new URL(ACCOUNTS_URL, req.url), 302);
+  return NextResponse.redirect(new URL(`${ACCOUNTS_URL}?success=true`, req.url), 302);
 }

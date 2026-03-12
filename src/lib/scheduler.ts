@@ -94,6 +94,7 @@ async function publishOne(post: DuePost, now: Date): Promise<void> {
     const { blotatoPostId } = await publishPost(
       post.socialAccount.blotatoAccountId ?? "",
       post.content,
+      post.socialAccount.platform,
       post.mediaUrls,
     );
     await prisma.post.update({
