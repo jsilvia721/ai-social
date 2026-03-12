@@ -219,4 +219,25 @@ describe("buildMergeGroups", () => {
     const groups = buildMergeGroups([]);
     expect(groups.size).toBe(0);
   });
+
+  it("breaks ties by earliest firstSeenAt when counts are equal", () => {
+    const rows = [
+      makeRow({
+        message: "Error 100", source: "SERVER",
+        count: 5,
+        firstSeenAt: new Date("2026-03-01"),
+      }),
+      makeRow({
+        message: "Error 200", source: "SERVER",
+        count: 5,
+        firstSeenAt: new Date("2026-01-01"),
+      }),
+    ];
+
+    const groups = buildMergeGroups(rows);
+    const group = [...groups.values()][0];
+
+    // Survivor should be the one with earliest firstSeenAt
+    expect(group.survivor.firstSeenAt).toEqual(new Date("2026-01-01"));
+  });
 });

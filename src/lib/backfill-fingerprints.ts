@@ -1,15 +1,18 @@
 import crypto from "crypto";
 import { normalizeMessage } from "@/lib/normalize-error";
 
+export type ErrorReportSource = "SERVER" | "CLIENT";
+export type ErrorReportStatus = "NEW" | "ISSUE_CREATED" | "RESOLVED" | "IGNORED";
+
 export interface ErrorReportRow {
   id: string;
   fingerprint: string;
   message: string;
-  source: string;
+  source: ErrorReportSource;
   count: number;
   firstSeenAt: Date;
   lastSeenAt: Date;
-  status: string;
+  status: ErrorReportStatus;
   githubIssueNumber: number | null;
 }
 
@@ -20,7 +23,7 @@ export interface MergeGroup {
   mergedCount: number;
   mergedFirstSeenAt: Date;
   mergedLastSeenAt: Date;
-  mergedStatus: string;
+  mergedStatus: ErrorReportStatus;
   mergedGithubIssueNumber: number | null;
 }
 
@@ -51,9 +54,14 @@ export function buildMergeGroups(
   const groups = new Map<string, MergeGroup>();
 
   for (const [fp, groupRows] of byFingerprint) {
-    // Sort by count descending — highest count is the survivor
-    const sorted = [...groupRows].sort((a, b) => b.count - a.count);
+    // Sort by count descending, then earliest firstSeenAt for tie-breaking
+    const sorted = [...groupRows].sort(
+      (a, b) =>
+        b.count - a.count ||
+        a.firstSeenAt.getTime() - b.firstSeenAt.getTime()
+    );
     const survivor = sorted[0];
+    if (!survivor) throw new Error("Invariant: merge group cannot be empty");
     const duplicates = sorted.slice(1);
 
     const mergedCount = groupRows.reduce((sum, r) => sum + r.count, 0);

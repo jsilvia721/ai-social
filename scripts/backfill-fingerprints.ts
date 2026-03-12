@@ -10,8 +10,8 @@
 
 import { prisma } from "../src/lib/db";
 import {
-  computeFingerprint,
   buildMergeGroups,
+  type ErrorReportRow,
 } from "../src/lib/backfill-fingerprints";
 
 const dryRun = process.argv.includes("--dry-run");
@@ -45,7 +45,7 @@ async function main() {
     return;
   }
 
-  const groups = buildMergeGroups(rows);
+  const groups = buildMergeGroups(rows as ErrorReportRow[]);
 
   // Count stats
   let updatedCount = 0;
@@ -106,9 +106,16 @@ async function main() {
   console.log("\nExecuting migration…");
 
   await prisma.$transaction(async (tx) => {
-    // Step 1: Set all fingerprints to temporary values to avoid unique constraint
+    // Filter to groups that actually need changes
+    const changedGroups = [...groups.values()].filter(
+      (g) =>
+        g.survivor.fingerprint !== g.newFingerprint ||
+        g.duplicates.length > 0
+    );
+
+    // Step 1: Set fingerprints to temporary values to avoid unique constraint
     // violations during the migration. Use "temp:" prefix + old id.
-    for (const group of groups.values()) {
+    for (const group of changedGroups) {
       await tx.errorReport.update({
         where: { id: group.survivor.id },
         data: { fingerprint: `temp:${group.survivor.id}` },
@@ -116,7 +123,7 @@ async function main() {
     }
 
     // Step 2: Delete duplicates and update survivors
-    for (const group of groups.values()) {
+    for (const group of changedGroups) {
       // Delete duplicates
       if (group.duplicates.length > 0) {
         await tx.errorReport.deleteMany({
