@@ -13,6 +13,26 @@ function buildConnectSrc(): string {
       const hostname = new URL(s3PublicUrl).hostname;
       sources.push(`https://${hostname}`);
       hasSpecificHost = true;
+
+      // AWS S3 presigned URLs may use either regional
+      // (bucket.s3.us-east-1.amazonaws.com) or non-regional
+      // (bucket.s3.amazonaws.com) hostnames. Allow both variants so
+      // browser uploads via presigned URLs aren't blocked by CSP.
+      const regionalMatch = hostname.match(
+        /^(.+)\.s3\.([a-z0-9-]+)\.amazonaws\.com$/
+      );
+      const nonRegionalMatch = hostname.match(
+        /^(.+)\.s3\.amazonaws\.com$/
+      );
+      if (regionalMatch) {
+        // Also allow the non-regional variant
+        sources.push(`https://${regionalMatch[1]}.s3.amazonaws.com`);
+      } else if (nonRegionalMatch) {
+        // Also allow the regional variant (us-east-1 is the default)
+        sources.push(
+          `https://${nonRegionalMatch[1]}.s3.us-east-1.amazonaws.com`
+        );
+      }
     } catch {
       // Invalid URL — fall through to wildcard patterns
     }
