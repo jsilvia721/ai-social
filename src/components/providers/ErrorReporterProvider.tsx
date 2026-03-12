@@ -9,7 +9,7 @@ export function ErrorReporterProvider({
   children: React.ReactNode;
 }) {
   useEffect(() => {
-    const cleanup = initErrorReporter();
+    const cleanup = initErrorReporter({ captureConsoleErrors: true });
     return cleanup;
   }, []);
 

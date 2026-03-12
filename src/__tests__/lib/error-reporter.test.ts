@@ -127,7 +127,7 @@ describe("error-reporter", () => {
       console.error = originalConsoleError;
     });
 
-    it("console.error wrapper ignores non-Error arguments", () => {
+    it("console.error wrapper captures string arguments", () => {
       const originalConsoleError = console.error;
       const mockOriginal = jest.fn();
       console.error = mockOriginal;
@@ -137,11 +137,58 @@ describe("error-reporter", () => {
         debounceMs: 100,
       });
 
-      console.error("just a string warning");
+      console.error("something failed");
       jest.advanceTimersByTime(100);
 
-      expect(mockOriginal).toHaveBeenCalledWith("just a string warning");
+      expect(mockOriginal).toHaveBeenCalledWith("something failed");
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.message).toBe("something failed");
+      expect(body.source).toBe("CLIENT");
+
+      cleanup();
+      console.error = originalConsoleError;
+    });
+
+    it("console.error wrapper filters out React Warning: strings", () => {
+      const originalConsoleError = console.error;
+      const mockOriginal = jest.fn();
+      console.error = mockOriginal;
+
+      const cleanup = initErrorReporter({
+        captureConsoleErrors: true,
+        debounceMs: 100,
+      });
+
+      console.error("Warning: Each child in a list should have a unique key");
+      jest.advanceTimersByTime(100);
+
+      expect(mockOriginal).toHaveBeenCalledWith(
+        "Warning: Each child in a list should have a unique key"
+      );
       expect(mockFetch).not.toHaveBeenCalled();
+
+      cleanup();
+      console.error = originalConsoleError;
+    });
+
+    it("console.error wrapper joins multiple non-Error string arguments", () => {
+      const originalConsoleError = console.error;
+      const mockOriginal = jest.fn();
+      console.error = mockOriginal;
+
+      const cleanup = initErrorReporter({
+        captureConsoleErrors: true,
+        debounceMs: 100,
+      });
+
+      console.error("failed to load", "resource", 404);
+      jest.advanceTimersByTime(100);
+
+      expect(mockOriginal).toHaveBeenCalledWith("failed to load", "resource", 404);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.message).toBe("failed to load resource 404");
 
       cleanup();
       console.error = originalConsoleError;
