@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { reportError } from "@/lib/error-reporter";
 
 export default function Error({
   error,
@@ -10,18 +11,7 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    fetch("/api/errors", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: error.message,
-        stack: error.stack,
-        source: "CLIENT",
-        url: window.location.href,
-      }),
-    }).catch(() => {
-      // Silently ignore reporting failures
-    });
+    reportError(error);
   }, [error]);
 
   return (
