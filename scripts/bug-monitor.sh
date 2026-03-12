@@ -28,7 +28,7 @@ MIN_COUNT_THRESHOLD=1      # skip errors seen fewer than this many times (unless
 COOLDOWN_SECONDS=1800      # don't re-check the same fingerprint within this window (CloudWatch only)
 LOG_DIR="./logs/bug-monitor"
 LABEL_BUG="bug-report"
-LABEL_READY="claude-ready"
+LABEL_TRIAGE="needs-triage"
 
 # User-specified log groups (empty = auto-discover)
 declare -a LOG_GROUPS=()
@@ -258,14 +258,14 @@ EOF
 
   if [ "$DRY_RUN" = true ]; then
     log "[DRY RUN] Would create issue: ${title}"
-    log "[DRY RUN] Labels: ${LABEL_BUG}, ${LABEL_READY}"
+    log "[DRY RUN] Labels: ${LABEL_BUG}, ${LABEL_TRIAGE}"
     return
   fi
 
   local issue_url
   issue_url=$(gh issue create \
     --title "$title" \
-    --label "${LABEL_BUG},${LABEL_READY}" \
+    --label "${LABEL_BUG},${LABEL_TRIAGE}" \
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
