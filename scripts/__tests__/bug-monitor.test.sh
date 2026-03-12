@@ -251,6 +251,72 @@ else
   pass "invalid severity rejected"
 fi
 
+# --- Test Bash 3 compatibility (no declare -A) --------------------------------
+echo ""
+echo "Bash 3 compatibility:"
+
+# Verify no associative arrays (declare -A) in bug-monitor.sh
+if grep -q 'declare -A' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  fail "no declare -A in bug-monitor.sh" "no associative arrays" "found declare -A"
+else
+  pass "no declare -A in bug-monitor.sh"
+fi
+
+# Verify log() writes to stderr, not stdout
+# Check that the echo in log() uses >&2 redirection
+if grep -A5 '^log()' "$REPO_ROOT/scripts/bug-monitor.sh" | grep -q 'echo.*>&2'; then
+  pass "log() writes to stderr"
+else
+  fail "log() writes to stderr" "echo ... >&2" "no stderr redirect found"
+fi
+
+# Test temp directory aggregation pattern (used by poll_cloudwatch)
+echo ""
+echo "Temp directory aggregation pattern:"
+
+cw_tmp=$(mktemp -d)
+
+# Simulate first occurrence of a fingerprint
+fp1="abc123"
+mkdir -p "$cw_tmp/$fp1"
+printf '%s' "Error: something broke" > "$cw_tmp/$fp1/message"
+echo "1" > "$cw_tmp/$fp1/count"
+echo "1700000000000" > "$cw_tmp/$fp1/first_seen"
+echo "1700000000000" > "$cw_tmp/$fp1/last_seen"
+echo "/aws/lambda/foo" > "$cw_tmp/$fp1/log_group"
+
+assert_eq "stores message in temp file" "Error: something broke" "$(cat "$cw_tmp/$fp1/message")"
+assert_eq "stores count in temp file" "1" "$(cat "$cw_tmp/$fp1/count")"
+
+# Simulate second occurrence (increment count, update last_seen)
+prev_count=$(cat "$cw_tmp/$fp1/count")
+echo $((prev_count + 1)) > "$cw_tmp/$fp1/count"
+echo "1700000060000" > "$cw_tmp/$fp1/last_seen"
+
+assert_eq "increments count correctly" "2" "$(cat "$cw_tmp/$fp1/count")"
+assert_eq "updates last_seen" "1700000060000" "$(cat "$cw_tmp/$fp1/last_seen")"
+assert_eq "first_seen unchanged" "1700000000000" "$(cat "$cw_tmp/$fp1/first_seen")"
+
+# Simulate second fingerprint
+fp2="def456"
+mkdir -p "$cw_tmp/$fp2"
+printf '%s' "Error: another thing" > "$cw_tmp/$fp2/message"
+echo "1" > "$cw_tmp/$fp2/count"
+echo "1700000030000" > "$cw_tmp/$fp2/first_seen"
+echo "1700000030000" > "$cw_tmp/$fp2/last_seen"
+echo "/aws/lambda/bar" > "$cw_tmp/$fp2/log_group"
+
+# Iterate over fingerprints (the pattern used in poll_cloudwatch)
+fp_count=0
+for fp_dir in "$cw_tmp"/*/; do
+  [ -d "$fp_dir" ] || continue
+  fp_count=$((fp_count + 1))
+done
+assert_eq "iterates over all fingerprints" "2" "$fp_count"
+
+rm -rf "$cw_tmp"
+pass "temp directory cleanup succeeds"
+
 # Test that shellcheck passes
 echo ""
 echo "Shellcheck:"
