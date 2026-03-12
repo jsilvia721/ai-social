@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Copy, Check, Upload, Calendar, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { reportError } from "@/lib/error-reporter";
 
 type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK" | "TIKTOK" | "YOUTUBE";
 type BriefFormat = "TEXT" | "IMAGE" | "CAROUSEL" | "VIDEO";
@@ -137,6 +138,8 @@ export function FulfillmentPanel({
         setMediaUrls((prev) => [...prev, publicUrl]);
       }
     } catch (err) {
+      const file = files?.length ? files[0] : undefined;
+      reportError(err, { url: window.location.href, metadata: { type: "UPLOAD", method: "presigned", fileType: file?.type, fileSize: file?.size } });
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setIsUploading(false);

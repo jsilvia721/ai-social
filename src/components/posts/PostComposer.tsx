@@ -16,6 +16,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X, Film, Copy, Wand2 } from "lucide-react";
 import type { Platform } from "@/types";
+import { reportError } from "@/lib/error-reporter";
 
 const CHAR_LIMITS: Partial<Record<Platform, number>> = {
   TWITTER: 280,
@@ -238,6 +239,7 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
       setImagePrompt("");
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return;
+      reportError(err, { url: window.location.href, metadata: { type: "IMAGE_GENERATION" } });
       setError(err instanceof Error ? err.message : "Image generation failed.");
     } finally {
       setIsGeneratingImage(false);
@@ -313,6 +315,8 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
       if (err instanceof Error && err.message === "Upload cancelled") {
         // Don't show error for intentional cancellation
       } else {
+        const file = files[0];
+        reportError(err, { url: window.location.href, metadata: { type: "UPLOAD", method: "presigned", fileType: file?.type, fileSize: file?.size } });
         setError(err instanceof Error ? err.message : "Upload failed.");
       }
     } finally {
