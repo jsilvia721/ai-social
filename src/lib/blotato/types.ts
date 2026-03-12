@@ -8,6 +8,11 @@ export const BlotatoAccountSchema = z.object({
   username: z.string(),
 });
 
+/** Blotato API wraps account lists in { items: [...] } */
+export const BlotatoAccountListSchema = z.object({
+  items: z.array(BlotatoAccountSchema),
+});
+
 export const BlotatoPublishResultSchema = z.object({
   postSubmissionId: z.string(),
 });

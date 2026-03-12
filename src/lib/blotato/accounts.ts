@@ -1,8 +1,6 @@
-import { z } from "zod";
-import { blotatoFetch } from "./client";
-import { BlotatoApiError } from "./client";
+import { blotatoFetch, BlotatoApiError } from "./client";
 import {
-  BlotatoAccountSchema,
+  BlotatoAccountListSchema,
   type BlotatoAccount,
 } from "./types";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
@@ -13,7 +11,8 @@ import {
 
 export async function listAccounts(): Promise<BlotatoAccount[]> {
   if (shouldMockExternalApis()) return mockListAccounts();
-  return blotatoFetch("/users/me/accounts", z.array(BlotatoAccountSchema));
+  const response = await blotatoFetch("/users/me/accounts", BlotatoAccountListSchema);
+  return response.items;
 }
 
 export async function getAccount(id: string): Promise<BlotatoAccount> {
