@@ -4,7 +4,7 @@ test.describe("Accounts page (authenticated)", () => {
   test("accounts page loads with the heading", async ({ page }) => {
     await page.goto("/dashboard/accounts");
     await expect(page).not.toHaveURL(/auth\/signin/);
-    await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toBeVisible();
   });
 
   test("imported accounts section is rendered", async ({ page }) => {
