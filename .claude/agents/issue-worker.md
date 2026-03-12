@@ -92,7 +92,11 @@ This is where you save budget on simpler work:
   - If schema changes: `data-integrity-guardian`
   - If deployment impact: `deployment-verification-agent`
 
-**How to launch reviews:** Use the Agent tool with the appropriate `subagent_type` from the compound-engineering review agents. Run them in parallel. Fix any issues they surface, then re-run ci:check.
+**How to launch reviews:** Use the Agent tool with the appropriate `subagent_type` from the compound-engineering review agents. Run them in parallel.
+
+**BLOCKING REQUIREMENT:** Do NOT proceed to Step 5 until ALL launched review agents have returned results. Wait for every single one. If a review agent fails or times out, re-launch it exactly once. If it fails a second time, record its status as "failed after retry" — never leave any agent as "pending."
+
+Fix any issues the reviews surface, then re-run ci:check.
 
 ## Step 5: Create the PR
 
@@ -113,8 +117,14 @@ Closes #<issue-number>
 ## Test plan
 <how to verify this works>
 
-## Review agents used
-<list which review subagents ran, or "Self-review only" for trivial>
+## Review results
+<!-- For trivial issues use: "Self-review only (trivial)" -->
+<!-- For moderate/complex issues, list EVERY agent launched with its final status. -->
+<!-- Each agent MUST have one of: a findings summary, "no issues found", or "failed after retry". -->
+<!-- NEVER write "pending" — all agents must have completed before creating the PR. -->
+| Agent | Result |
+|-------|--------|
+| `<agent-name>` | <findings summary OR "no issues found" OR "failed after retry"> |
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
@@ -129,7 +139,7 @@ Comment on the issue with a link to the PR and a brief summary of what was done.
 gh issue comment <number> --body "PR created: <pr-url>
 **What was done:** <1-2 sentences>
 **Tests:** <pass/fail summary>
-**Review:** <which agents reviewed>"
+**Review:** <final status of each review agent, or 'Self-review only' for trivial — never 'pending'>"
 ```
 
 ## Rules
