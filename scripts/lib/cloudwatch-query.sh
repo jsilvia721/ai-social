@@ -57,6 +57,22 @@ cloudwatch_query_errors() {
     '.[] | . + {logGroup: $lg}' 2>/dev/null || true
 }
 
+# Normalize dynamic values (UUIDs, IDs, timestamps, numbers, query strings)
+# to stable placeholders for consistent fingerprinting.
+# Must match the TypeScript normalizeMessage() from issue #113.
+normalize_message() {
+  echo "$1" | sed -E \
+    -e 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<UUID>/g' \
+    -e 's/(^|[^a-zA-Z0-9])([a-z][a-z0-9]{24,})([^a-zA-Z0-9]|$)/\1<ID>\3/g' \
+    -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z?/<TIMESTAMP>/g' \
+    -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}/<TIMESTAMP>/g' \
+    -e 's/(^|[^a-zA-Z0-9_./:-])[0-9]+([^a-zA-Z0-9_./:-]|$)/\1<N>\2/g' \
+    -e 's/(^|[^a-zA-Z0-9_./:-])[0-9]+([^a-zA-Z0-9_./:-]|$)/\1<N>\2/g' \
+    -e 's/\?[^ ]*//g' \
+    -e 's/[[:space:]]+/ /g' \
+    -e 's/^ //;s/ $//'
+}
+
 # Extract a concise error summary from a log message.
 # Strips timestamps, request IDs, and truncates to ~120 chars.
 #
