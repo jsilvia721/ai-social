@@ -17,6 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X, Film, Copy, Wand2 } from "lucide-react";
 import type { Platform } from "@/types";
 import { reportError } from "@/lib/error-reporter";
+import { isVideoUrl, isVideoFile, VIDEO_EXTENSIONS } from "@/lib/media";
 
 const CHAR_LIMITS: Partial<Record<Platform, number>> = {
   TWITTER: 280,
@@ -32,19 +33,8 @@ const PLATFORM_LABELS: Record<Platform, string> = {
 
 const VIDEO_PUBLISHING_PLATFORMS = new Set<Platform>(["TWITTER", "INSTAGRAM", "FACEBOOK", "TIKTOK", "YOUTUBE"]);
 
-const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
-
 const UPLOAD_TIMEOUT_MS = 300_000; // 5 minutes
 const UPLOAD_MAX_RETRIES = 1;
-
-function isVideoUrl(url: string): boolean {
-  const ext = url.slice(url.lastIndexOf(".")).toLowerCase();
-  return VIDEO_EXTENSIONS.has(ext);
-}
-
-function isVideoFile(file: File): boolean {
-  return file.type.startsWith("video/");
-}
 
 /** Format a Date as YYYY-MM-DDTHH:mm in local time (for datetime-local inputs). */
 function toLocalDatetimeString(date: Date): string {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Copy, Check, Upload, Calendar, Loader2 } from "lucide-react";
+import { X, Copy, Check, Upload, Calendar, Loader2, Film } from "lucide-react";
+import { isVideoUrl } from "@/lib/media";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { reportError } from "@/lib/error-reporter";
@@ -291,12 +292,27 @@ export function FulfillmentPanel({
           {mediaUrls.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-3">
               {mediaUrls.map((url, i) => (
-                <div key={i} className="relative group">
-                  <img
-                    src={url}
-                    alt={`Upload ${i + 1}`}
-                    className="h-20 w-20 rounded-lg object-cover border border-zinc-700"
-                  />
+                <div key={i} className={`relative group ${isVideoUrl(url) ? "w-full" : ""}`}>
+                  {isVideoUrl(url) ? (
+                    url.endsWith(".mov") ? (
+                      <div className="w-full rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center gap-2 py-6">
+                        <Film className="h-5 w-5 text-zinc-500" />
+                        <span className="text-xs text-zinc-400">{url.split("/").pop()}</span>
+                      </div>
+                    ) : (
+                      <video
+                        src={url}
+                        className="w-full rounded-lg max-h-40 border border-zinc-700"
+                        controls
+                      />
+                    )
+                  ) : (
+                    <img
+                      src={url}
+                      alt={`Upload ${i + 1}`}
+                      className="h-20 w-20 rounded-lg object-cover border border-zinc-700"
+                    />
+                  )}
                   <button
                     onClick={() => setMediaUrls((prev) => prev.filter((_, j) => j !== i))}
                     className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-zinc-700 text-zinc-300 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
