@@ -329,6 +329,9 @@ assert_eq "replaces UUID with <UUID>" "Error for user <UUID> failed" "$result"
 result=$(normalize_message "a]550e8400-e29b-41d4-a716-446655440000[b")
 assert_eq "replaces UUID in brackets" "a]<UUID>[b" "$result"
 
+result=$(normalize_message "Error for 550E8400-E29B-41D4-A716-446655440000")
+assert_eq "replaces uppercase UUID" "Error for <UUID>" "$result"
+
 echo ""
 echo "CUID/nanoid normalization:"
 result=$(normalize_message "Post clbzgxkja0000qwer12345678 not found")
@@ -359,6 +362,9 @@ assert_eq "replaces standalone number with <N>" "Failed after <N> retries" "$res
 
 result=$(normalize_message "Error 500 at line 123")
 assert_eq "replaces multiple numbers" "Error <N> at line <N>" "$result"
+
+result=$(normalize_message "Error 500 500 at line 10")
+assert_eq "replaces consecutive numbers" "Error <N> <N> at line <N>" "$result"
 
 # Numbers in identifiers should NOT be replaced
 result=$(normalize_message "TypeError: Cannot read property")
