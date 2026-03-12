@@ -90,7 +90,7 @@ trap cleanup SIGINT SIGTERM
 log() {
   local timestamp
   timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-  echo "[bug-monitor ${timestamp}] $*"
+  echo "[bug-monitor ${timestamp}] $*" >&2
   echo "[bug-monitor ${timestamp}] $*" >> "$LOG_DIR/daemon.log" 2>/dev/null || true
 }
 
