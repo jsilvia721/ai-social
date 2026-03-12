@@ -270,3 +270,25 @@ model StrategyDigest {
   @@unique([businessId, weekOf])
   @@index([businessId, createdAt])
 }
+
+// ── Error Tracking ──────────────────────────────────────────────────────────
+
+model ErrorReport {
+  id                String   @id @default(cuid())
+  fingerprint       String   @unique          // SHA-256 hash of normalized error message + source
+  message           String                     // Error message
+  stack             String?  @db.Text          // Stack trace if available
+  source            String                     // "SERVER" or "CLIENT"
+  url               String?                    // URL where error occurred (page or API route)
+  metadata          Json?                      // Additional context (user agent, request info, etc.)
+  count             Int      @default(1)       // How many times this error has been seen
+  firstSeenAt       DateTime @default(now())
+  lastSeenAt        DateTime @default(now())
+  status            String   @default("NEW")   // NEW, ISSUE_CREATED, RESOLVED, IGNORED
+  githubIssueNumber Int?                        // Linked GitHub issue number
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status, lastSeenAt])
+  @@index([source, status])
+}
