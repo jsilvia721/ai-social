@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Suspense } from "react";
 import { AccountCard } from "@/components/accounts/AccountCard";
+import { BlotatoSyncSection } from "@/components/accounts/BlotatoSyncSection";
+import { Separator } from "@/components/ui/separator";
 import type { Platform } from "@/types";
-
-const PLATFORMS: Platform[] = ["TWITTER", "INSTAGRAM", "FACEBOOK", "TIKTOK", "YOUTUBE"];
 
 interface Account {
   id: string;
@@ -17,7 +16,6 @@ interface Account {
 }
 
 function AccountsContent() {
-  const searchParams = useSearchParams();
   const { data: session } = useSession();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [notification, setNotification] = useState<{
@@ -27,28 +25,6 @@ function AccountsContent() {
 
   const activeBusinessId = (session?.user as { id: string; activeBusinessId?: string | null })
     ?.activeBusinessId;
-
-  const successParam = searchParams.get("success");
-  const errorParam = searchParams.get("error");
-
-  useEffect(() => {
-    if (successParam) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setNotification({ type: "success", message: "Account connected successfully." });
-    } else if (errorParam) {
-      const errorMessages: Record<string, string> = {
-        connect: "Failed to connect account. Please try again.",
-        not_on_blotato: "No matching account found on Blotato. Please connect the account on blotato.com first, then try again.",
-        invalid_platform: "Unsupported platform returned by Blotato.",
-        state_mismatch: "OAuth state mismatch — please try again.",
-        account_claimed: "This account is already connected to another workspace.",
-      };
-      setNotification({
-        type: "error",
-        message: errorMessages[errorParam] ?? `Failed to connect account (${errorParam}). Please try again.`,
-      });
-    }
-  }, [successParam, errorParam]);
 
   const fetchAccounts = useCallback(async () => {
     if (!activeBusinessId) return;
@@ -74,15 +50,17 @@ function AccountsContent() {
     }
   }
 
-  const getAccount = (platform: Platform) =>
-    accounts.find((a) => a.platform === platform);
+  function handleImportComplete() {
+    fetchAccounts();
+    setNotification({ type: "success", message: "Accounts imported successfully." });
+  }
 
   if (!activeBusinessId) {
     return (
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-zinc-50">Accounts</h1>
-          <p className="text-zinc-400 mt-1">Connect your social media accounts to start posting.</p>
+          <p className="text-zinc-400 mt-1">Import your social media accounts from Blotato.</p>
         </div>
         <div className="rounded-lg border border-zinc-700 bg-zinc-800 px-6 py-8 text-center">
           <p className="text-zinc-400">
@@ -100,7 +78,7 @@ function AccountsContent() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-zinc-50">Accounts</h1>
-        <p className="text-zinc-400 mt-1">Connect social media accounts to this workspace via Blotato.</p>
+        <p className="text-zinc-400 mt-1">Import your social media accounts from Blotato.</p>
       </div>
 
       {notification && (
@@ -115,29 +93,31 @@ function AccountsContent() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {PLATFORMS.map((platform) => (
-          <AccountCard
-            key={platform}
-            platform={platform}
-            businessId={activeBusinessId}
-            account={
-              getAccount(platform)
-                ? {
-                    id: getAccount(platform)!.id,
-                    username: getAccount(platform)!.username,
-                  }
-                : undefined
-            }
-            onDisconnect={handleDisconnect}
-          />
-        ))}
-      </div>
+      <BlotatoSyncSection onImportComplete={handleImportComplete} />
 
-      <p className="text-xs text-zinc-600">
-        Accounts are connected via Blotato, which manages OAuth tokens on your behalf.
-        To connect an account, click &quot;Connect&quot; and follow the Blotato authorization flow.
-      </p>
+      <Separator className="bg-zinc-700" />
+
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold text-zinc-100">Imported Accounts</h2>
+
+        {accounts.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {accounts.map((account) => (
+              <AccountCard
+                key={account.id}
+                platform={account.platform}
+                username={account.username}
+                accountId={account.id}
+                onDisconnect={handleDisconnect}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 px-6 py-8 text-center">
+            <p className="text-sm text-zinc-500">No imported accounts yet. Select accounts above to get started.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

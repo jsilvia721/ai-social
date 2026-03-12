@@ -7,13 +7,10 @@ test.describe("Accounts page (authenticated)", () => {
     await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
   });
 
-  test("unconnected platform connect buttons are rendered", async ({ page }) => {
+  test("imported accounts section is rendered", async ({ page }) => {
     await page.goto("/dashboard/accounts");
-    // Twitter and Instagram are seeded/connected; Facebook, TikTok, YouTube are not.
-    // Unconnected platforms render a link: "Connect {Platform label}" via Blotato.
-    await expect(page.getByRole("link", { name: /connect facebook/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /connect tiktok/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /connect youtube/i })).toBeVisible();
+    // The redesigned page always shows an "Imported Accounts" heading
+    await expect(page.getByRole("heading", { name: /imported accounts/i })).toBeVisible();
   });
 
   test("seeded Twitter account shows as connected", async ({ page }) => {

@@ -8,8 +8,11 @@ import { randomUUID } from "crypto";
 export function mockListAccounts(): BlotatoAccount[] {
   return [
     { id: "mock-twitter-001", platform: "twitter", username: "mock_twitter_user" },
+    { id: "mock-twitter-002", platform: "twitter", username: "mock_twitter_alt" },
     { id: "mock-instagram-001", platform: "instagram", username: "mock_insta_user" },
     { id: "mock-facebook-001", platform: "facebook", username: "Mock Facebook Page" },
+    { id: "mock-tiktok-001", platform: "tiktok", username: "mock_tiktok_user" },
+    { id: "mock-youtube-001", platform: "youtube", username: "Mock YouTube Channel" },
   ];
 }
 
