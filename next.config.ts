@@ -12,6 +12,24 @@ function buildConnectSrc(): string {
     try {
       const hostname = new URL(s3PublicUrl).hostname;
       sources.push(`https://${hostname}`);
+
+      // S3 presigned URLs may use either the regional or non-regional hostname.
+      // e.g. bucket.s3.amazonaws.com vs bucket.s3.us-east-1.amazonaws.com
+      // Add whichever variant is missing so both forms are allowed.
+      const regionalMatch = hostname.match(
+        /^(.+)\.s3\.([a-z0-9-]+)\.amazonaws\.com$/
+      );
+      const globalMatch = hostname.match(/^(.+)\.s3\.amazonaws\.com$/);
+      if (regionalMatch) {
+        // Have regional — also add global
+        sources.push(`https://${regionalMatch[1]}.s3.amazonaws.com`);
+      } else if (globalMatch) {
+        // Have global — also add regional (default to us-east-1)
+        sources.push(
+          `https://${globalMatch[1]}.s3.us-east-1.amazonaws.com`
+        );
+      }
+
       hasSpecificHost = true;
     } catch {
       // Invalid URL — fall through to wildcard patterns

@@ -87,6 +87,24 @@ describe("CSP connect-src with AWS_S3_PUBLIC_URL set (production)", () => {
     expect(connectSrc).not.toContain("https://*.s3.us-east-1.amazonaws.com");
     expect(connectSrc).not.toContain("https://*.s3.amazonaws.com");
   });
+
+  it("should include both regional and non-regional S3 hostnames when URL has no region", async () => {
+    process.env.AWS_S3_PUBLIC_URL =
+      "https://my-bucket.s3.amazonaws.com";
+    const csp = await loadCsp();
+    const connectSrc = extractDirective(csp, "connect-src");
+    expect(connectSrc).toContain("https://my-bucket.s3.amazonaws.com");
+    expect(connectSrc).toContain("https://my-bucket.s3.us-east-1.amazonaws.com");
+  });
+
+  it("should include both regional and non-regional S3 hostnames when URL has region", async () => {
+    process.env.AWS_S3_PUBLIC_URL =
+      "https://my-bucket.s3.us-east-1.amazonaws.com";
+    const csp = await loadCsp();
+    const connectSrc = extractDirective(csp, "connect-src");
+    expect(connectSrc).toContain("https://my-bucket.s3.us-east-1.amazonaws.com");
+    expect(connectSrc).toContain("https://my-bucket.s3.amazonaws.com");
+  });
 });
 
 describe("CSP connect-src without AWS_S3_PUBLIC_URL (local dev)", () => {
