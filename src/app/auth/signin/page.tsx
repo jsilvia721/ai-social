@@ -2,7 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkles } from "lucide-react";
@@ -45,7 +45,23 @@ function GoogleIcon() {
 function SignInContent() {
   const searchParams = useSearchParams();
   const errorCode = searchParams.get("error");
-  const errorMessage = errorCode ? (ERROR_MESSAGES[errorCode] ?? ERROR_MESSAGES.Default) : null;
+  const urlErrorMessage = errorCode ? (ERROR_MESSAGES[errorCode] ?? ERROR_MESSAGES.Default) : null;
+
+  const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const handleSignIn = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
+    try {
+      await signIn("google", { callbackUrl: "/dashboard" });
+    } catch {
+      setFetchError("Failed to connect to the authentication service. Please try again.");
+      setLoading(false);
+    }
+  }, []);
+
+  const errorMessage = fetchError ?? urlErrorMessage;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 px-4">
@@ -68,12 +84,13 @@ function SignInContent() {
             </div>
           )}
           <Button
-            onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+            onClick={handleSignIn}
+            disabled={loading}
             variant="outline"
             className="w-full border-zinc-700 bg-zinc-800 text-zinc-50 hover:bg-zinc-700 hover:text-zinc-50 gap-3"
           >
             <GoogleIcon />
-            Continue with Google
+            {loading ? "Connecting..." : "Continue with Google"}
           </Button>
         </CardContent>
       </Card>
