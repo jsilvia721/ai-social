@@ -3,10 +3,10 @@ import { prisma } from "@/lib/db";
 import { listAccounts } from "@/lib/blotato/accounts";
 import { toPrismaPlatform } from "@/lib/blotato/types";
 import { getServerSession } from "next-auth/next";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 // GET /api/accounts/available — fetch Blotato accounts not yet imported
-export async function GET() {
+export async function GET(_req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
