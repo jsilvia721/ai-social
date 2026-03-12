@@ -1,12 +1,12 @@
 ---
 name: create-issue
-description: Translate natural language task descriptions into well-structured GitHub issues optimized for the issue-worker agent
+description: Translate natural language task descriptions into well-structured GitHub issues optimized for the issue-worker agent, with intelligent decomposition for parallel execution
 allowed-tools: Agent, Bash, Glob, Grep, Read
 ---
 
 # Create Issue for Claude Code Pipeline
 
-The user will describe one or more tasks they want done. Your job is to create GitHub issues that are **optimized for the issue-worker agent** to pick up and execute autonomously.
+The user will describe tasks they want done. Your job is to create GitHub issues that are **optimized for the issue-worker agent** — right-sized for high success rates, minimal context window usage, and maximum parallelism when it makes sense.
 
 **Arguments:** $ARGUMENTS — the user's natural language description of what they want done.
 
@@ -14,27 +14,65 @@ The user will describe one or more tasks they want done. Your job is to create G
 
 ### 1. Understand Intent
 
-Parse the user's request. They may describe:
-- A single task ("add a loading spinner to the posts page")
-- Multiple tasks ("add dark mode toggle and also fix the broken avatar upload")
-- A vague goal ("improve the accounts page performance")
-
-If the request is vague or ambiguous, ask one clarifying question before proceeding. Don't over-ask — make reasonable assumptions and note them in the issue context.
-
-If the request contains multiple independent tasks, create separate issues for each one.
+Parse the user's request. If vague or ambiguous, ask one clarifying question before proceeding. Don't over-ask — make reasonable assumptions and note them in the issue context.
 
 ### 2. Research the Codebase
 
-Before writing the issue, research what the issue-worker will need to know:
+Before making any decomposition decisions, research thoroughly:
 
-- **Find relevant files** — use Glob and Grep to locate the code areas that will be touched. The worker starts cold; giving it precise file paths saves it exploration time and tokens.
-- **Identify existing patterns** — if the task involves creating something new (endpoint, component, test), find a similar existing example the worker should follow.
-- **Check for gotchas** — look at the schema, existing tests, and related code for constraints the worker needs to know about (e.g., "this model has a unique constraint on email", "this component uses server actions not API routes").
-- **Check docs/solutions/** — look for any previously documented solutions relevant to this task.
+- **Find relevant files** — use Glob and Grep to locate the code areas that will be touched. The worker starts cold; giving it precise file paths saves exploration time and tokens.
+- **Identify existing patterns** — find similar existing examples the worker should follow.
+- **Check for gotchas** — schema constraints, test patterns, related code the worker needs to know about.
+- **Check docs/solutions/** — look for previously documented solutions relevant to this task.
+- **Map dependencies** — understand which files and modules depend on each other. This is critical for decomposition decisions.
 
-### 3. Assess Complexity
+### 3. Decomposition Analysis
 
-Based on your research, classify the task:
+This is the key step. Evaluate whether the task should be kept as a single issue or split into multiple parallel issues.
+
+**Run this decision framework:**
+
+#### A. Estimate the scope
+- Count the files that need to change
+- Identify how many distinct "layers" are involved (schema, API, UI, tests)
+- Estimate how many lines of code will change
+
+#### B. Check the splitting criteria
+
+**KEEP AS ONE ISSUE when:**
+- Total scope is ≤5 files and changes are tightly coupled (e.g., "add API endpoint + its tests")
+- Splitting would create dependencies that force serial execution anyway
+- The task is inherently atomic (e.g., a schema migration that multiple features depend on)
+- The overhead of coordinating split issues exceeds the benefit (trivial tasks)
+- Changes touch shared state that would cause merge conflicts if done in parallel
+
+**SPLIT INTO MULTIPLE ISSUES when:**
+- The task spans independent layers that don't share files (e.g., "new API endpoint" + "new UI page that calls it" can be split if the API contract is defined upfront)
+- Multiple independent features are bundled in one request ("add X and also fix Y")
+- The total scope exceeds ~8 files or ~300 lines of changes — larger tasks have lower success rates
+- Parts of the work have different complexity tiers (don't make the worker do a Complex workflow for a task that's 80% Trivial)
+- There are independent subtasks that can genuinely run in parallel without merge conflicts
+
+#### C. If splitting, design the decomposition
+
+For each potential split, verify:
+
+1. **No file overlap** — two parallel issues should NOT modify the same file. If they must, they can't be parallel.
+2. **Clear contract boundaries** — if issue B depends on issue A's output (e.g., a new DB model), define the interface/schema in issue A and reference it in issue B.
+3. **Independent testability** — each issue must be independently testable and pass ci:check on its own.
+4. **Minimal shared context** — each issue should be self-contained. Don't make one issue's instructions reference another issue's details.
+
+#### D. Assign execution strategy
+
+For each issue (whether split or not), determine:
+
+| Strategy | When | Label |
+|----------|------|-------|
+| **Parallel** | No file overlap, no data dependency | `claude-ready` (all at once) |
+| **Sequential** | Issue B depends on Issue A's output | `claude-ready` on A only; note in B: "Depends on #N — label `claude-ready` after #N merges" |
+| **Single** | Keep as one issue | `claude-ready` |
+
+### 4. Assess Complexity (per issue)
 
 | Tier | Criteria |
 |------|----------|
@@ -42,9 +80,9 @@ Based on your research, classify the task:
 | **Moderate** | 2-5 files, clear approach, follows existing patterns |
 | **Complex** | 6+ files, new patterns, schema changes, cross-cutting |
 
-### 4. Write the Issue
+### 5. Write the Issues
 
-Create the issue using `gh issue create` with this exact structure:
+Create each issue using `gh issue create` with this structure:
 
 ```bash
 gh issue create \
@@ -78,35 +116,43 @@ gh issue create \
 
 - `path/to/file.ts` — <what to do with it>
 - `path/to/pattern.ts` — <follow this as a reference>
-- `path/to/schema.prisma` — <if schema changes needed>
 ISSUE_EOF
 )"
 ```
 
-## Quality Standards for Issues
+For **sequential** issues that depend on a prior issue, omit the `claude-ready` label and add a dependency note:
+
+```
+### Dependencies
+
+> ⚠️ **Do not start until #<number> is merged.** This issue depends on <what it provides>.
+> Once merged, add the `claude-ready` label to this issue.
+```
+
+## Quality Standards
 
 The issue-worker reads the issue as its **sole instructions**. A well-written issue:
 
-1. **Starts with a clear objective** — the worker should know exactly what "done" looks like after reading the first paragraph
-2. **Points to specific files** — "follow the pattern in `src/app/api/posts/route.ts`" beats "follow existing API patterns"
+1. **Starts with a clear objective** — the worker should know exactly what "done" looks like after the first paragraph
+2. **Points to specific files** — `src/app/api/posts/route.ts` beats "the posts API"
 3. **Includes behavioral details** — "returns 201 with `{ id, name, createdAt }`" beats "creates the resource"
 4. **Specifies edge cases** — "reject if name is empty (400), reject if duplicate (409)" beats "handle errors"
-5. **Notes schema implications** — if a Prisma model change is needed, say exactly what fields/relations to add
-6. **Keeps scope tight** — one issue = one deliverable. If the user's request is broad, split into multiple issues and note dependencies
-
-## Anti-patterns to Avoid
-
-- **Don't be vague** — "improve performance" → "add database index on `Post.scheduledAt` and cache the dashboard query for 60s"
-- **Don't assume knowledge** — the worker starts fresh each time, it doesn't remember previous issues
-- **Don't overload** — a single issue shouldn't require more than ~10 files of changes. Split it up.
-- **Don't skip acceptance criteria** — every issue needs testable criteria the worker can verify
+5. **Is self-contained** — the worker doesn't read other issues. Everything it needs is in this one issue.
+6. **Stays focused** — one issue = one deliverable, ≤8 files changed, one clear objective
 
 ## After Creating
 
-After creating each issue, report back to the user with:
-- Issue number and title
-- Link to the issue
-- Your complexity assessment
-- Brief summary of what the worker will do
+Report back to the user with a summary table:
 
-If you created multiple issues, list them all and note any ordering dependencies (e.g., "Issue #55 should be done before #56 because it adds the schema the second one depends on").
+```
+| # | Title | Complexity | Strategy | Depends On |
+|---|-------|------------|----------|------------|
+| 55 | Add Widget model and migration | Moderate | Parallel | — |
+| 56 | Add POST /api/widgets endpoint | Moderate | Parallel | — |
+| 57 | Add widget management UI page | Complex | Sequential | #55, #56 |
+```
+
+Include:
+- Your decomposition reasoning (why you split or kept as one)
+- Which issues can run in parallel vs. which must wait
+- Total estimated files touched across all issues
