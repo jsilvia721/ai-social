@@ -36,6 +36,7 @@ function mockReport(overrides: Partial<ErrorReport> = {}): ErrorReport {
     lastSeenAt: new Date(),
     status: "NEW",
     githubIssueNumber: null,
+    acknowledgedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

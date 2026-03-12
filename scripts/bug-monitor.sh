@@ -24,8 +24,8 @@ POLL_INTERVAL=300          # seconds between polls (default: 5 minutes)
 SEVERITY="error"           # minimum severity: "error" or "warn"
 DRY_RUN=false              # if true, print actions without executing
 MAX_ISSUES_PER_CYCLE=5     # safety guard: max issues created per poll cycle
-MIN_COUNT_THRESHOLD=3      # skip errors seen fewer than this many times (unless FATAL)
-COOLDOWN_SECONDS=3600      # don't re-check the same fingerprint within this window
+MIN_COUNT_THRESHOLD=1      # skip errors seen fewer than this many times (unless FATAL)
+COOLDOWN_SECONDS=1800      # don't re-check the same fingerprint within this window (CloudWatch only)
 LOG_DIR="./logs/bug-monitor"
 LABEL_BUG="bug-report"
 LABEL_READY="claude-ready"
@@ -279,7 +279,10 @@ EOF
 
 # --- Process a single error (shared by both poll sources) ---------------------
 # Checks cooldown, count threshold, deduplication, then creates/comments.
-# Echoes "1" if an issue was created, "0" otherwise.
+# Echoes issue number if an issue was created, "0" otherwise.
+# $10 = source_type: "CLOUDWATCH" applies count threshold + file cooldown,
+#                    "DB" skips both (uses acknowledgedAt instead).
+# $11 = existing_issue_number: for DB re-triaged errors with known GitHub issue.
 process_error() {
   local fp="$1"
   local msg="$2"
@@ -290,34 +293,56 @@ process_error() {
   local first_seen="$7"
   local last_seen="$8"
   local metadata="${9:-}"
+  local source_type="${10:-CLOUDWATCH}"
+  local existing_issue_number="${11:-}"
 
-  # Check cooldown
-  if is_in_cooldown "$fp"; then
-    echo "0"
-    return
+  # CloudWatch: check file-based cooldown and count threshold
+  if [ "$source_type" = "CLOUDWATCH" ]; then
+    if is_in_cooldown "$fp"; then
+      echo "0"
+      return
+    fi
+
+    # Check if FATAL (always file regardless of count)
+    local is_fatal=false
+    if echo "$msg" | grep -qE 'FATAL'; then
+      is_fatal=true
+    fi
+
+    # Skip low-count non-fatal errors
+    if [ "$err_count" -lt "$MIN_COUNT_THRESHOLD" ] && [ "$is_fatal" = false ]; then
+      log "Skipping low-count error (${err_count}x): $(echo "$msg" | head -c 80)"
+      set_cooldown "$fp"
+      echo "0"
+      return
+    fi
   fi
 
-  # Check if FATAL (always file regardless of count)
-  local is_fatal=false
-  if echo "$msg" | grep -qE 'FATAL'; then
-    is_fatal=true
+  # For DB re-triaged errors with a known GitHub issue, check if it's still open
+  if [ -n "$existing_issue_number" ]; then
+    local issue_state
+    issue_state=$(gh issue view "$existing_issue_number" --json state -q '.state' 2>/dev/null || echo "UNKNOWN")
+
+    if [ "$issue_state" = "OPEN" ]; then
+      # Issue is still open — comment on it
+      local issue_url
+      issue_url="https://github.com/$(gh repo view --json nameWithOwner -q '.nameWithOwner')/issues/${existing_issue_number}"
+      comment_existing_issue "$issue_url" "$err_count" "$last_seen"
+      [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$fp"
+      echo "0"
+      return
+    fi
+    # Issue is closed — create a new one (fix didn't work)
+    log "Linked issue #${existing_issue_number} is closed, creating new issue for recurrence"
   fi
 
-  # Skip low-count non-fatal errors
-  if [ "$err_count" -lt "$MIN_COUNT_THRESHOLD" ] && [ "$is_fatal" = false ]; then
-    log "Skipping low-count error (${err_count}x): $(echo "$msg" | head -c 80)"
-    set_cooldown "$fp"
-    echo "0"
-    return
-  fi
-
-  # Check for existing issue
+  # Check for existing open issue by fingerprint search
   local existing_url
   existing_url=$(find_existing_issue "$fp")
 
   if [ -n "$existing_url" ]; then
     comment_existing_issue "$existing_url" "$err_count" "$last_seen"
-    set_cooldown "$fp"
+    [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$fp"
     echo "0"
     return
   fi
@@ -328,7 +353,7 @@ process_error() {
     "$msg" "$source" "$stack" "$url" \
     "$err_count" "$first_seen" "$last_seen" "$fp" "$metadata")
 
-  set_cooldown "$fp"
+  [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$fp"
 
   if [ -n "$issue_number" ]; then
     echo "$issue_number"
@@ -418,7 +443,9 @@ poll_cloudwatch() {
       "" \
       "${cw_log_groups[$fp]}" \
       "$(ms_to_human "${cw_first_seen[$fp]}")" \
-      "$(ms_to_human "${cw_last_seen[$fp]}")")
+      "$(ms_to_human "${cw_last_seen[$fp]}")" \
+      "" \
+      "CLOUDWATCH")
 
     if [ "$result" != "0" ]; then
       count=$((count + 1))
@@ -444,13 +471,18 @@ poll_error_reports() {
     return
   fi
 
-  log "Polling ErrorReport table for NEW errors..."
+  log "Polling ErrorReport table for NEW and re-triage errors..."
 
   local query="SELECT json_agg(row_to_json(t)) FROM (
     SELECT fingerprint, message, stack, source, url, metadata::text, count,
-           \"firstSeenAt\"::text as first_seen, \"lastSeenAt\"::text as last_seen
+           \"firstSeenAt\"::text as first_seen, \"lastSeenAt\"::text as last_seen,
+           status, \"githubIssueNumber\" as github_issue_number
     FROM \"ErrorReport\"
     WHERE status = 'NEW'
+       OR (status = 'ISSUE_CREATED'
+           AND \"acknowledgedAt\" IS NOT NULL
+           AND \"lastSeenAt\" > \"acknowledgedAt\"
+           AND \"acknowledgedAt\" < NOW() - INTERVAL '24 hours')
     ORDER BY count DESC, \"lastSeenAt\" DESC
     LIMIT 20
   ) t;"
@@ -459,7 +491,7 @@ poll_error_reports() {
   result=$(psql "$DATABASE_URL" -t -A -c "$query" 2>>"$LOG_DIR/daemon.log" || echo "null")
 
   if [ "$result" = "null" ] || [ -z "$result" ]; then
-    log "No NEW error reports found"
+    log "No actionable error reports found"
     echo "$issues_created"
     return
   fi
@@ -474,6 +506,7 @@ poll_error_reports() {
     fi
 
     local fp msg stack err_source url metadata err_count first_seen last_seen
+    local row_status existing_issue_num
     fp=$(echo "$row" | jq -r '.fingerprint')
     msg=$(echo "$row" | jq -r '.message')
     stack=$(echo "$row" | jq -r '.stack // ""')
@@ -483,11 +516,14 @@ poll_error_reports() {
     err_count=$(echo "$row" | jq -r '.count')
     first_seen=$(echo "$row" | jq -r '.first_seen')
     last_seen=$(echo "$row" | jq -r '.last_seen')
+    row_status=$(echo "$row" | jq -r '.status')
+    existing_issue_num=$(echo "$row" | jq -r '.github_issue_number // ""')
 
     local issue_number
     issue_number=$(process_error \
       "$fp" "$msg" "$err_count" "$err_source" \
-      "$stack" "$url" "$first_seen" "$last_seen" "$metadata")
+      "$stack" "$url" "$first_seen" "$last_seen" "$metadata" \
+      "DB" "$existing_issue_num")
 
     if [ "$issue_number" != "0" ] && [ -n "$issue_number" ]; then
       # Validate inputs before SQL interpolation (prevent injection)
@@ -500,16 +536,32 @@ poll_error_reports() {
         continue
       fi
 
-      # Update ErrorReport status
+      # Update ErrorReport status and set acknowledgedAt
       if [ "$DRY_RUN" = false ]; then
         psql "$DATABASE_URL" -c \
-          "UPDATE \"ErrorReport\" SET status = 'ISSUE_CREATED', \"githubIssueNumber\" = ${issue_number} WHERE fingerprint = '${fp}';" \
+          "UPDATE \"ErrorReport\" SET status = 'ISSUE_CREATED', \"githubIssueNumber\" = ${issue_number}, \"acknowledgedAt\" = NOW() WHERE fingerprint = '${fp}';" \
           2>>"$LOG_DIR/daemon.log" || log "Warning: failed to update ErrorReport for fingerprint ${fp}"
       else
         log "[DRY RUN] Would update ErrorReport status to ISSUE_CREATED for fingerprint ${fp}"
       fi
 
       count=$((count + 1))
+    else
+      # For re-triaged errors that were commented on (not new issue), still update acknowledgedAt
+      if [ "$row_status" = "ISSUE_CREATED" ]; then
+        if ! [[ "$fp" =~ ^[0-9a-f]{64}$ ]]; then
+          log "Error: invalid fingerprint '${fp}', skipping acknowledgedAt update"
+          continue
+        fi
+
+        if [ "$DRY_RUN" = false ]; then
+          psql "$DATABASE_URL" -c \
+            "UPDATE \"ErrorReport\" SET \"acknowledgedAt\" = NOW() WHERE fingerprint = '${fp}';" \
+            2>>"$LOG_DIR/daemon.log" || log "Warning: failed to update acknowledgedAt for fingerprint ${fp}"
+        else
+          log "[DRY RUN] Would update acknowledgedAt for fingerprint ${fp}"
+        fi
+      fi
     fi
   done < <(echo "$result" | jq -c '.[]' 2>/dev/null)
 
