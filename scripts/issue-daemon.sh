@@ -17,7 +17,7 @@ set -euo pipefail
 MAX_WORKERS=1          # max parallel Claude instances
 POLL_INTERVAL=60       # seconds between polls
 MAX_BUDGET=10          # max USD per issue
-MAX_TURNS=50           # max agentic turns per issue
+MAX_TURNS=200          # max agentic turns per issue (TDD + review agents need many turns)
 LABEL_READY="claude-ready"
 LABEL_WIP="claude-wip"
 LABEL_DONE="claude-done"
@@ -73,7 +73,7 @@ run_worker() {
   # Label as in-progress
   gh issue edit "$issue_number" --remove-label "$LABEL_READY" --add-label "$LABEL_WIP" 2>/dev/null || true
 
-  # Run Claude in an isolated worktree
+  # Run Claude in an isolated worktree (--worktree ensures --max-turns applies to the session)
   claude -p "$(cat <<EOF
 You are the issue-worker agent. Implement GitHub issue #${issue_number}.
 
@@ -86,6 +86,7 @@ If you get stuck, comment on the issue and add the label "claude-blocked".
 EOF
 )" \
     --agent "issue-worker" \
+    --worktree \
     --max-turns "$MAX_TURNS" \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Agent,Bash,Edit,Glob,Grep,Read,Write,Skill" \
@@ -93,17 +94,33 @@ EOF
 
   local exit_code=$?
 
-  if [ $exit_code -eq 0 ]; then
-    log "Worker for issue #${issue_number} completed successfully"
+  # Verify a PR was actually created for this issue (regardless of exit code)
+  local pr_url
+  pr_url=$(gh pr list --search "Closes #${issue_number}" --json url -q '.[0].url' 2>/dev/null || echo "")
+  if [ -z "$pr_url" ]; then
+    # Also check for "closes #N" in PR body with issue number in branch name
+    pr_url=$(gh pr list --search "${issue_number}" --json url,body -q ".[] | select(.body | test(\"#${issue_number}\")) | .url" 2>/dev/null | head -1 || echo "")
+  fi
+
+  if [ $exit_code -eq 0 ] && [ -n "$pr_url" ]; then
+    log "Worker for issue #${issue_number} completed successfully (PR: ${pr_url})"
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_DONE" 2>/dev/null || true
   else
-    log "Worker for issue #${issue_number} failed (exit code: $exit_code)"
+    if [ $exit_code -eq 0 ] && [ -z "$pr_url" ]; then
+      log "Worker for issue #${issue_number} exited cleanly but no PR was created (likely hit max turns)"
+    else
+      log "Worker for issue #${issue_number} failed (exit code: $exit_code)"
+    fi
     # Check if Claude already labeled it as blocked
     local labels
     labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
     if ! echo "$labels" | grep -q "$LABEL_BLOCKED"; then
       gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
-      gh issue comment "$issue_number" --body "Claude Code worker exited with code $exit_code. Check logs at \`$log_file\` for details." 2>/dev/null || true
+      local fail_reason="exit code $exit_code"
+      if [ $exit_code -eq 0 ] && [ -z "$pr_url" ]; then
+        fail_reason="no PR created (possible max turns or budget limit)"
+      fi
+      gh issue comment "$issue_number" --body "Claude Code worker finished but did not complete: ${fail_reason}. Check logs at \`$log_file\` for details." 2>/dev/null || true
     fi
   fi
 }
