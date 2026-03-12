@@ -22,6 +22,8 @@ LABEL_READY="claude-ready"
 LABEL_WIP="claude-wip"
 LABEL_DONE="claude-done"
 LABEL_BLOCKED="claude-blocked"
+LABEL_PLAN_REVIEW="claude-plan-review"
+LABEL_APPROVED="claude-approved"
 LOG_DIR="./logs/issue-daemon"
 
 # --- Parse flags --------------------------------------------------------------
@@ -40,16 +42,18 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 mkdir -p "$LOG_DIR"
 
-ACTIVE_PIDS=()
+PID_FILE="$LOG_DIR/.active_pids"
+: > "$PID_FILE"  # truncate on start
 
 cleanup() {
   echo "[daemon] Shutting down..."
-  for pid in "${ACTIVE_PIDS[@]}"; do
+  while IFS= read -r pid; do
     if kill -0 "$pid" 2>/dev/null; then
       echo "[daemon] Stopping worker PID $pid"
       kill "$pid" 2>/dev/null || true
     fi
-  done
+  done < "$PID_FILE"
+  rm -f "$PID_FILE"
   exit 0
 }
 trap cleanup SIGINT SIGTERM
@@ -104,51 +108,131 @@ EOF
   fi
 }
 
-# --- Reap finished workers ----------------------------------------------------
-reap_workers() {
-  local still_active=()
-  for pid in "${ACTIVE_PIDS[@]}"; do
-    if kill -0 "$pid" 2>/dev/null; then
-      still_active+=("$pid")
+# --- Plan executor function ---------------------------------------------------
+run_plan_executor() {
+  local issue_number="$1"
+  local issue_title="$2"
+  local log_file="$LOG_DIR/plan-${issue_number}.log"
+
+  log "Starting plan-executor for issue #${issue_number}: ${issue_title}"
+
+  # Label as in-progress
+  gh issue edit "$issue_number" --remove-label "$LABEL_APPROVED" --add-label "$LABEL_WIP" 2>/dev/null || true
+
+  # Run Claude with plan-executor agent (read-only, no worktree needed)
+  claude -p "$(cat <<EOF
+You are the plan-executor agent. Process approved plan issue #${issue_number}.
+
+Read the full issue with: gh issue view ${issue_number} --json title,body,labels
+
+Follow your agent instructions exactly — parse the plan items, create work issues
+with correct labels and dependencies, post a summary, and close out the plan issue.
+
+If parsing fails, comment on the issue and add the label "claude-blocked".
+EOF
+)" \
+    --agent "plan-executor" \
+    --max-turns "$MAX_TURNS" \
+    --max-budget-usd "$MAX_BUDGET" \
+    --allowedTools "Bash,Glob,Grep,Read" \
+    > "$log_file" 2>&1
+
+  local exit_code=$?
+
+  if [ $exit_code -eq 0 ]; then
+    log "Plan-executor for issue #${issue_number} completed successfully"
+    # plan-executor handles its own label transitions (approved -> done)
+    # but ensure WIP is removed if still present
+    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  else
+    log "Plan-executor for issue #${issue_number} failed (exit code: $exit_code)"
+    local labels
+    labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
+    if ! echo "$labels" | grep -q "$LABEL_BLOCKED"; then
+      gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
+      gh issue comment "$issue_number" --body "Plan-executor exited with code $exit_code. Check logs at \`$log_file\` for details." 2>/dev/null || true
     fi
-  done
-  ACTIVE_PIDS=("${still_active[@]+"${still_active[@]}"}")
+  fi
+}
+
+# --- Worker tracking via PID file ---------------------------------------------
+active_worker_count() {
+  local count=0
+  local tmp
+  tmp=$(mktemp)
+  while IFS= read -r pid; do
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "$pid" >> "$tmp"
+      count=$((count + 1))
+    fi
+  done < "$PID_FILE"
+  mv "$tmp" "$PID_FILE"
+  echo "$count"
 }
 
 # --- Main loop ----------------------------------------------------------------
 log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, turns=$MAX_TURNS)"
-log "Watching for issues labeled '${LABEL_READY}'..."
+log "Watching for issues labeled '${LABEL_APPROVED}' and '${LABEL_READY}'..."
 
 while true; do
-  reap_workers
-
-  available_slots=$(( MAX_WORKERS - ${#ACTIVE_PIDS[@]} ))
+  active=$(active_worker_count)
+  available_slots=$(( MAX_WORKERS - active ))
 
   if [ "$available_slots" -gt 0 ]; then
-    # Fetch up to available_slots issues
-    issues=$(gh issue list \
+    # --- Priority 1: Approved plans (create work issues quickly) ---
+    approved_issues=$(gh issue list \
       --state open \
-      --label "$LABEL_READY" \
+      --label "$LABEL_APPROVED" \
       --limit "$available_slots" \
       --json number,title \
-      -q '.[]' 2>/dev/null || echo "")
+      -q '.[] | @json' 2>/dev/null || echo "")
 
-    if [ -n "$issues" ]; then
-      echo "$issues" | while IFS= read -r issue_json; do
+    if [ -n "$approved_issues" ]; then
+      while IFS= read -r issue_json; do
         number=$(echo "$issue_json" | jq -r '.number')
         title=$(echo "$issue_json" | jq -r '.title')
 
-        # Skip if already being worked on (defensive check)
         wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
         if [ "$wip_check" -gt 0 ]; then
-          log "Skipping issue #${number} (already WIP)"
+          log "Skipping plan #${number} (already WIP)"
           continue
         fi
 
-        run_worker "$number" "$title" &
-        ACTIVE_PIDS+=($!)
-        log "Spawned worker PID $! for issue #${number}"
-      done
+        run_plan_executor "$number" "$title" &
+        echo "$!" >> "$PID_FILE"
+        log "Spawned plan-executor PID $! for issue #${number}"
+      done <<< "$approved_issues"
+
+      # Recalculate available slots after spawning plan executors
+      active=$(active_worker_count)
+      available_slots=$(( MAX_WORKERS - active ))
+    fi
+
+    # --- Priority 2: Ready work issues ---
+    if [ "$available_slots" -gt 0 ]; then
+      issues=$(gh issue list \
+        --state open \
+        --label "$LABEL_READY" \
+        --limit "$available_slots" \
+        --json number,title \
+        -q '.[] | @json' 2>/dev/null || echo "")
+
+      if [ -n "$issues" ]; then
+        while IFS= read -r issue_json; do
+          number=$(echo "$issue_json" | jq -r '.number')
+          title=$(echo "$issue_json" | jq -r '.title')
+
+          wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
+          if [ "$wip_check" -gt 0 ]; then
+            log "Skipping issue #${number} (already WIP)"
+            continue
+          fi
+
+          run_worker "$number" "$title" &
+          echo "$!" >> "$PID_FILE"
+          log "Spawned worker PID $! for issue #${number}"
+        done <<< "$issues"
+      fi
     fi
   else
     log "All $MAX_WORKERS worker slots occupied, waiting..."
