@@ -61,3 +61,6 @@ test-results/
 
 # Git worktrees (parallel Claude Code sessions)
 .worktrees/
+
+# Issue daemon logs
+logs/
