@@ -1,6 +1,10 @@
 import { normalizeMessage } from "@/lib/normalize-error";
 
 describe("normalizeMessage", () => {
+  it("returns empty string for empty input", () => {
+    expect(normalizeMessage("")).toBe("");
+  });
+
   describe("UUID replacement", () => {
     it("replaces UUIDs with <UUID>", () => {
       expect(
