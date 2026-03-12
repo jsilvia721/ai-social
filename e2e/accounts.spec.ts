@@ -7,11 +7,10 @@ test.describe("Accounts page (authenticated)", () => {
     await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
   });
 
-  test("Blotato sync section shows available accounts", async ({ page }) => {
+  test("imported accounts section is rendered", async ({ page }) => {
     await page.goto("/dashboard/accounts");
-    // In mock mode, the sync section fetches available (not-yet-imported) Blotato accounts.
-    // The section header should be visible once loaded.
-    await expect(page.getByText(/available on blotato|all your blotato|no accounts found/i)).toBeVisible();
+    // The redesigned page always shows an "Imported Accounts" heading
+    await expect(page.getByRole("heading", { name: /imported accounts/i })).toBeVisible();
   });
 
   test("seeded Twitter account shows as connected", async ({ page }) => {
