@@ -83,7 +83,17 @@ log() {
   echo "[bug-monitor ${timestamp}] $*" >> "$LOG_DIR/daemon.log" 2>/dev/null || true
 }
 
-# --- Fingerprint generation ---------------------------------------------------
+# --- Helpers ------------------------------------------------------------------
+
+# Convert epoch milliseconds to human-readable timestamp (cross-platform)
+ms_to_human() {
+  local ms="$1"
+  local s=$(( ms / 1000 ))
+  date -d "@${s}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || \
+    date -r "${s}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || \
+    echo "$ms"
+}
+
 # Matches the API algorithm: sha256(source + ':' + message)
 generate_fingerprint() {
   local source="$1"
@@ -256,13 +266,72 @@ EOF
   fi
 }
 
+# --- Process a single error (shared by both poll sources) ---------------------
+# Checks cooldown, count threshold, deduplication, then creates/comments.
+# Echoes "1" if an issue was created, "0" otherwise.
+process_error() {
+  local fp="$1"
+  local msg="$2"
+  local err_count="$3"
+  local source="$4"
+  local stack="${5:-}"
+  local url="${6:-}"
+  local first_seen="$7"
+  local last_seen="$8"
+  local metadata="${9:-}"
+
+  # Check cooldown
+  if is_in_cooldown "$fp"; then
+    echo "0"
+    return
+  fi
+
+  # Check if FATAL (always file regardless of count)
+  local is_fatal=false
+  if echo "$msg" | grep -qE 'FATAL'; then
+    is_fatal=true
+  fi
+
+  # Skip low-count non-fatal errors
+  if [ "$err_count" -lt "$MIN_COUNT_THRESHOLD" ] && [ "$is_fatal" = false ]; then
+    log "Skipping low-count error (${err_count}x): $(echo "$msg" | head -c 80)"
+    set_cooldown "$fp"
+    echo "0"
+    return
+  fi
+
+  # Check for existing issue
+  local existing_url
+  existing_url=$(find_existing_issue "$fp")
+
+  if [ -n "$existing_url" ]; then
+    comment_existing_issue "$existing_url" "$err_count" "$last_seen"
+    set_cooldown "$fp"
+    echo "0"
+    return
+  fi
+
+  # Create new issue
+  local issue_number
+  issue_number=$(create_bug_issue \
+    "$msg" "$source" "$stack" "$url" \
+    "$err_count" "$first_seen" "$last_seen" "$fp" "$metadata")
+
+  set_cooldown "$fp"
+
+  if [ -n "$issue_number" ]; then
+    echo "$issue_number"
+  else
+    echo "0"
+  fi
+}
+
 # --- Poll CloudWatch Logs ----------------------------------------------------
 poll_cloudwatch() {
   local since_ms="$1"
-  local issues_created="$2"  # current count
-  local max_remaining=$(( MAX_ISSUES_PER_CYCLE - issues_created ))
+  local issues_created="$2"
 
-  if [ "$max_remaining" -le 0 ]; then
+  if [ "$issues_created" -ge "$MAX_ISSUES_PER_CYCLE" ]; then
     log "Max issues per cycle reached, skipping CloudWatch poll"
     echo "$issues_created"
     return
@@ -324,65 +393,25 @@ poll_cloudwatch() {
   # Process collected errors
   local count="$issues_created"
   for fp in "${!cw_errors[@]}"; do
-    if [ $((count)) -ge "$MAX_ISSUES_PER_CYCLE" ]; then
+    if [ "$count" -ge "$MAX_ISSUES_PER_CYCLE" ]; then
       log "Max issues per cycle reached, stopping"
       break
     fi
 
-    # Check cooldown
-    if is_in_cooldown "$fp"; then
-      continue
-    fi
+    local result
+    result=$(process_error \
+      "$fp" \
+      "${cw_errors[$fp]}" \
+      "${cw_counts[$fp]}" \
+      "SERVER" \
+      "" \
+      "${cw_log_groups[$fp]}" \
+      "$(ms_to_human "${cw_first_seen[$fp]}")" \
+      "$(ms_to_human "${cw_last_seen[$fp]}")")
 
-    local err_count="${cw_counts[$fp]}"
-    local msg="${cw_errors[$fp]}"
-    local is_fatal=false
-
-    # Check if FATAL
-    if echo "$msg" | grep -qE 'FATAL'; then
-      is_fatal=true
-    fi
-
-    # Skip low-count non-fatal errors
-    if [ "$err_count" -lt "$MIN_COUNT_THRESHOLD" ] && [ "$is_fatal" = false ]; then
-      log "Skipping low-count error (${err_count}x): $(echo "$msg" | head -c 80)"
-      set_cooldown "$fp"
-      continue
-    fi
-
-    # Check for existing issue
-    local existing_url
-    existing_url=$(find_existing_issue "$fp")
-
-    if [ -n "$existing_url" ]; then
-      local ts_human
-      ts_human=$(date -d "@$(( ${cw_last_seen[$fp]} / 1000 ))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || \
-                 date -r "$(( ${cw_last_seen[$fp]} / 1000 ))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || \
-                 echo "${cw_last_seen[$fp]}")
-      comment_existing_issue "$existing_url" "$err_count" "$ts_human"
-    else
-      local first_human last_human
-      first_human=$(date -d "@$(( ${cw_first_seen[$fp]} / 1000 ))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || \
-                    date -r "$(( ${cw_first_seen[$fp]} / 1000 ))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || \
-                    echo "${cw_first_seen[$fp]}")
-      last_human=$(date -d "@$(( ${cw_last_seen[$fp]} / 1000 ))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || \
-                   date -r "$(( ${cw_last_seen[$fp]} / 1000 ))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || \
-                   echo "${cw_last_seen[$fp]}")
-
-      create_bug_issue \
-        "$msg" \
-        "SERVER" \
-        "" \
-        "${cw_log_groups[$fp]}" \
-        "$err_count" \
-        "$first_human" \
-        "$last_human" \
-        "$fp"
-
+    if [ "$result" != "0" ]; then
       count=$((count + 1))
     fi
-
-    set_cooldown "$fp"
   done
 
   echo "$count"
@@ -391,9 +420,8 @@ poll_cloudwatch() {
 # --- Poll ErrorReport table ---------------------------------------------------
 poll_error_reports() {
   local issues_created="$1"
-  local max_remaining=$(( MAX_ISSUES_PER_CYCLE - issues_created ))
 
-  if [ "$max_remaining" -le 0 ]; then
+  if [ "$issues_created" -ge "$MAX_ISSUES_PER_CYCLE" ]; then
     log "Max issues per cycle reached, skipping DB poll"
     echo "$issues_created"
     return
@@ -427,76 +455,42 @@ poll_error_reports() {
 
   local count="$issues_created"
 
-  # Process each error report
-  echo "$result" | jq -c '.[]' 2>/dev/null | while IFS= read -r row; do
-    if [ $((count)) -ge "$MAX_ISSUES_PER_CYCLE" ]; then
+  # Process each error report (use process substitution to avoid subshell)
+  while IFS= read -r row; do
+    if [ "$count" -ge "$MAX_ISSUES_PER_CYCLE" ]; then
       log "Max issues per cycle reached, stopping"
       break
     fi
 
-    local fp msg stack source url metadata err_count first_seen last_seen
+    local fp msg stack err_source url metadata err_count first_seen last_seen
     fp=$(echo "$row" | jq -r '.fingerprint')
     msg=$(echo "$row" | jq -r '.message')
     stack=$(echo "$row" | jq -r '.stack // ""')
-    source=$(echo "$row" | jq -r '.source')
+    err_source=$(echo "$row" | jq -r '.source')
     url=$(echo "$row" | jq -r '.url // ""')
     metadata=$(echo "$row" | jq -r '.metadata // ""')
     err_count=$(echo "$row" | jq -r '.count')
     first_seen=$(echo "$row" | jq -r '.first_seen')
     last_seen=$(echo "$row" | jq -r '.last_seen')
 
-    # Check cooldown
-    if is_in_cooldown "$fp"; then
-      continue
-    fi
+    local issue_number
+    issue_number=$(process_error \
+      "$fp" "$msg" "$err_count" "$err_source" \
+      "$stack" "$url" "$first_seen" "$last_seen" "$metadata")
 
-    local is_fatal=false
-    if echo "$msg" | grep -qE 'FATAL'; then
-      is_fatal=true
-    fi
-
-    # Skip low-count non-fatal errors
-    if [ "$err_count" -lt "$MIN_COUNT_THRESHOLD" ] && [ "$is_fatal" = false ]; then
-      log "Skipping low-count DB error (${err_count}x): $(echo "$msg" | head -c 80)"
-      set_cooldown "$fp"
-      continue
-    fi
-
-    # Check for existing issue
-    local existing_url
-    existing_url=$(find_existing_issue "$fp")
-
-    if [ -n "$existing_url" ]; then
-      comment_existing_issue "$existing_url" "$err_count" "$last_seen"
-    else
-      local issue_number
-      issue_number=$(create_bug_issue \
-        "$msg" \
-        "$source" \
-        "$stack" \
-        "$url" \
-        "$err_count" \
-        "$first_seen" \
-        "$last_seen" \
-        "$fp" \
-        "$metadata")
-
-      if [ -n "$issue_number" ]; then
-        # Update ErrorReport status
-        if [ "$DRY_RUN" = false ]; then
-          psql "$DATABASE_URL" -c \
-            "UPDATE \"ErrorReport\" SET status = 'ISSUE_CREATED', \"githubIssueNumber\" = ${issue_number} WHERE fingerprint = '${fp}';" \
-            2>/dev/null || log "Warning: failed to update ErrorReport for fingerprint ${fp}"
-        else
-          log "[DRY RUN] Would update ErrorReport status to ISSUE_CREATED for fingerprint ${fp}"
-        fi
-
-        count=$((count + 1))
+    if [ "$issue_number" != "0" ] && [ -n "$issue_number" ]; then
+      # Update ErrorReport status
+      if [ "$DRY_RUN" = false ]; then
+        psql "$DATABASE_URL" -c \
+          "UPDATE \"ErrorReport\" SET status = 'ISSUE_CREATED', \"githubIssueNumber\" = ${issue_number} WHERE fingerprint = '${fp}';" \
+          2>/dev/null || log "Warning: failed to update ErrorReport for fingerprint ${fp}"
+      else
+        log "[DRY RUN] Would update ErrorReport status to ISSUE_CREATED for fingerprint ${fp}"
       fi
-    fi
 
-    set_cooldown "$fp"
-  done
+      count=$((count + 1))
+    fi
+  done < <(echo "$result" | jq -c '.[]' 2>/dev/null)
 
   echo "$count"
 }
@@ -527,7 +521,7 @@ while true; do
   local_issues_created=0
   since_ms=$(get_last_poll_ms)
 
-  log "--- Poll cycle start (since=$(date -d "@$(( since_ms / 1000 ))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r "$(( since_ms / 1000 ))" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$since_ms")) ---"
+  log "--- Poll cycle start (since=$(ms_to_human "$since_ms")) ---"
 
   # Poll CloudWatch
   local_issues_created=$(poll_cloudwatch "$since_ms" "$local_issues_created")

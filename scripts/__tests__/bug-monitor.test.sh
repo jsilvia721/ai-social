@@ -196,6 +196,30 @@ fi
 
 rm -rf "$TEST_COOLDOWN_DIR"
 
+# --- Define helper functions from bug-monitor.sh (can't source it directly) ---
+ms_to_human() {
+  local ms="$1"
+  local s=$(( ms / 1000 ))
+  date -d "@${s}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || \
+    date -r "${s}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || \
+    echo "$ms"
+}
+
+# --- Test ms_to_human ---------------------------------------------------------
+echo ""
+echo "ms_to_human (epoch ms to human-readable):"
+
+# Test with a known timestamp: 1700000000000 ms = 2023-11-14 22:13:20 UTC
+# We can't assert the exact output (timezone dependent), but we can check format
+ms_result=$(ms_to_human 1700000000000)
+assert_not_empty "converts epoch ms to non-empty string" "$ms_result"
+# Should contain a date-like pattern (YYYY-MM-DD)
+if echo "$ms_result" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}'; then
+  pass "ms_to_human returns date-formatted string"
+else
+  fail "ms_to_human returns date-formatted string" "YYYY-MM-DD format" "$ms_result"
+fi
+
 # --- Test flag parsing (dry run) ----------------------------------------------
 echo ""
 echo "Script flag parsing:"

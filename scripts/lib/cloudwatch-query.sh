@@ -14,12 +14,6 @@
 
 set -euo pipefail
 
-# Error patterns to match in CloudWatch logs (used as reference; filter strings built inline)
-# shellcheck disable=SC2034
-readonly CW_ERROR_PATTERNS='ERROR|FATAL|Unhandled|TypeError|ReferenceError|BRIEF_FAILED|PUBLISH_FAILED'
-# shellcheck disable=SC2034
-readonly CW_WARN_PATTERNS='WARN|WARNING'
-
 # Discover SST-created Lambda log groups
 # Outputs one log group name per line
 cloudwatch_discover_log_groups() {
