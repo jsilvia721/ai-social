@@ -16,7 +16,14 @@ paths:
 `src/components/**`, `src/cron/**`, `src/lib/auth.ts`, `src/lib/db.ts`, `src/lib/storage.ts`, `src/lib/utils.ts`, pages, layouts, shadcn/ui, providers, types.
 
 ## Mocking
-- Prisma: use `prismaMock` from `@/__tests__/mocks/prisma.ts` (pattern in CLAUDE.md)
+
+**Prisma mock pattern** — copy this exactly:
+```ts
+import { prismaMock } from "@/__tests__/mocks/prisma";
+jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
+beforeEach(() => mockReset(prismaMock));
+```
+
 - HTTP: spy on `global.fetch` — do NOT use `msw` or other interceptors
 - All tests run in `node` environment (not jsdom)
 - `src/cron/*.ts` Lambda handlers are intentionally not unit-tested (thin wrappers)

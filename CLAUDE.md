@@ -94,26 +94,11 @@ Unified publishing via `src/lib/blotato/`. Connect flows in `src/app/api/connect
 
 ## Testing
 
-Tests in `src/__tests__/` mirroring `src/` structure, `node` environment. Coverage: 75% statements/lines/branches, 70% functions. Always create/update tests when modifying covered code. See `.claude/rules/testing.md` for coverage exclusions and setup details.
-
-**Prisma mock pattern** — copy this exactly:
-```ts
-import { prismaMock } from "@/__tests__/mocks/prisma";
-jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
-beforeEach(() => mockReset(prismaMock));
-```
-
-**HTTP mocking:** spy on `global.fetch` — do not use `msw` or other interceptors.
+Tests in `src/__tests__/` mirroring `src/` structure, `node` environment. Coverage: 75% statements/lines/branches, 70% functions. Always create/update tests when modifying covered code. See `.claude/rules/testing.md` for mocking patterns, coverage exclusions, and setup details.
 
 ## Deployment
 
 PRs target `main`. Merges to `main` auto-deploy to staging; production deploy requires manual approval. See `.claude/rules/deployment.md` for CI pipeline, E2E setup, and SST details.
-
-## Design System
-- Dark mode: `class="dark"` on `<html>`
-- Colors: bg-zinc-950 (page), bg-zinc-900 (sidebar), bg-zinc-800 (cards), violet-600 (accent)
-- Platforms: Twitter=sky-400, Instagram=pink-500, Facebook=blue-500, TikTok=zinc-100, YouTube=red-500
-- Status: emerald=published, amber=scheduled, red=failed, zinc=draft
 
 ## Verification Checklist
 
@@ -128,6 +113,9 @@ npx prisma migrate diff \
   --to-schema-datamodel prisma/schema.prisma \
   --exit-code                       # No schema drift
 ```
+
+## Compact Instructions
+When compacting, preserve: current task goal, files modified so far, test results, any user corrections given this session, and the current branch name.
 
 ## Project Config
 project_tracker: github
