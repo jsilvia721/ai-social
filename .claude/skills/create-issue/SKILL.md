@@ -80,54 +80,65 @@ For each issue (whether split or not), determine:
 | **Moderate** | 2-5 files, clear approach, follows existing patterns |
 | **Complex** | 6+ files, new patterns, schema changes, cross-cutting |
 
-### 5. Write the Issues
+### 5. Write the Plan Issue
 
-Create each issue using `gh issue create` with this structure:
+Create a **single plan issue** for human review. This issue contains all the work items structured for the plan-executor agent to parse after approval.
 
 ```bash
 gh issue create \
-  --title "<imperative verb> <concise description>" \
-  --label "claude-ready" \
+  --title "Plan: <concise description of the overall task>" \
+  --label "claude-plan-review" \
   --body "$(cat <<'ISSUE_EOF'
-### Objective
+### Plan: <title>
 
-<What should be accomplished. Be specific about the desired end state. Include behavioral details — what the user should see, what the API should return, what the test should assert. Don't leave room for interpretation.>
+<High-level description of the task and what will be accomplished.>
 
-### Context
+### Research Summary
 
-<Background the worker needs. Include:>
-- <Existing patterns to follow (with file paths)>
-- <Architectural constraints or conventions>
-- <Any gotchas discovered during research>
-- <Related docs/solutions if applicable>
+<Key findings from codebase exploration — patterns found, constraints identified, files involved.>
 
-### Acceptance Criteria
+<!-- To edit this plan: modify titles, objectives, criteria, or reorder items freely.
+     Keep the PLAN_ITEMS_START/END markers and the #### numbering format intact.
+     The plan-executor parses these markers to create work issues. -->
 
-- [ ] <Specific, verifiable criterion>
-- [ ] <Another criterion>
-- [ ] Tests cover happy path and error cases
-- [ ] `npm run ci:check` passes
+<!-- PLAN_ITEMS_START -->
+#### 1. <title>
+- **Complexity:** <Trivial|Moderate|Complex>
+- **Depends on:** none
+- **Files:** `path/to/file.ts`, `path/to/other.ts`
+- **Objective:** <What should be accomplished. Be specific about the desired end state.>
+- **Context:** <Background the worker needs — existing patterns, constraints, gotchas.>
+- **Acceptance Criteria:**
+  - [ ] <Specific, verifiable criterion>
+  - [ ] <Another criterion>
+  - [ ] Tests cover happy path and error cases
+  - [ ] `npm run ci:check` passes
 
-### Complexity Hint
+#### 2. <title>
+- **Complexity:** <Trivial|Moderate|Complex>
+- **Depends on:** 1
+- **Files:** `path/to/file.ts`
+- **Objective:** <...>
+- **Context:** <...>
+- **Acceptance Criteria:**
+  - [ ] <...>
+<!-- PLAN_ITEMS_END -->
 
-<Trivial|Moderate|Complex>
+### Execution Strategy
 
-### Relevant Files
-
-- `path/to/file.ts` — <what to do with it>
-- `path/to/pattern.ts` — <follow this as a reference>
+| # | Title | Complexity | Strategy | Depends On |
+|---|-------|------------|----------|------------|
+| 1 | <title> | <complexity> | Parallel | — |
+| 2 | <title> | <complexity> | Sequential | 1 |
 ISSUE_EOF
 )"
 ```
 
-For **sequential** issues that depend on a prior issue, omit the `claude-ready` label and add a dependency note:
-
-```
-### Dependencies
-
-> ⚠️ **Do not start until #<number> is merged.** This issue depends on <what it provides>.
-> Once merged, add the `claude-ready` label to this issue.
-```
+**Important:**
+- Use the `claude-plan-review` label, NOT `claude-ready`
+- Items with `Depends on: none` will get `claude-ready` when created by the plan-executor
+- Items with dependencies will wait until their dependencies are merged
+- Include ALL detail the worker will need — the plan-executor preserves it verbatim
 
 ## Quality Standards
 
@@ -142,17 +153,10 @@ The issue-worker reads the issue as its **sole instructions**. A well-written is
 
 ## After Creating
 
-Report back to the user with a summary table:
+Report back to the user with:
 
-```
-| # | Title | Complexity | Strategy | Depends On |
-|---|-------|------------|----------|------------|
-| 55 | Add Widget model and migration | Moderate | Parallel | — |
-| 56 | Add POST /api/widgets endpoint | Moderate | Parallel | — |
-| 57 | Add widget management UI page | Complex | Sequential | #55, #56 |
-```
-
-Include:
-- Your decomposition reasoning (why you split or kept as one)
-- Which issues can run in parallel vs. which must wait
-- Total estimated files touched across all issues
+1. A link to the plan issue on GitHub
+2. The execution strategy table from the issue body
+3. Your decomposition reasoning (why you split or kept as one)
+4. Total estimated files touched across all items
+5. Instruction: **"Review the plan on GitHub and comment `/approve` to kick off work."**
