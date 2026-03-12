@@ -6,6 +6,7 @@ import { POST } from "@/app/api/errors/route";
 import { NextRequest } from "next/server";
 import crypto from "crypto";
 import type { ErrorReport } from "@prisma/client";
+import { normalizeMessage } from "@/lib/normalize-error";
 
 function makeRequest(body: unknown) {
   return new NextRequest("http://localhost/api/errors", {
@@ -18,7 +19,7 @@ function makeRequest(body: unknown) {
 function fingerprint(source: string, message: string) {
   return crypto
     .createHash("sha256")
-    .update(source + ":" + message)
+    .update(source + ":" + normalizeMessage(message))
     .digest("hex");
 }
 
