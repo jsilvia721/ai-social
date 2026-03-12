@@ -48,17 +48,13 @@ function normalizeError(error: unknown): { message: string; stack?: string } {
 }
 
 function sendViaFetch(payload: ErrorPayload): void {
-  try {
-    fetch(API_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).catch(() => {
-      // Silently drop failed reports
-    });
-  } catch {
-    // Safety: never throw from error reporter
-  }
+  fetch(API_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch(() => {
+    // Silently drop failed reports
+  });
 }
 
 function sendViaBeacon(payload: ErrorPayload): void {
