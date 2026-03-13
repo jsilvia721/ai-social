@@ -254,7 +254,7 @@ export function getLabelsForFinding(finding: Finding): string[] {
   if (finding.complexity === "simple") {
     labels.push("simple-fix");
   } else {
-    labels.push("needs-plan");
+    labels.push("complex");
   }
   return labels;
 }

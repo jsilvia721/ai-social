@@ -193,7 +193,7 @@ For each high-confidence finding, create a GitHub issue:
 gh issue create \
   --title "[QA] <Page Label>: <Finding Title>" \
   --label "qa-audit" --label "needs-triage" \
-  --label "<simple-fix|needs-plan>" \
+  --label "<simple-fix|complex>" \
   --body "$(cat <<'EOF'
 **Severity:** <severity>
 **Confidence:** <N>%
@@ -216,7 +216,7 @@ EOF
 )"
 ```
 
-Use `simple-fix` label for simple findings, `needs-plan` for complex ones.
+Use `simple-fix` label for simple findings, `complex` for complex ones.
 
 **Deduplication:** Before creating issues, run:
 ```bash
