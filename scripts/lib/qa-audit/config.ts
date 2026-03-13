@@ -245,7 +245,8 @@ export function generateFingerprint(route: string, findingTitle: string): string
     const char = normalized.charCodeAt(i);
     hash = ((hash << 5) - hash + char) | 0;
   }
-  return `qa-${Math.abs(hash).toString(36)}`;
+  // Use unsigned right shift to avoid Math.abs(-2147483648) returning negative
+  return `qa-${(hash >>> 0).toString(36)}`;
 }
 
 export function getLabelsForFinding(finding: Finding): string[] {

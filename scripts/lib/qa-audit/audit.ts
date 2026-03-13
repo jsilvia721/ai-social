@@ -3,7 +3,7 @@
  *
  * Exported `runQaAudit(options)` is the main entry point.
  */
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import Anthropic from "@anthropic-ai/sdk";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { execFileSync } from "node:child_process";
@@ -31,12 +31,14 @@ import {
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
+type ViewportName = "mobile" | "desktop";
+
 interface PageResult {
   route: RouteEntry;
   resolvedPath: string;
-  screenshots: Map<string, Buffer>; // viewport name -> resized JPEG buffer
+  screenshots: Partial<Record<ViewportName, Buffer>>;
   analysis?: FindingsResponse;
-  screenshotUrls: Map<string, string>; // viewport name -> S3 URL or local path
+  screenshotUrls: Partial<Record<ViewportName, string>>;
   error?: string;
 }
 
@@ -476,8 +478,8 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
     const result: PageResult = {
       route,
       resolvedPath,
-      screenshots: new Map(),
-      screenshotUrls: new Map(),
+      screenshots: {},
+      screenshotUrls: {},
     };
 
     try {
@@ -487,7 +489,7 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
         validateNavigationUrl(url, options.baseUrl);
 
         const buffer = await captureScreenshot(browser, url, viewport, cookie);
-        result.screenshots.set(viewport.name, buffer);
+        result.screenshots[viewport.name as ViewportName] = buffer;
         log(`   ✅ ${viewport.name} (${viewport.width}px) — ${buffer.byteLength} bytes`);
       }
 
@@ -501,8 +503,11 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
       pendingAnalysis = (async () => {
         try {
           // Upload screenshots (or save locally in dry-run)
-          const mobileBuffer = result.screenshots.get("mobile")!;
-          const desktopBuffer = result.screenshots.get("desktop")!;
+          const mobileBuffer = result.screenshots.mobile;
+          const desktopBuffer = result.screenshots.desktop;
+          if (!mobileBuffer || !desktopBuffer) {
+            throw new Error(`Missing screenshot buffers for ${resolvedPath}`);
+          }
 
           if (options.dryRun) {
             const dir = `tmp/qa-audit/${date}`;
@@ -511,8 +516,8 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
             const desktopPath = `${dir}/${slug}-desktop.jpg`;
             writeFileSync(mobilePath, mobileBuffer);
             writeFileSync(desktopPath, desktopBuffer);
-            result.screenshotUrls.set("mobile", mobilePath);
-            result.screenshotUrls.set("desktop", desktopPath);
+            result.screenshotUrls.mobile = mobilePath;
+            result.screenshotUrls.desktop = desktopPath;
             log(`   💾 Saved to ${dir}/`);
           } else {
             const [mobileUrl, desktopUrl] = await Promise.all([
@@ -529,8 +534,8 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
                 "image/jpeg"
               ),
             ]);
-            result.screenshotUrls.set("mobile", mobileUrl);
-            result.screenshotUrls.set("desktop", desktopUrl);
+            result.screenshotUrls.mobile = mobileUrl;
+            result.screenshotUrls.desktop = desktopUrl;
           }
 
           // Analyze with Claude (skip in dry-run)
@@ -546,7 +551,7 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
           }
 
           // Release buffers
-          result.screenshots.clear();
+          result.screenshots = {};
         } catch (err) {
           result.error = String(err);
           console.error(`   ❌ Analysis failed: ${err}`);
@@ -596,8 +601,8 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
           resolvedPath: result.resolvedPath,
           fingerprint,
           screenshotUrls: {
-            mobile: result.screenshotUrls.get("mobile"),
-            desktop: result.screenshotUrls.get("desktop"),
+            mobile: result.screenshotUrls.mobile,
+            desktop: result.screenshotUrls.desktop,
           },
         });
 
@@ -613,11 +618,11 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
     // Create index issue
     if (issuesCreated.length > 0) {
       const summaries = results
-        .filter((r) => r.analysis)
+        .filter((r): r is PageResult & { analysis: FindingsResponse } => !!r.analysis)
         .map((r) => ({
           route: r.resolvedPath,
-          score: r.analysis!.overallScore,
-          findingCount: r.analysis!.findings.filter((f) => f.confidence >= 0.7).length,
+          score: r.analysis.overallScore,
+          findingCount: r.analysis.findings.filter((f) => f.confidence >= 0.7).length,
         }));
 
       const indexUrl = createIndexIssue(issuesCreated, summaries);
@@ -636,14 +641,14 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
       route: r.resolvedPath,
       label: r.route.label,
       analysis: r.analysis ?? null,
-      screenshots: Object.fromEntries(r.screenshotUrls),
+      screenshots: { ...r.screenshotUrls },
       error: r.error ?? null,
     }));
     console.log(JSON.stringify(report, null, 2));
   } else if (options.dryRun) {
     console.log("\n📊 Dry-run Summary:\n");
     for (const r of results) {
-      const screenshots = Array.from(r.screenshotUrls.values()).join(", ");
+      const screenshots = Object.values(r.screenshotUrls).filter(Boolean).join(", ");
       console.log(`  ${r.route.label} (${r.resolvedPath})`);
       console.log(`    Screenshots: ${screenshots || "none"}`);
       if (r.error) console.log(`    Error: ${r.error}`);

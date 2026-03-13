@@ -41,11 +41,12 @@ Options:
   process.exit(0);
 }
 
-const output = values.output as "text" | "json";
-if (output !== "text" && output !== "json") {
-  console.error(`Invalid output format: ${output}. Must be "text" or "json".`);
+const outputRaw = values.output ?? "text";
+if (outputRaw !== "text" && outputRaw !== "json") {
+  console.error(`Invalid output format: ${outputRaw}. Must be "text" or "json".`);
   process.exit(1);
 }
+const output: "text" | "json" = outputRaw;
 
 const options: AuditOptions = {
   dryRun: values["dry-run"] ?? false,
