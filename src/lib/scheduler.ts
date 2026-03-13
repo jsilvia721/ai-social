@@ -122,6 +122,7 @@ async function publishOne(post: DuePost, now: Date): Promise<void> {
       post.content,
       post.socialAccount.platform,
       post.mediaUrls,
+      { coverImageUrl: post.coverImageUrl ?? undefined },
     );
     await prisma.post.update({
       where: { id: post.id },

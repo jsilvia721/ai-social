@@ -9,6 +9,7 @@ export async function publishPost(
   content: string,
   platform: string,
   mediaUrls: string[] = [],
+  options: { coverImageUrl?: string } = {},
 ): Promise<{ blotatoPostId: string }> {
   if (shouldMockExternalApis()) return mockPublishPost();
 
@@ -17,9 +18,14 @@ export async function publishPost(
     assertSafeMediaUrl(url);
   }
 
+  // Validate cover image URL if provided
+  if (options.coverImageUrl) {
+    assertSafeMediaUrl(options.coverImageUrl);
+  }
+
   const blotatoPlatform = platform.toLowerCase();
 
-  const target = buildTarget(blotatoPlatform);
+  const target = buildTarget(blotatoPlatform, options);
 
   const body = {
     post: {
@@ -55,8 +61,15 @@ interface TikTokTarget extends BaseTarget {
   isAiGenerated: boolean;
 }
 
+interface InstagramTarget extends BaseTarget {
+  coverImageUrl?: string;
+}
+
 /** Build platform-specific target object for the Blotato API. */
-function buildTarget(platform: string): BaseTarget | TikTokTarget {
+function buildTarget(
+  platform: string,
+  options: { coverImageUrl?: string } = {},
+): BaseTarget | TikTokTarget | InstagramTarget {
   if (platform === "tiktok") {
     return {
       targetType: platform,
@@ -67,6 +80,13 @@ function buildTarget(platform: string): BaseTarget | TikTokTarget {
       isBrandedContent: false,
       isYourBrand: false,
       isAiGenerated: true,
+    };
+  }
+
+  if (platform === "instagram" && options.coverImageUrl) {
+    return {
+      targetType: platform,
+      coverImageUrl: options.coverImageUrl,
     };
   }
 

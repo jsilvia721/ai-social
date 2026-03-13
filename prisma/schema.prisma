@@ -136,6 +136,7 @@ model Post {
   socialAccountId       String
   content               String        @db.Text
   mediaUrls             String[]
+  coverImageUrl         String?
   status                PostStatus    @default(DRAFT)
   retryCount            Int           @default(0)
   retryAt               DateTime?

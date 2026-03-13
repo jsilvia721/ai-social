@@ -91,6 +91,46 @@ describe("PATCH /api/posts/[id]", () => {
     );
   });
 
+  it("updates coverImageUrl when provided", async () => {
+    mockAuthenticated();
+    prismaMock.post.findFirst.mockResolvedValue({ id: "post-1", status: "DRAFT" } as any);
+    prismaMock.post.update.mockResolvedValue({ id: "post-1", coverImageUrl: "https://storage.example.com/cover.jpg" } as any);
+
+    const res = await PATCH(makeRequest({ coverImageUrl: "https://storage.example.com/cover.jpg" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ coverImageUrl: "https://storage.example.com/cover.jpg" }),
+      })
+    );
+  });
+
+  it("clears coverImageUrl when set to null", async () => {
+    mockAuthenticated();
+    prismaMock.post.findFirst.mockResolvedValue({ id: "post-1", status: "DRAFT" } as any);
+    prismaMock.post.update.mockResolvedValue({ id: "post-1", coverImageUrl: null } as any);
+
+    const res = await PATCH(makeRequest({ coverImageUrl: null }), { params });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ coverImageUrl: null }),
+      })
+    );
+  });
+
+  it("rejects coverImageUrl that fails SSRF validation", async () => {
+    mockAuthenticated();
+    prismaMock.post.findFirst.mockResolvedValue({ id: "post-1", status: "DRAFT" } as any);
+
+    const res = await PATCH(makeRequest({ coverImageUrl: "https://evil.com/cover.jpg" }), { params });
+
+    expect(res.status).toBe(400);
+    expect(prismaMock.post.update).not.toHaveBeenCalled();
+  });
+
   it("sets status DRAFT when scheduledAt is null", async () => {
     mockAuthenticated();
     prismaMock.post.findFirst.mockResolvedValue({ id: "post-1", status: "SCHEDULED" } as any);

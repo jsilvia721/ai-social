@@ -264,6 +264,45 @@ describe("POST /api/posts", () => {
     expect(createCall.data.scheduledAt).toBeTruthy();
   });
 
+  it("passes coverImageUrl to prisma when provided", async () => {
+    mockAuthenticated();
+    prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1", businessId: "biz-1" } as any);
+    prismaMock.post.create.mockResolvedValue({ id: "post-1", coverImageUrl: "https://storage.example.com/cover.jpg" } as any);
+
+    const res = await POST(
+      makePostRequest({
+        content: "test",
+        socialAccountId: "acc-1",
+        businessId: "biz-1",
+        coverImageUrl: "https://storage.example.com/cover.jpg",
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(prismaMock.post.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ coverImageUrl: "https://storage.example.com/cover.jpg" }),
+      })
+    );
+  });
+
+  it("rejects coverImageUrl that fails SSRF validation", async () => {
+    mockAuthenticated();
+    prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1", businessId: "biz-1" } as any);
+
+    const res = await POST(
+      makePostRequest({
+        content: "test",
+        socialAccountId: "acc-1",
+        businessId: "biz-1",
+        coverImageUrl: "https://evil.com/cover.jpg",
+      })
+    );
+
+    expect(res.status).toBe(400);
+    expect(prismaMock.post.create).not.toHaveBeenCalled();
+  });
+
   it("uses businessId from the request body (never trusts implicit context)", async () => {
     mockAuthenticated();
     prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1", businessId: "biz-1" } as any);

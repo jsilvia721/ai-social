@@ -9,6 +9,7 @@ const PatchPostSchema = z.object({
   content: z.string().min(1).max(10000).optional(),
   scheduledAt: z.string().nullable().optional(),
   mediaUrls: z.array(z.string().url()).optional(),
+  coverImageUrl: z.string().url().nullable().optional(),
 });
 
 type Params = { params: Promise<{ id: string }> };
@@ -46,7 +47,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       { status: 400 }
     );
   }
-  const { content, scheduledAt, mediaUrls } = parsed.data;
+  const { content, scheduledAt, mediaUrls, coverImageUrl } = parsed.data;
 
   // Block status-changing operations on PENDING_REVIEW posts (must use approve/reject APIs)
   if (post.status === "PENDING_REVIEW" && scheduledAt !== undefined) {
@@ -71,11 +72,23 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     mediaUrls.forEach(assertSafeMediaUrl);
   }
 
+  if (coverImageUrl) {
+    try {
+      assertSafeMediaUrl(coverImageUrl);
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Invalid cover image URL" },
+        { status: 400 }
+      );
+    }
+  }
+
   const updated = await prisma.post.update({
     where: { id: post.id },
     data: {
       ...(content !== undefined ? { content } : {}),
       ...(mediaUrls !== undefined ? { mediaUrls } : {}),
+      ...(coverImageUrl !== undefined ? { coverImageUrl } : {}),
       ...(scheduledAt !== undefined
         ? {
             scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
