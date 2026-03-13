@@ -69,6 +69,7 @@ If the dev server cannot be started (e.g., missing env vars, database not runnin
 - **If stuck, re-plan** — don't keep pushing when something goes sideways
 - **Every `schema.prisma` change MUST have a migration** — run `npx prisma migrate dev --name <name>`, never just `npx prisma generate`. CI enforces this with `prisma migrate diff --exit-code`.
 - **New SST secrets require environment setup** — when adding a `new sst.Secret()` to `sst.config.ts`, the PR description MUST list every new secret and the exact `npx sst secret set <Name> "<value>" --stage staging` and `--stage production` commands. If the secret isn't ready, make it optional (set to `null` in sst.config.ts, `z.string().optional()` in env.ts) following the BlotatoApiKey pattern. See `docs/solutions/deployment-issues/sst-secret-not-set-causes-deploy-failure.md`.
+- **Always use `/create-issue` skill for GitHub issues** — never use `gh issue create` directly. The `/create-issue` skill handles decomposition and formatting for the issue-worker agent. This applies everywhere: after `/ce:plan`, from bug findings, self-improvement issues, etc.
 
 ### Branching & Worktrees
 - **Always branch from `main`** — run `git fetch origin main` then branch from `origin/main`. PRs target `main`.
