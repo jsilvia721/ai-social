@@ -75,7 +75,7 @@ function isPermissionError(error: unknown): boolean {
   return (
     error instanceof Error &&
     "status" in error &&
-    (error as { status: number }).status === 403
+    (error as Record<string, unknown>).status === 403
   );
 }
 
