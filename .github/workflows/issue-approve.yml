@@ -60,17 +60,33 @@ jobs:
                 name: 'needs-triage'
               });
 
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                labels: ['claude-ready']
-              });
+              if (labels.includes('bug-report')) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  labels: ['bug-investigate']
+                });
 
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                body: 'Issue approved. The issue daemon will pick this up for implementation shortly.'
-              });
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  body: 'Bug approved for investigation. A plan will be created shortly.'
+                });
+              } else {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  labels: ['claude-ready']
+                });
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  body: 'Issue approved. The issue daemon will pick this up for implementation shortly.'
+                });
+              }
             }
