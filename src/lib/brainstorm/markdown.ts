@@ -8,8 +8,12 @@ import type { BrainstormOutput, ParsedBrainstormItem } from "./types";
 
 /**
  * Render a brainstorm output as a GitHub issue body with checkboxes.
+ * Pass checkedTitles to preserve checked state when re-rendering after iteration.
  */
-export function renderBrainstormIssue(output: BrainstormOutput): string {
+export function renderBrainstormIssue(
+  output: BrainstormOutput,
+  checkedTitles?: Set<string>,
+): string {
   const lines: string[] = [];
 
   lines.push("# 🧠 Brainstorm");
@@ -33,7 +37,8 @@ export function renderBrainstormIssue(output: BrainstormOutput): string {
   lines.push("## 💡 Ideas");
   lines.push("");
   output.items.forEach((item, i) => {
-    lines.push(`- [ ] **${i + 1}. ${item.title}**`);
+    const isChecked = checkedTitles?.has(item.title) ?? false;
+    lines.push(`- [${isChecked ? "x" : " "}] **${i + 1}. ${item.title}**`);
     lines.push(`  **Rationale:** ${item.rationale}`);
     lines.push(`  **Scope:** ${item.scope}`);
     lines.push(`  **Category:** ${item.category}`);

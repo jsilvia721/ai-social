@@ -121,17 +121,10 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
     const output = BrainstormOutputSchema.parse(toolUse.input);
 
     // 3. Re-render issue body, preserving checked state from current body
-    let updatedBody = renderBrainstormIssue(output);
-
-    // Restore checked state from current body via title matching
     const checkedTitles = new Set(
       currentItems.filter((i) => i.checked).map((i) => i.title),
     );
-    updatedBody = updatedBody.replace(
-      /^- \[ \] \*\*(\d+)\. (.+?)\*\*/gm,
-      (match, _num: string, title: string) =>
-        checkedTitles.has(title) ? match.replace("[ ]", "[x]") : match,
-    );
+    const updatedBody = renderBrainstormIssue(output, checkedTitles);
 
     // 4. Update issue body and carry forward for next iteration
     await github.updateIssueBody(session.githubIssueNumber, updatedBody);

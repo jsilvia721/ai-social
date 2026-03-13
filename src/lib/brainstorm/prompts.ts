@@ -87,7 +87,7 @@ ${currentBrainstorm}
 </current_brainstorm>
 
 <human_feedback>
-${humanComment}
+${escapeXml(humanComment)}
 </human_feedback>
 
 Refine the brainstorm based on this feedback. You may:
