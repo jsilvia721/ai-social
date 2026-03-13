@@ -215,7 +215,7 @@ jobs:
       (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
     concurrency:
       group: deploy-staging
-      cancel-in-progress: true
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -248,7 +248,12 @@ jobs:
         run: npx prisma migrate deploy
 
       - name: Deploy with SST
-        run: npx sst deploy --stage staging
+        run: |
+          if ! npx sst deploy --stage staging; then
+            echo "Deploy failed — attempting to clear stale lock and retry"
+            npx sst unlock --stage staging
+            npx sst deploy --stage staging
+          fi
 
   # ── Deploy to Production (manual approval after staging) ───────────────────
   deploy-production:
