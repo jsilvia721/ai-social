@@ -102,44 +102,6 @@ heartbeat_indicator() {
   fi
 }
 
-# Try to detect MAX_WORKERS from daemon's command line.
-# $1 — daemon PID
-detect_max_workers() {
-  local daemon_pid="$1"
-  local cmdline=""
-
-  # Try macOS ps first, then Linux /proc
-  cmdline=$(ps -o args= -p "$daemon_pid" 2>/dev/null || true)
-  if [ -z "$cmdline" ] && [ -f "/proc/${daemon_pid}/cmdline" ]; then
-    # /proc/cmdline uses null bytes as separators
-    cmdline=$(tr '\0' ' ' < "/proc/${daemon_pid}/cmdline" 2>/dev/null || true)
-  fi
-
-  if [ -n "$cmdline" ]; then
-    # Extract -w flag value
-    local max_w=""
-    max_w=$(echo "$cmdline" | grep -oE '\-w [0-9]+' | awk '{print $2}' || true)
-    if [ -n "$max_w" ]; then
-      echo "$max_w"
-      return
-    fi
-  fi
-
-  echo ""
-}
-
-# Get the log file for a worker.
-# $1 — issue number, $2 — type (worker or plan)
-get_log_file() {
-  local issue="$1"
-  local type="$2"
-  if [ "$type" = "plan" ]; then
-    echo "plan-${issue}.log"
-  else
-    echo "issue-${issue}.log"
-  fi
-}
-
 # --- Display ------------------------------------------------------------------
 
 show_status() {
@@ -187,7 +149,6 @@ show_status() {
 
   if [ -f "$pid_metadata_file" ]; then
     while IFS=: read -r pid issue start_epoch type; do
-      # Skip empty lines
       [ -z "$pid" ] && continue
       # Validate all fields
       case "$pid" in *[!0-9]*) continue ;; esac
@@ -204,18 +165,7 @@ show_status() {
   fi
 
   # Worker count display
-  local max_workers=""
-  max_workers=$(detect_max_workers "$daemon_pid")
-  if [ -n "$max_workers" ]; then
-    echo "  Workers: ${active_count}/${max_workers} active"
-  else
-    echo "  Workers: ${active_count} active"
-  fi
-
-  # Rate limit
-  if ! is_rate_limit_paused; then
-    echo "  Rate limit: none"
-  fi
+  echo "  Workers: ${active_count} active"
 
   if [ "$active_count" -eq 0 ]; then
     echo ""
@@ -239,8 +189,8 @@ show_status() {
     local hb_str
     hb_str=$(heartbeat_indicator "$issue")
 
-    local log_name
-    log_name=$(get_log_file "$issue" "$type")
+    local log_name="issue-${issue}.log"
+    [ "$type" = "plan" ] && log_name="plan-${issue}.log"
     local log_path="$LOG_DIR/$log_name"
 
     local size_str="(missing)"
