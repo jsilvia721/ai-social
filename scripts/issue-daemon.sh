@@ -24,6 +24,7 @@ MAX_TURNS=200          # max agentic turns per issue (TDD + review agents need m
 LABEL_READY="claude-ready"
 LABEL_WIP="claude-wip"
 LABEL_DONE="claude-done"
+LABEL_ACTIVE="claude-active"
 LABEL_BLOCKED="claude-blocked"
 LABEL_INTERRUPTED="claude-interrupted"
 LABEL_PLAN_REVIEW="claude-plan-review"
