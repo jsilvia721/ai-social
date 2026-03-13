@@ -56,6 +56,7 @@ interface EditPostData {
   username: string;
   scheduledAt: string | null;
   mediaUrls: string[];
+  coverImageUrl?: string | null;
 }
 
 export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: EditPostData; defaultScheduledAt?: string }) {
@@ -86,7 +87,10 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [imagePrompt, setImagePrompt] = useState("");
+  const [coverImageUrl, setCoverImageUrl] = useState<string | null>(editPost?.coverImageUrl ?? null);
+  const [isUploadingCover, setIsUploadingCover] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
   const imageAbortRef = useRef<AbortController | null>(null);
 
@@ -349,6 +353,34 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
     setMediaUrls((prev) => prev.filter((_, i) => i !== index));
   }
 
+  async function handleCoverImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingCover(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Cover image upload failed");
+      }
+      const { url } = await res.json();
+      setCoverImageUrl(url);
+    } catch (err) {
+      reportError(err, {
+        url: window.location.href,
+        metadata: { type: "UPLOAD", method: "server", fileType: file.type, fileSize: file.size },
+      });
+      setError(err instanceof Error ? err.message : "Cover image upload failed.");
+    } finally {
+      setIsUploadingCover(false);
+      if (coverInputRef.current) coverInputRef.current.value = "";
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedAccountId || !content.trim() || isOverLimit) return;
@@ -362,6 +394,7 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
         socialAccountId: selectedAccountId,
         mediaUrls,
         ...(activeBusinessId ? { businessId: activeBusinessId } : {}),
+        ...(coverImageUrl ? { coverImageUrl } : {}),
       };
 
       if (scheduleMode === "now") {
@@ -466,6 +499,14 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
         multiple
         className="hidden"
         onChange={handleFileSelect}
+      />
+      {/* hidden cover image file input */}
+      <input
+        ref={coverInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        className="hidden"
+        onChange={handleCoverImageSelect}
       />
 
       {/* Media */}
@@ -607,6 +648,60 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
           )}
         </CardContent>
       </Card>
+
+      {/* Cover Image (Instagram + video only) */}
+      {selectedPlatform === "INSTAGRAM" && hasVideo && (
+        <Card className="bg-zinc-900 border-zinc-700">
+          <CardContent className="pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="h-4 w-4 text-zinc-400" />
+                <span className="text-sm font-medium text-zinc-300">Cover image</span>
+              </div>
+              {!coverImageUrl && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => coverInputRef.current?.click()}
+                  disabled={isUploadingCover}
+                  className="border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+                >
+                  {isUploadingCover ? (
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  ) : (
+                    <Upload className="h-3 w-3 mr-1" />
+                  )}
+                  {isUploadingCover ? "Uploading…" : "Upload cover"}
+                </Button>
+              )}
+            </div>
+            {coverImageUrl && (
+              <div className="relative group w-full sm:w-48">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={coverImageUrl}
+                  alt="Cover image preview"
+                  className="w-full rounded-md object-cover max-h-40"
+                />
+                <button
+                  type="button"
+                  aria-label="Remove cover image"
+                  onClick={() => setCoverImageUrl(null)}
+                  className="absolute top-1 right-1 bg-black/60 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <X className="h-3 w-3 text-white" />
+                </button>
+              </div>
+            )}
+            {!coverImageUrl && (
+              <p className="text-xs text-zinc-500">
+                Optional thumbnail image displayed as the Reel cover.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* AI Generate */}
       <Card className="bg-zinc-900 border-zinc-700">
