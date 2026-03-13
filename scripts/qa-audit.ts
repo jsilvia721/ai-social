@@ -37,6 +37,10 @@ Options:
   --base-url <url>   Base URL of the app (default: http://localhost:3000).
   --verbose          Enable detailed logging.
   --help             Show this help message.
+
+Prerequisites:
+  Dev server must be running with PLAYWRIGHT_E2E=true for auth to work.
+  ANTHROPIC_API_KEY must be set (not required for --dry-run).
 `);
   process.exit(0);
 }

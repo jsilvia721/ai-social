@@ -196,7 +196,8 @@ async function getAuthCookie(
 // ── Dynamic Route Resolution ────────────────────────────────────────────────
 
 async function resolveDynamicParams(): Promise<Record<string, string>> {
-  // Lazy import to avoid triggering env.ts validation at module load
+  // Lazy import to avoid triggering env.ts validation at module load.
+  // Cannot use @/lib/db — scripts run outside Next.js module resolution.
   const { prisma } = await import("../../../src/lib/db");
 
   try {
@@ -592,6 +593,8 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
     for (const result of results) {
       if (!result.analysis) continue;
 
+      // Two-stage filter: Claude reports findings at >= 0.5 confidence (see SYSTEM_PROMPT),
+      // but only >= 0.7 become GitHub issues to reduce false positives.
       const highConfidenceFindings = result.analysis.findings.filter(
         (f) => f.confidence >= 0.7
       );
