@@ -31,15 +31,19 @@ LABEL_PLAN_REVIEW="claude-plan-review"
 LABEL_APPROVED="claude-approved"
 LOG_DIR="./logs/issue-daemon"
 RATE_LIMIT_PAUSE_SECONDS=900
+WALL_TIMEOUT=60            # wall-clock timeout in minutes per worker
+HEARTBEAT_INTERVAL=30      # seconds between heartbeat writes
+STALE_THRESHOLD=300        # seconds before a heartbeat is considered stale (5 min)
 
 # --- Parse flags --------------------------------------------------------------
-while getopts "w:i:b:t:" opt; do
+while getopts "w:i:b:t:T:" opt; do
   case $opt in
     w) MAX_WORKERS=$OPTARG ;;
     i) POLL_INTERVAL=$OPTARG ;;
     b) MAX_BUDGET=$OPTARG ;;
     t) MAX_TURNS=$OPTARG ;;
-    *) echo "Usage: $0 [-w workers] [-i interval] [-b budget] [-t turns]" && exit 1 ;;
+    T) WALL_TIMEOUT=$OPTARG ;;
+    *) echo "Usage: $0 [-w workers] [-i interval] [-b budget] [-t turns] [-T timeout_min]" && exit 1 ;;
   esac
 done
 
@@ -58,20 +62,30 @@ if is_drain_mode; then
   clear_drain_mode
 fi
 
-PID_FILE="$LOG_DIR/.active_pids"
+PID_FILE="${WORKER_PID_FILE:-$LOG_DIR/.active_pids}"
+export WORKER_PID_FILE="$PID_FILE"
 : > "$PID_FILE"  # truncate on start
+
+# Clean up orphaned heartbeat and stale-notified files from a previous run
+for hb_file in "$LOG_DIR"/heartbeat-* "$LOG_DIR"/.stale-notified-*; do
+  [ -f "$hb_file" ] && rm -f "$hb_file"
+done
 
 DAEMON_PID_FILE="$LOG_DIR/.issue-daemon.pid"
 echo $$ > "$DAEMON_PID_FILE"
 
 cleanup() {
   echo "[daemon] Shutting down..."
-  while IFS= read -r pid; do
-    if kill -0 "$pid" 2>/dev/null; then
+  while IFS=: read -r pid _issue _epoch _type; do
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       echo "[daemon] Stopping worker PID $pid"
       kill "$pid" 2>/dev/null || true
     fi
   done < "$PID_FILE"
+  # Remove all heartbeat and stale-notified files
+  for hb_file in "$LOG_DIR"/heartbeat-* "$LOG_DIR"/.stale-notified-*; do
+    [ -f "$hb_file" ] && rm -f "$hb_file"
+  done
   rm -f "$PID_FILE" "$DAEMON_PID_FILE"
   exit 0
 }
@@ -154,6 +168,34 @@ commit_wip_if_needed() {
   done
 }
 
+# --- Heartbeat helper ---------------------------------------------------------
+# Start a background heartbeat writer for a given issue/PID.
+# $1 — issue_number, $2 — PID to monitor
+# Outputs the heartbeat subshell PID to stdout.
+start_heartbeat() {
+  local issue_number="$1"
+  local monitored_pid="$2"
+  local hb_file="$LOG_DIR/heartbeat-${issue_number}"
+
+  (
+    while kill -0 "$monitored_pid" 2>/dev/null; do
+      date +%s > "${hb_file}.tmp" && mv "${hb_file}.tmp" "$hb_file"
+      sleep "$HEARTBEAT_INTERVAL"
+    done
+  ) &
+  echo $!
+}
+
+# Stop heartbeat and clean up file.
+# $1 — heartbeat subshell PID, $2 — issue_number
+stop_heartbeat() {
+  local hb_pid="$1"
+  local issue_number="$2"
+  kill "$hb_pid" 2>/dev/null || true
+  wait "$hb_pid" 2>/dev/null || true
+  rm -f "$LOG_DIR/heartbeat-${issue_number}"
+}
+
 # --- Worker function ----------------------------------------------------------
 run_worker() {
   local issue_number="$1"
@@ -200,24 +242,40 @@ EOF
   local start_time
   start_time=$(date +%s)
 
-  # Run Claude in an isolated worktree (--worktree ensures --max-turns applies to the session)
+  # Run Claude in background so heartbeat can run concurrently
   claude -p "$prompt" \
     --agent "issue-worker" \
     --worktree \
     --max-turns "$MAX_TURNS" \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Agent,Bash,Edit,Glob,Grep,Read,Write,Skill" \
-    > "$log_file" 2>&1
+    > "$log_file" 2>&1 &
+  local claude_pid=$!
 
+  # Start heartbeat writer
+  local hb_pid
+  hb_pid=$(start_heartbeat "$issue_number" "$claude_pid")
+
+  # Wait for Claude to finish
+  wait "$claude_pid"
   local exit_code=$?
+
+  # Stop heartbeat
+  stop_heartbeat "$hb_pid" "$issue_number"
+
   local end_time
   end_time=$(date +%s)
   local runtime=$(( end_time - start_time ))
+
+  # Get our own PID for cleanup (Bash 3 compatible)
+  local self_pid
+  self_pid=$(sh -c 'echo $PPID')
 
   # Check for rate limit first
   if detect_rate_limit "$exit_code" "$log_file"; then
     commit_wip_if_needed "$issue_number"
     handle_rate_limit_exit "$issue_number" "$runtime" "Worker"
+    remove_worker "$self_pid"
     return
   fi
 
@@ -250,6 +308,8 @@ EOF
       gh issue comment "$issue_number" --body "Claude Code worker finished but did not complete: ${fail_reason}. Check logs at \`$log_file\` for details." 2>/dev/null || true
     fi
   fi
+
+  remove_worker "$self_pid"
 }
 
 # --- Plan executor function ---------------------------------------------------
@@ -267,7 +327,7 @@ run_plan_executor() {
   local start_time
   start_time=$(date +%s)
 
-  # Run Claude with plan-executor agent (read-only, no worktree needed)
+  # Run Claude in background so heartbeat can run concurrently
   claude -p "$(cat <<EOF
 You are the plan-executor agent. Process approved plan issue #${issue_number}.
 
@@ -283,16 +343,32 @@ EOF
     --max-turns "$MAX_TURNS" \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Bash,Glob,Grep,Read" \
-    > "$log_file" 2>&1
+    > "$log_file" 2>&1 &
+  local claude_pid=$!
 
+  # Start heartbeat writer
+  local hb_pid
+  hb_pid=$(start_heartbeat "$issue_number" "$claude_pid")
+
+  # Wait for Claude to finish
+  wait "$claude_pid"
   local exit_code=$?
+
+  # Stop heartbeat
+  stop_heartbeat "$hb_pid" "$issue_number"
+
   local end_time
   end_time=$(date +%s)
   local runtime=$(( end_time - start_time ))
 
+  # Get our own PID for cleanup (Bash 3 compatible)
+  local self_pid
+  self_pid=$(sh -c 'echo $PPID')
+
   # Check for rate limit first
   if detect_rate_limit "$exit_code" "$log_file"; then
     handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor"
+    remove_worker "$self_pid"
     return
   fi
 
@@ -310,6 +386,8 @@ EOF
       gh issue comment "$issue_number" --body "Plan-executor exited with code $exit_code. Check logs at \`$log_file\` for details." 2>/dev/null || true
     fi
   fi
+
+  remove_worker "$self_pid"
 }
 
 # --- Worker tracking via PID file ---------------------------------------------
@@ -317,9 +395,9 @@ active_worker_count() {
   local count=0
   local tmp
   tmp=$(mktemp)
-  while IFS= read -r pid; do
-    if kill -0 "$pid" 2>/dev/null; then
-      echo "$pid" >> "$tmp"
+  while IFS=: read -r pid issue epoch type; do
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      echo "${pid}:${issue}:${epoch}:${type}" >> "$tmp"
       count=$((count + 1))
     fi
   done < "$PID_FILE"
@@ -328,7 +406,7 @@ active_worker_count() {
 }
 
 # --- Main loop ----------------------------------------------------------------
-log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, turns=$MAX_TURNS)"
+log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, turns=$MAX_TURNS, timeout=${WALL_TIMEOUT}m)"
 log "Watching for issues labeled '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', and '${LABEL_READY}'..."
 log "PID file: ${DAEMON_PID_FILE} (send SIGUSR1 to toggle drain mode)"
 
@@ -354,6 +432,62 @@ while true; do
     continue
   fi
 
+  # --- 3. Stale detection & wall-clock timeout ---
+  now_epoch=$(date +%s)
+  wall_timeout_secs=$(( WALL_TIMEOUT * 60 ))
+
+  while IFS=: read -r w_pid w_issue w_start w_type; do
+    [ -n "$w_pid" ] || continue
+
+    # Dead worker — clean up orphaned state
+    if ! kill -0 "$w_pid" 2>/dev/null; then
+      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
+      remove_worker "$w_pid"
+      continue
+    fi
+
+    # Wall-clock timeout check (runs before stale check)
+    elapsed=$(( now_epoch - w_start ))
+    if [ "$elapsed" -ge "$wall_timeout_secs" ]; then
+      elapsed_min=$(( elapsed / 60 ))
+      log "Worker PID $w_pid for issue #${w_issue} exceeded wall-clock timeout (${elapsed_min}m > ${WALL_TIMEOUT}m)"
+      commit_wip_if_needed "$w_issue"
+      kill -TERM "$w_pid" 2>/dev/null || true
+      # Poll for graceful exit (10s max, 1s intervals to stay responsive to signals)
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "$w_pid" 2>/dev/null || break
+        sleep 1
+      done
+      if kill -0 "$w_pid" 2>/dev/null; then
+        kill -KILL "$w_pid" 2>/dev/null || true
+      fi
+      gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
+      gh issue comment "$w_issue" --body "Worker timed out after ${elapsed_min} minutes (wall-clock limit: ${WALL_TIMEOUT}m). Check logs at \`$LOG_DIR/issue-${w_issue}.log\`." 2>/dev/null || true
+      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
+      remove_worker "$w_pid"
+      continue
+    fi
+
+    # Stale heartbeat check (only notify once per worker via marker file)
+    hb_file="$LOG_DIR/heartbeat-${w_issue}"
+    stale_marker="$LOG_DIR/.stale-notified-${w_pid}"
+    if [ -f "$hb_file" ] && [ ! -f "$stale_marker" ]; then
+      hb_epoch=$(cat "$hb_file" 2>/dev/null || echo "0")
+      stale_secs=$(( now_epoch - hb_epoch ))
+      if [ "$stale_secs" -ge "$STALE_THRESHOLD" ]; then
+        stale_min=$(( stale_secs / 60 ))
+        stale_log_file="$LOG_DIR/issue-${w_issue}.log"
+        if [ "$w_type" = "plan" ]; then
+          stale_log_file="$LOG_DIR/plan-${w_issue}.log"
+        fi
+        log "Worker PID $w_pid for issue #${w_issue} appears stalled (no heartbeat for ${stale_min}m)"
+        gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
+        gh issue comment "$w_issue" --body "Worker appears stalled (no heartbeat for ${stale_min}m). Check logs at \`$stale_log_file\`." 2>/dev/null || true
+        touch "$stale_marker"
+      fi
+    fi
+  done < "$PID_FILE"
+
   active=$(active_worker_count)
   available_slots=$(( MAX_WORKERS - active ))
 
@@ -378,7 +512,7 @@ while true; do
         fi
 
         run_worker "$number" "$title" "true" &
-        echo "$!" >> "$PID_FILE"
+        record_worker "$!" "$number" "worker"
         log "Spawned retry worker PID $! for interrupted issue #${number}"
       done <<< "$interrupted_issues"
 
@@ -411,7 +545,7 @@ while true; do
           # Check if this is a plan (has plan markers) or a single work item
           if echo "$body" | grep -q "PLAN_ITEMS_START"; then
             run_plan_executor "$number" "$title" &
-            echo "$!" >> "$PID_FILE"
+            record_worker "$!" "$number" "plan"
             log "Spawned plan-executor PID $! for issue #${number}"
           else
             # Single work item — route to needs-triage for human review
@@ -448,7 +582,7 @@ while true; do
           fi
 
           run_worker "$number" "$title" &
-          echo "$!" >> "$PID_FILE"
+          record_worker "$!" "$number" "worker"
           log "Spawned worker PID $! for issue #${number}"
         done <<< "$issues"
       fi

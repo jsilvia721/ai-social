@@ -240,6 +240,126 @@ clear_drain_mode
 clear_drain_mode
 pass "double clear_drain_mode doesn't error"
 
+# --- Test worker tracking (PID metadata) --------------------------------------
+echo ""
+echo "Worker tracking — record_worker:"
+
+# Set up a temp PID file for worker tracking tests
+TEST_LOG_DIR=$(mktemp -d)
+export WORKER_PID_FILE="$TEST_LOG_DIR/.active_pids"
+: > "$WORKER_PID_FILE"
+
+# record_worker creates entry with PID:ISSUE:START_EPOCH:TYPE format
+record_worker "12345" "42" "worker"
+line=$(cat "$WORKER_PID_FILE")
+pid_field=$(echo "$line" | cut -d: -f1)
+issue_field=$(echo "$line" | cut -d: -f2)
+epoch_field=$(echo "$line" | cut -d: -f3)
+type_field=$(echo "$line" | cut -d: -f4)
+assert_eq "record_worker PID field" "12345" "$pid_field"
+assert_eq "record_worker issue field" "42" "$issue_field"
+assert_not_empty "record_worker epoch field" "$epoch_field"
+assert_eq "record_worker type field" "worker" "$type_field"
+
+# Epoch should be close to current time
+now_epoch=$(date +%s)
+epoch_diff=$(( now_epoch - epoch_field ))
+if [ "$epoch_diff" -ge -2 ] && [ "$epoch_diff" -le 2 ]; then
+  pass "record_worker epoch is close to current time"
+else
+  fail "record_worker epoch is close to current time" "within 2s of $now_epoch" "$epoch_field (diff: ${epoch_diff}s)"
+fi
+
+echo ""
+echo "Worker tracking — list_workers:"
+
+# list_workers returns entries
+: > "$WORKER_PID_FILE"
+record_worker "111" "10" "worker"
+record_worker "222" "20" "plan"
+result=$(list_workers)
+line_count=$(echo "$result" | wc -l | tr -d ' ')
+assert_eq "list_workers returns 2 entries" "2" "$line_count"
+
+# First entry has PID 111
+first_pid=$(echo "$result" | head -1 | cut -d: -f1)
+assert_eq "list_workers first entry PID" "111" "$first_pid"
+
+# Second entry has type plan
+second_type=$(echo "$result" | tail -1 | cut -d: -f4)
+assert_eq "list_workers second entry type" "plan" "$second_type"
+
+echo ""
+echo "Worker tracking — remove_worker:"
+
+# remove_worker removes by PID
+: > "$WORKER_PID_FILE"
+record_worker "111" "10" "worker"
+record_worker "222" "20" "plan"
+record_worker "333" "30" "worker"
+remove_worker "222"
+result=$(list_workers)
+line_count=$(echo "$result" | wc -l | tr -d ' ')
+assert_eq "remove_worker leaves 2 entries" "2" "$line_count"
+
+# Verify PID 222 is gone
+if echo "$result" | grep -q "^222:"; then
+  fail "remove_worker removed PID 222" "PID 222 absent" "PID 222 still present"
+else
+  pass "remove_worker removed PID 222"
+fi
+
+# PID 111 and 333 still present
+if echo "$result" | grep -q "^111:" && echo "$result" | grep -q "^333:"; then
+  pass "remove_worker kept PIDs 111 and 333"
+else
+  fail "remove_worker kept PIDs 111 and 333" "both present" "$(echo "$result" | tr '\n' ' ')"
+fi
+
+echo ""
+echo "Worker tracking — get_worker_start:"
+
+# get_worker_start returns correct epoch
+: > "$WORKER_PID_FILE"
+record_worker "555" "50" "worker"
+start=$(get_worker_start "555")
+assert_not_empty "get_worker_start returns epoch" "$start"
+start_diff=$(( now_epoch - start ))
+if [ "$start_diff" -ge -2 ] && [ "$start_diff" -le 2 ]; then
+  pass "get_worker_start epoch is close to current time"
+else
+  fail "get_worker_start epoch is close to current time" "within 2s of $now_epoch" "$start (diff: ${start_diff}s)"
+fi
+
+# get_worker_start returns empty for unknown PID
+result=$(get_worker_start "99999")
+assert_eq "get_worker_start returns empty for unknown PID" "" "$result"
+
+echo ""
+echo "Worker tracking — concurrent operations:"
+
+# Concurrent appends don't corrupt the file
+: > "$WORKER_PID_FILE"
+for i in $(seq 1 10); do
+  record_worker "${i}00" "$i" "worker" &
+done
+wait
+line_count=$(wc -l < "$WORKER_PID_FILE" | tr -d ' ')
+assert_eq "10 concurrent record_worker calls produce 10 lines" "10" "$line_count"
+
+# Each line should have 4 colon-separated fields
+bad_lines=0
+while IFS= read -r line; do
+  field_count=$(echo "$line" | awk -F: '{print NF}')
+  if [ "$field_count" -ne 4 ]; then
+    bad_lines=$((bad_lines + 1))
+  fi
+done < "$WORKER_PID_FILE"
+assert_eq "all lines have 4 fields after concurrent writes" "0" "$bad_lines"
+
+# Clean up worker tracking temp
+rm -rf "$TEST_LOG_DIR"
+
 # --- Shellcheck --------------------------------------------------------------
 echo ""
 echo "Shellcheck:"
