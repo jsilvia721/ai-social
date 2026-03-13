@@ -8,13 +8,15 @@ allowed-tools: Agent, Bash, Glob, Grep, Read
 
 The user will describe tasks they want done. Your job is to create GitHub issues that are **optimized for the issue-worker agent** — right-sized for high success rates, minimal context window usage, and maximum parallelism when it makes sense.
 
-**Arguments:** $ARGUMENTS — the user's natural language description of what they want done.
+**Arguments:** $ARGUMENTS — the user's natural language description of what they want done. May optionally include `--label <label-name>` to override the default `claude-plan-review` label on the created issue.
 
 ## Process
 
 ### 1. Understand Intent
 
 Parse the user's request. If vague or ambiguous, ask one clarifying question before proceeding. Don't over-ask — make reasonable assumptions and note them in the issue context.
+
+**Label parsing:** Check if the arguments include `--label <name>`. If present, extract the label name and remove the flag from the task description. If not present, default to `claude-plan-review`.
 
 ### 2. Research the Codebase
 
@@ -87,7 +89,7 @@ Create a **single plan issue** for human review. This issue contains all the wor
 ```bash
 gh issue create \
   --title "Plan: <concise description of the overall task>" \
-  --label "claude-plan-review" \
+  --label "<parsed-label>" \
   --body "$(cat <<'ISSUE_EOF'
 ### Plan: <title>
 
@@ -135,7 +137,8 @@ ISSUE_EOF
 ```
 
 **Important:**
-- Use the `claude-plan-review` label, NOT `claude-ready` or `needs-triage`
+- Use the parsed label (default: `claude-plan-review`). Do NOT use `claude-ready` or `needs-triage` unless explicitly passed via `--label`
+- When a custom label is provided via `--label`, the issue follows that label's workflow instead of the standard plan-review pipeline
 - Items with `Depends on: none` will get `needs-triage` when created by the plan-executor (requires human approval to become `claude-ready`)
 - Items with dependencies will wait until their dependencies are merged
 - Include ALL detail the worker will need — the plan-executor preserves it verbatim
