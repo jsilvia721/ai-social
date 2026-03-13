@@ -115,10 +115,14 @@ async function scrollToBottom(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const distance = 300;
     const delay = 100;
+    const maxScrolls = 50; // Cap at ~15,000px to avoid infinite scroll pages
+    let scrolls = 0;
     while (
+      scrolls < maxScrolls &&
       document.documentElement.scrollTop + window.innerHeight <
       document.documentElement.scrollHeight
     ) {
+      scrolls++;
       window.scrollBy(0, distance);
       await new Promise((r) => setTimeout(r, delay));
     }
@@ -312,24 +316,27 @@ async function analyzeScreenshots(
 
 // ── GitHub Issue Management ─────────────────────────────────────────────────
 
-function checkExistingIssue(fingerprint: string): boolean {
+function fetchExistingFingerprints(): Set<string> {
   try {
     const result = execFileSync("gh", [
       "issue",
       "list",
       "--label",
       "qa-audit",
-      "--search",
-      fingerprint,
       "--json",
-      "number",
+      "body",
       "--limit",
-      "1",
+      "200",
     ], { encoding: "utf8" });
-    const issues = JSON.parse(result);
-    return issues.length > 0;
+    const issues: { body: string }[] = JSON.parse(result);
+    const fingerprints = new Set<string>();
+    for (const issue of issues) {
+      const match = issue.body.match(/\*\*Fingerprint:\*\* `(qa-[a-z0-9]+)`/);
+      if (match) fingerprints.add(match[1]);
+    }
+    return fingerprints;
   } catch {
-    return false;
+    return new Set();
   }
 }
 
@@ -578,6 +585,10 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
   if (!options.dryRun) {
     console.log("\n📝 Creating GitHub issues...\n");
 
+    // Batch fetch existing fingerprints for dedup (single gh call)
+    const existingFingerprints = fetchExistingFingerprints();
+    log(`   Found ${existingFingerprints.size} existing qa-audit fingerprints`);
+
     for (const result of results) {
       if (!result.analysis) continue;
 
@@ -588,8 +599,8 @@ export async function runQaAudit(options: AuditOptions): Promise<AuditReport> {
       for (const finding of highConfidenceFindings) {
         const fingerprint = generateFingerprint(result.resolvedPath, finding.title);
 
-        // Dedup check
-        if (checkExistingIssue(fingerprint)) {
+        // Dedup check against batch-fetched fingerprints
+        if (existingFingerprints.has(fingerprint)) {
           log(`   ⏭️  Skipping duplicate: ${finding.title}`);
           continue;
         }

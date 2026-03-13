@@ -118,8 +118,8 @@ export const FindingComplexity = z.enum(["simple", "complex"]);
 export type FindingComplexity = z.infer<typeof FindingComplexity>;
 
 export const FindingSchema = z.object({
-  title: z.string().min(1),
-  description: z.string().min(1),
+  title: z.string().min(1).max(200),
+  description: z.string().min(1).max(2000),
   severity: FindingSeverity,
   confidence: z.number().min(0).max(1),
   complexity: FindingComplexity,
@@ -328,9 +328,3 @@ export interface AuditOptions {
   verbose: boolean;
 }
 
-export const DEFAULT_OPTIONS: AuditOptions = {
-  dryRun: false,
-  output: "text",
-  baseUrl: "http://localhost:3000",
-  verbose: false,
-};
