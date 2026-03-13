@@ -33,7 +33,7 @@ export default $config({
       // SES_FROM_EMAIL: optional — set SesFromEmail secret to enable failure alert emails
       sesFromEmail:        null,
       // GitHub: optional — set GitHubToken secret to enable brainstorm agent
-      githubToken:         null,
+      githubToken:         null as null | InstanceType<typeof sst.Secret>,
       // ADMIN_EMAILS: optional — comma-separated emails to auto-promote to admin on sign-in
       adminEmails:         new sst.Secret("AdminEmails"),
     };
