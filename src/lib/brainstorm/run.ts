@@ -17,6 +17,9 @@ import { promoteBrainstormItems } from "./promote";
 /** Default wall-clock budget: 4.5 minutes (Lambda timeout is 5m). */
 const DEFAULT_BUDGET_MS = 4.5 * 60 * 1000;
 
+/** Safety margin before deadline — ensures enough time to complete the next step. */
+const WALL_CLOCK_BUFFER_MS = 30_000;
+
 /** Default cooldown between brainstorm sessions. */
 const DEFAULT_FREQUENCY_DAYS = 7;
 
@@ -39,7 +42,7 @@ export async function runBrainstormAgent(deadlineMs?: number): Promise<void> {
 
   if (!session) {
     // No open session — check if we should generate a new one
-    if (Date.now() > deadline) return;
+    if (Date.now() > deadline - WALL_CLOCK_BUFFER_MS) return;
 
     const frequencyDays = env.BRAINSTORM_FREQUENCY_DAYS ?? DEFAULT_FREQUENCY_DAYS;
 
@@ -67,7 +70,7 @@ export async function runBrainstormAgent(deadlineMs?: number): Promise<void> {
 
   // Open session exists — run iterate then promote
   // Step 1: Iterate (process new comments)
-  if (Date.now() < deadline) {
+  if (Date.now() < deadline - WALL_CLOCK_BUFFER_MS) {
     try {
       await iterateBrainstorm(session);
     } catch (error) {
@@ -79,7 +82,7 @@ export async function runBrainstormAgent(deadlineMs?: number): Promise<void> {
   }
 
   // Step 2: Promote (checked items → plan issues)
-  if (Date.now() < deadline) {
+  if (Date.now() < deadline - WALL_CLOCK_BUFFER_MS) {
     try {
       await promoteBrainstormItems(session);
     } catch (error) {
