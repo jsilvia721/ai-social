@@ -65,8 +65,8 @@ PID_FILE="${WORKER_PID_FILE:-$LOG_DIR/.active_pids}"
 export WORKER_PID_FILE="$PID_FILE"
 : > "$PID_FILE"  # truncate on start
 
-# Clean up orphaned heartbeat files from a previous run
-for hb_file in "$LOG_DIR"/heartbeat-*; do
+# Clean up orphaned heartbeat and stale-notified files from a previous run
+for hb_file in "$LOG_DIR"/heartbeat-* "$LOG_DIR"/.stale-notified-*; do
   [ -f "$hb_file" ] && rm -f "$hb_file"
 done
 
@@ -81,8 +81,8 @@ cleanup() {
       kill "$pid" 2>/dev/null || true
     fi
   done < "$PID_FILE"
-  # Remove all heartbeat files
-  for hb_file in "$LOG_DIR"/heartbeat-*; do
+  # Remove all heartbeat and stale-notified files
+  for hb_file in "$LOG_DIR"/heartbeat-* "$LOG_DIR"/.stale-notified-*; do
     [ -f "$hb_file" ] && rm -f "$hb_file"
   done
   rm -f "$PID_FILE" "$DAEMON_PID_FILE"
@@ -440,7 +440,7 @@ while true; do
 
     # Dead worker — clean up orphaned state
     if ! kill -0 "$w_pid" 2>/dev/null; then
-      rm -f "$LOG_DIR/heartbeat-${w_issue}"
+      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
       remove_worker "$w_pid"
       continue
     fi
@@ -458,14 +458,15 @@ while true; do
       fi
       gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
       gh issue comment "$w_issue" --body "Worker timed out after ${elapsed_min} minutes (wall-clock limit: ${WALL_TIMEOUT}m). Check logs at \`$LOG_DIR/issue-${w_issue}.log\`." 2>/dev/null || true
-      rm -f "$LOG_DIR/heartbeat-${w_issue}"
+      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
       remove_worker "$w_pid"
       continue
     fi
 
-    # Stale heartbeat check
+    # Stale heartbeat check (only notify once per worker via marker file)
     hb_file="$LOG_DIR/heartbeat-${w_issue}"
-    if [ -f "$hb_file" ]; then
+    stale_marker="$LOG_DIR/.stale-notified-${w_pid}"
+    if [ -f "$hb_file" ] && [ ! -f "$stale_marker" ]; then
       hb_epoch=$(cat "$hb_file" 2>/dev/null || echo "0")
       stale_secs=$(( now_epoch - hb_epoch ))
       if [ "$stale_secs" -ge "$STALE_THRESHOLD" ]; then
@@ -477,6 +478,7 @@ while true; do
         log "Worker PID $w_pid for issue #${w_issue} appears stalled (no heartbeat for ${stale_min}m)"
         gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
         gh issue comment "$w_issue" --body "Worker appears stalled (no heartbeat for ${stale_min}m). Check logs at \`$stale_log_file\`." 2>/dev/null || true
+        touch "$stale_marker"
       fi
     fi
   done < "$PID_FILE"
