@@ -20,20 +20,20 @@ jobs:
 
             console.log(`Issue #${closedIssueNumber} was closed. Checking for parent plan issues...`);
 
-            // --- Step 1: Find open plan issues with claude-done label ---
+            // --- Step 1: Find open plan issues with claude-active label ---
             const planIssues = await github.rest.issues.listForRepo({
               owner, repo,
               state: 'open',
-              labels: 'claude-done',
+              labels: 'claude-active',
               per_page: 100
             });
 
             if (planIssues.data.length === 0) {
-              console.log('No open plan issues with claude-done label found.');
+              console.log('No open plan issues with claude-active label found.');
               return;
             }
 
-            console.log(`Found ${planIssues.data.length} open plan issue(s) with claude-done label.`);
+            console.log(`Found ${planIssues.data.length} open plan issue(s) with claude-active label.`);
 
             const issueRefPattern = /#(\d+)/g;
 
@@ -107,6 +107,18 @@ jobs:
                 owner, repo,
                 issue_number: planIssue.number,
                 body: `All work items completed. Closing plan. Issues: ${issueList}.`
+              });
+
+              await github.rest.issues.addLabels({
+                owner, repo,
+                issue_number: planIssue.number,
+                labels: ['claude-done']
+              });
+
+              await github.rest.issues.removeLabel({
+                owner, repo,
+                issue_number: planIssue.number,
+                name: 'claude-active'
               });
 
               await github.rest.issues.update({
