@@ -126,4 +126,23 @@ jobs:
                 issue_number: planIssue.number,
                 state: 'closed'
               });
+
+              // --- Step 5: Close linked bug issue if BUG_ISSUE marker exists ---
+              const bugMarkerMatch = (planIssue.body || '').match(/<!-- BUG_ISSUE: #(\d+) -->/);
+              if (bugMarkerMatch) {
+                const bugIssueNumber = parseInt(bugMarkerMatch[1], 10);
+                console.log(`#${planIssue.number}: found BUG_ISSUE marker referencing #${bugIssueNumber}. Closing bug issue.`);
+
+                await github.rest.issues.createComment({
+                  owner, repo,
+                  issue_number: bugIssueNumber,
+                  body: `Closing: all work items in plan issue #${planIssue.number} have been completed.`
+                });
+
+                await github.rest.issues.update({
+                  owner, repo,
+                  issue_number: bugIssueNumber,
+                  state: 'closed'
+                });
+              }
             }
