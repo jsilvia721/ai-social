@@ -50,20 +50,82 @@ describe("issue-worker agent prompt", () => {
     });
   });
 
-  describe("Step 6: Self-Assessment", () => {
-    it("exists as Step 6 between Step 5 (Create the PR) and Step 7 (Report Back)", () => {
-      const step5Index = content.indexOf("## Step 5:");
-      const step6Index = content.indexOf("## Step 6: Self-Assessment");
-      const step7Index = content.indexOf("## Step 7:");
+  describe("Step 5: Validate Test Plan", () => {
+    it("exists as Step 5 between Step 4 (Review Gate) and Step 6 (Create the PR)", () => {
+      const step4Index = content.indexOf("## Step 4:");
+      const step5Index = content.indexOf("## Step 5: Validate Test Plan");
+      const step6Index = content.indexOf("## Step 6:");
 
-      expect(step6Index).toBeGreaterThan(step5Index);
-      expect(step6Index).toBeLessThan(step7Index);
+      expect(step5Index).toBeGreaterThan(step4Index);
+      expect(step5Index).toBeLessThan(step6Index);
+    });
+
+    it("includes infrastructure setup for database and dev server", () => {
+      const section = extractSection(content, "## Step 5: Validate Test Plan");
+      expect(section).toContain("docker compose up -d db");
+      expect(section).toContain("pg_isready");
+      expect(section).toContain("npm run dev");
+    });
+
+    it("includes all 6 sub-steps", () => {
+      const section = extractSection(content, "## Step 5: Validate Test Plan");
+      expect(section).toContain("### 1. Infrastructure Setup");
+      expect(section).toContain("### 2. Execute Each Test Plan Item");
+      expect(section).toContain("### 3. Fix and Retry on Failure");
+      expect(section).toContain("### 4. Create Issue for Blocked Steps");
+      expect(section).toContain("### 5. Cleanup");
+      expect(section).toContain("### 6. Gate");
+    });
+
+    it("uses agent-infra label for blocked step issues", () => {
+      const section = extractSection(content, "## Step 5: Validate Test Plan");
+      expect(section).toContain("agent-infra");
+      expect(section).toContain("[Agent Infra]");
+    });
+
+    it("specifies the blocked item format with issue link", () => {
+      const section = extractSection(content, "## Step 5: Validate Test Plan");
+      expect(section).toContain("— blocked, see #");
+    });
+
+    it("requires re-running ci:check after fixing failures", () => {
+      const section = extractSection(content, "## Step 5: Validate Test Plan");
+      expect(section).toContain("ci:check");
+    });
+
+    it("requires cleanup of started services", () => {
+      const section = extractSection(content, "## Step 5: Validate Test Plan");
+      expect(section).toMatch(/kill.*dev server|stop.*docker/i);
+    });
+
+    it("gates PR creation on all items being verified or having linked issues", () => {
+      const section = extractSection(content, "## Step 5: Validate Test Plan");
+      expect(section).toMatch(/proceed to step 6/i);
+    });
+  });
+
+  describe("Step 6: Create the PR (renumbered from Step 5)", () => {
+    it("includes verification status format in test plan template", () => {
+      const section = extractSection(content, "## Step 6: Create the PR");
+      expect(section).toContain("[x]");
+      expect(section).toContain("— blocked, see #");
+    });
+  });
+
+  describe("Step 7: Self-Assessment", () => {
+    it("exists as Step 7 between Step 6 (Create the PR) and Step 8 (Report Back)", () => {
+      const step6Index = content.indexOf("## Step 6:");
+      const step7Index = content.indexOf("## Step 7: Self-Assessment");
+      const step8Index = content.indexOf("## Step 8:");
+
+      expect(step7Index).toBeGreaterThan(step6Index);
+      expect(step7Index).toBeLessThan(step8Index);
     });
 
     it("runs on both success and failure paths", () => {
       const selfAssessmentSection = extractSection(
         content,
-        "## Step 6: Self-Assessment"
+        "## Step 7: Self-Assessment"
       );
       expect(selfAssessmentSection).toMatch(/success/i);
       expect(selfAssessmentSection).toMatch(/failure|blocked/i);
@@ -72,7 +134,7 @@ describe("issue-worker agent prompt", () => {
     it("includes significance filter criteria with explicit examples", () => {
       const selfAssessmentSection = extractSection(
         content,
-        "## Step 6: Self-Assessment"
+        "## Step 7: Self-Assessment"
       );
       // Should have CREATE and SKIP criteria
       expect(selfAssessmentSection).toMatch(/CREATE.*issue/i);
@@ -85,7 +147,7 @@ describe("issue-worker agent prompt", () => {
     it("caps at 3 issues per run", () => {
       const selfAssessmentSection = extractSection(
         content,
-        "## Step 6: Self-Assessment"
+        "## Step 7: Self-Assessment"
       );
       expect(selfAssessmentSection).toMatch(/3.*issue|at most 3/i);
     });
@@ -93,7 +155,7 @@ describe("issue-worker agent prompt", () => {
     it("includes the lightweight issue template with required fields", () => {
       const selfAssessmentSection = extractSection(
         content,
-        "## Step 6: Self-Assessment"
+        "## Step 7: Self-Assessment"
       );
       expect(selfAssessmentSection).toContain("claude-self-improvement");
       expect(selfAssessmentSection).toContain("Self-improvement:");
@@ -106,31 +168,40 @@ describe("issue-worker agent prompt", () => {
     it("includes escalation path for complex fixes", () => {
       const selfAssessmentSection = extractSection(
         content,
-        "## Step 6: Self-Assessment"
+        "## Step 7: Self-Assessment"
       );
-      expect(selfAssessmentSection).toMatch(/create-issue.*skill|skill.*create-issue/i);
+      expect(selfAssessmentSection).toMatch(
+        /create-issue.*skill|skill.*create-issue/i
+      );
     });
 
     it("includes error handling for gh issue create failures", () => {
       const selfAssessmentSection = extractSection(
         content,
-        "## Step 6: Self-Assessment"
+        "## Step 7: Self-Assessment"
       );
       expect(selfAssessmentSection).toMatch(/fail|error/i);
-      expect(selfAssessmentSection).toMatch(/do not fail.*overall|not.*fail.*run/i);
+      expect(selfAssessmentSection).toMatch(
+        /do not fail.*overall|not.*fail.*run/i
+      );
     });
   });
 
-  describe("Step 7: Report Back (renumbered)", () => {
-    it("is renumbered from Step 6 to Step 7", () => {
-      expect(content).toContain("## Step 7: Report Back");
-      // Old step 6 report back should not exist
-      expect(content).not.toContain("## Step 6: Report Back");
+  describe("Step 8: Report Back (renumbered from Step 7)", () => {
+    it("is renumbered to Step 8", () => {
+      expect(content).toContain("## Step 8: Report Back");
+      // Old step 7 report back should not exist
+      expect(content).not.toContain("## Step 7: Report Back");
     });
 
     it("includes Self-improvement line in the report-back comment", () => {
-      const step7Section = extractSection(content, "## Step 7: Report Back");
-      expect(step7Section).toContain("Self-improvement:");
+      const step8Section = extractSection(content, "## Step 8: Report Back");
+      expect(step8Section).toContain("Self-improvement:");
+    });
+
+    it("includes test plan validation summary in the report-back comment", () => {
+      const step8Section = extractSection(content, "## Step 8: Report Back");
+      expect(step8Section).toContain("Test plan validation:");
     });
   });
 
