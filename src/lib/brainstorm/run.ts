@@ -32,12 +32,12 @@ export async function runBrainstormAgent(deadlineMs?: number): Promise<void> {
 
   const deadline = deadlineMs ?? Date.now() + DEFAULT_BUDGET_MS;
 
-  // Find open sessions
-  const openSessions = await prisma.brainstormSession.findMany({
+  // Find open session (at most one expected)
+  const session = await prisma.brainstormSession.findFirst({
     where: { status: "OPEN" },
   });
 
-  if (openSessions.length === 0) {
+  if (!session) {
     // No open session — check if we should generate a new one
     if (Date.now() > deadline) return;
 
@@ -66,8 +66,6 @@ export async function runBrainstormAgent(deadlineMs?: number): Promise<void> {
   }
 
   // Open session exists — run iterate then promote
-  const session = openSessions[0];
-
   // Step 1: Iterate (process new comments)
   if (Date.now() < deadline) {
     try {

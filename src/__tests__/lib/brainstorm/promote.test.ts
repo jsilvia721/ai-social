@@ -174,12 +174,13 @@ describe("promoteBrainstormItems", () => {
     expect(updatedBody).toContain("→ [Plan #99]");
   });
 
-  it("increments approvedCount in DB", async () => {
+  it("increments approvedCount in DB (batched)", async () => {
     mockGetIssueBody.mockResolvedValue(BODY_ONE_CHECKED);
     const session = makeSession();
 
     await promoteBrainstormItems(session);
 
+    // Batched — single update after all promotions
     expect(mockSessionUpdate).toHaveBeenCalledWith({
       where: { id: "session-1" },
       data: { approvedCount: { increment: 1 } },

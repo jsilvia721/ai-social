@@ -19,14 +19,12 @@ jest.mock("@/lib/brainstorm/promote", () => ({
   promoteBrainstormItems: (...args: unknown[]) => mockPromoteBrainstormItems(...args),
 }));
 
-// Mock Prisma
+// Mock Prisma — findFirst is called twice: first for open session, then for cooldown
 const mockFindFirst = jest.fn();
-const mockFindMany = jest.fn();
 jest.mock("@/lib/db", () => ({
   prisma: {
     brainstormSession: {
       findFirst: (...args: unknown[]) => mockFindFirst(...args),
-      findMany: (...args: unknown[]) => mockFindMany(...args),
     },
   },
 }));
@@ -76,7 +74,6 @@ describe("runBrainstormAgent", () => {
   });
 
   it("returns early when GITHUB_TOKEN is not set", async () => {
-    // Override env for this test
     const envModule = await import("@/env");
     const originalToken = envModule.env.GITHUB_TOKEN;
     (envModule.env as Record<string, unknown>).GITHUB_TOKEN = undefined;
@@ -84,9 +81,8 @@ describe("runBrainstormAgent", () => {
     await runBrainstormAgent();
 
     expect(mockGenerateBrainstorm).not.toHaveBeenCalled();
-    expect(mockFindMany).not.toHaveBeenCalled();
+    expect(mockFindFirst).not.toHaveBeenCalled();
 
-    // Restore
     (envModule.env as Record<string, unknown>).GITHUB_TOKEN = originalToken;
   });
 
@@ -96,16 +92,13 @@ describe("runBrainstormAgent", () => {
     await runBrainstormAgent();
 
     expect(mockGenerateBrainstorm).not.toHaveBeenCalled();
-    expect(mockFindMany).not.toHaveBeenCalled();
+    expect(mockFindFirst).not.toHaveBeenCalled();
   });
 
   describe("no open session", () => {
-    beforeEach(() => {
-      mockFindMany.mockResolvedValue([]);
-    });
-
     it("generates a new brainstorm when no previous session exists", async () => {
-      mockFindFirst.mockResolvedValue(null);
+      // First call: open session check → null; Second call: last session → null
+      mockFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
 
       await runBrainstormAgent();
 
@@ -114,9 +107,10 @@ describe("runBrainstormAgent", () => {
 
     it("generates when cooldown has passed", async () => {
       const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
-      mockFindFirst.mockResolvedValue(
-        makeSession({ status: "CLOSED", closedAt: tenDaysAgo }),
-      );
+      // First call: open session → null; Second call: last closed session
+      mockFindFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeSession({ status: "CLOSED", closedAt: tenDaysAgo }));
 
       await runBrainstormAgent();
 
@@ -125,9 +119,9 @@ describe("runBrainstormAgent", () => {
 
     it("does NOT generate when cooldown has NOT passed", async () => {
       const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-      mockFindFirst.mockResolvedValue(
-        makeSession({ status: "CLOSED", closedAt: twoDaysAgo }),
-      );
+      mockFindFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeSession({ status: "CLOSED", closedAt: twoDaysAgo }));
 
       await runBrainstormAgent();
 
@@ -138,7 +132,7 @@ describe("runBrainstormAgent", () => {
   describe("open session exists", () => {
     it("runs iterate then promote (sequential)", async () => {
       const session = makeSession();
-      mockFindMany.mockResolvedValue([session]);
+      mockFindFirst.mockResolvedValueOnce(session);
 
       const callOrder: string[] = [];
       mockIterateBrainstorm.mockImplementation(async () => {
@@ -156,7 +150,7 @@ describe("runBrainstormAgent", () => {
     });
 
     it("does NOT generate a new brainstorm when session is open", async () => {
-      mockFindMany.mockResolvedValue([makeSession()]);
+      mockFindFirst.mockResolvedValueOnce(makeSession());
 
       await runBrainstormAgent();
 
@@ -167,12 +161,11 @@ describe("runBrainstormAgent", () => {
   describe("error handling", () => {
     it("reports errors via reportServerError and continues", async () => {
       const session = makeSession();
-      mockFindMany.mockResolvedValue([session]);
+      mockFindFirst.mockResolvedValueOnce(session);
       mockIterateBrainstorm.mockRejectedValue(new Error("Iterate failed"));
 
       await runBrainstormAgent();
 
-      // Should report the error
       expect(mockReportServerError).toHaveBeenCalledWith(
         expect.stringContaining("Iterate failed"),
         expect.any(Object),
@@ -184,10 +177,9 @@ describe("runBrainstormAgent", () => {
 
     it("does not crash when promote fails", async () => {
       const session = makeSession();
-      mockFindMany.mockResolvedValue([session]);
+      mockFindFirst.mockResolvedValueOnce(session);
       mockPromoteBrainstormItems.mockRejectedValue(new Error("Promote failed"));
 
-      // Should not throw
       await expect(runBrainstormAgent()).resolves.not.toThrow();
 
       expect(mockReportServerError).toHaveBeenCalledWith(
@@ -199,15 +191,12 @@ describe("runBrainstormAgent", () => {
 
   describe("deadline enforcement", () => {
     it("respects wall-clock budget", async () => {
-      // This is tested indirectly — the function should accept a deadline parameter
-      // and check it before each step. We test by passing a deadline in the past.
       const session = makeSession();
-      mockFindMany.mockResolvedValue([session]);
+      mockFindFirst.mockResolvedValueOnce(session);
 
       // Pass a deadline that's already expired
       await runBrainstormAgent(Date.now() - 1000);
 
-      // Should not run iterate or promote because deadline expired
       expect(mockIterateBrainstorm).not.toHaveBeenCalled();
       expect(mockPromoteBrainstormItems).not.toHaveBeenCalled();
     });

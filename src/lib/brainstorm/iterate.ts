@@ -123,19 +123,15 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
     // 3. Re-render issue body, preserving checked state from current body
     let updatedBody = renderBrainstormIssue(output);
 
-    // Restore checked state: match by title similarity
-    for (const prev of currentItems) {
-      if (prev.checked) {
-        // Find matching item in new output by exact title match
-        const matchingNew = output.items.find((item) => item.title === prev.title);
-        if (matchingNew) {
-          updatedBody = updatedBody.replace(
-            `- [ ] **${output.items.indexOf(matchingNew) + 1}. ${matchingNew.title}**`,
-            `- [x] **${output.items.indexOf(matchingNew) + 1}. ${matchingNew.title}**`,
-          );
-        }
-      }
-    }
+    // Restore checked state from current body via title matching
+    const checkedTitles = new Set(
+      currentItems.filter((i) => i.checked).map((i) => i.title),
+    );
+    updatedBody = updatedBody.replace(
+      /^- \[ \] \*\*(\d+)\. (.+?)\*\*/gm,
+      (match, _num: string, title: string) =>
+        checkedTitles.has(title) ? match.replace("[ ]", "[x]") : match,
+    );
 
     // 4. Update issue body
     await github.updateIssueBody(session.githubIssueNumber, updatedBody);

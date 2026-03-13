@@ -97,12 +97,13 @@ export async function promoteBrainstormItems(
   // Find items that need promotion: checked but no plan link
   const needsPromotion = items.filter((item) => item.checked && !item.hasPlanLink);
 
+  let currentBody = body;
+  let promotedCount = 0;
+
   if (needsPromotion.length > 0) {
     // Fetch existing plan issues for deduplication
     const existingPlans = await github.listIssues(["plan"], "all");
     const existingTitles = new Set(existingPlans.map((i) => i.title));
-
-    let currentBody = body;
 
     for (const item of needsPromotion) {
       const planTitle = `Plan: ${item.title}`;
@@ -127,25 +128,25 @@ export async function promoteBrainstormItems(
 
       // Track in dedup set
       existingTitles.add(planTitle);
-
-      // Increment approvedCount
-      await prisma.brainstormSession.update({
-        where: { id: session.id },
-        data: { approvedCount: { increment: 1 } },
-      });
+      promotedCount++;
     }
 
     // Update the issue body with all plan links
     if (currentBody !== body) {
       await github.updateIssueBody(session.githubIssueNumber, currentBody);
     }
+
+    // Batch increment approvedCount
+    if (promotedCount > 0) {
+      await prisma.brainstormSession.update({
+        where: { id: session.id },
+        data: { approvedCount: { increment: promotedCount } },
+      });
+    }
   }
 
-  // Auto-close check: re-parse after promotion
-  const updatedBody = needsPromotion.length > 0
-    ? (await github.getIssueBody(session.githubIssueNumber))
-    : body;
-  const updatedItems = parseBrainstormIssue(updatedBody);
+  // Auto-close check: use local currentBody (already updated)
+  const updatedItems = parseBrainstormIssue(currentBody);
 
   // All items resolved = every item is either (checked + linked) or unchecked
   const allResolved = updatedItems.length > 0 && updatedItems.every(
