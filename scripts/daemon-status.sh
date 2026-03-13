@@ -88,6 +88,7 @@ heartbeat_indicator() {
 
   local hb_epoch
   hb_epoch=$(cat "$hb_file" 2>/dev/null || echo "0")
+  case "$hb_epoch" in *[!0-9]*|"") hb_epoch=0 ;; esac
   local age=$((now - hb_epoch))
 
   if [ "$age" -lt 60 ]; then
@@ -151,6 +152,7 @@ show_status() {
   # Check daemon PID
   if [ -f "$pid_file" ]; then
     daemon_pid=$(cat "$pid_file" 2>/dev/null || echo "")
+    case "$daemon_pid" in *[!0-9]*) daemon_pid="" ;; esac
     if [ -n "$daemon_pid" ] && kill -0 "$daemon_pid" 2>/dev/null; then
       daemon_running=1
       echo "  PID: ${daemon_pid} (running)"
@@ -187,8 +189,11 @@ show_status() {
     while IFS=: read -r pid issue start_epoch type; do
       # Skip empty lines
       [ -z "$pid" ] && continue
-      # Validate PID is numeric
+      # Validate all fields
       case "$pid" in *[!0-9]*) continue ;; esac
+      case "$issue" in *[!0-9]*|"") continue ;; esac
+      case "$start_epoch" in *[!0-9]*|"") continue ;; esac
+      case "$type" in worker|plan) ;; *) continue ;; esac
       # Check if PID is alive
       if kill -0 "$pid" 2>/dev/null; then
         active_count=$((active_count + 1))

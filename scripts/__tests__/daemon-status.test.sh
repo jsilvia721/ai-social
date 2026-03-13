@@ -67,6 +67,8 @@ echo ""
 
 TEST_LOG_DIR=$(mktemp -d)
 TEST_STATE_DIR=$(mktemp -d)
+cleanup_test_dirs() { rm -rf "$TEST_LOG_DIR" "$TEST_STATE_DIR"; }
+trap cleanup_test_dirs EXIT
 
 # Create the dirs the script expects
 mkdir -p "$TEST_LOG_DIR"
