@@ -3,13 +3,16 @@ import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/blotato/publish");
 jest.mock("@/lib/alerts");
+jest.mock("@/lib/server-error-reporter");
 
 import { runScheduler, runMetricsRefresh } from "@/lib/scheduler";
 import { publishPost } from "@/lib/blotato/publish";
 import { sendFailureAlert } from "@/lib/alerts";
+import { reportServerError } from "@/lib/server-error-reporter";
 
 const mockPublishPost = publishPost as jest.MockedFunction<typeof publishPost>;
 const mockSendFailureAlert = sendFailureAlert as jest.MockedFunction<typeof sendFailureAlert>;
+const mockReportServerError = reportServerError as jest.MockedFunction<typeof reportServerError>;
 
 // Shared test data
 const mockSocialAccount = {
@@ -98,6 +101,8 @@ beforeEach(() => {
 
   // Default: alert utility succeeds
   mockSendFailureAlert.mockResolvedValue(undefined);
+  // Default: error reporter succeeds
+  mockReportServerError.mockResolvedValue(undefined);
 });
 
 // ── runScheduler ──────────────────────────────────────────────────────────────
@@ -366,6 +371,88 @@ describe("runScheduler", () => {
         data: expect.objectContaining({ status: "PUBLISHED" }),
       })
     );
+  });
+
+  it("calls reportServerError on retry failure path", async () => {
+    const post = makePost({ status: "SCHEDULED", retryCount: 0 });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockRejectedValue(new Error("Network error"));
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      "Network error",
+      expect.objectContaining({
+        url: "cron/publish",
+        metadata: expect.objectContaining({
+          postId: "post-1",
+          platform: "TWITTER",
+          businessId: "biz-1",
+          retryCount: 1,
+          source: "blotato-publish",
+        }),
+      })
+    );
+  });
+
+  it("calls reportServerError on final failure path", async () => {
+    const post = makePost({ status: "RETRYING", retryCount: 2 });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockRejectedValue(new Error("Blotato down"));
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      "Blotato down",
+      expect.objectContaining({
+        url: "cron/publish",
+        metadata: expect.objectContaining({
+          postId: "post-1",
+          platform: "TWITTER",
+          businessId: "biz-1",
+          retryCount: 3,
+          source: "blotato-publish",
+        }),
+      })
+    );
+  });
+
+  it("calls reportServerError for media validation failures", async () => {
+    const post = makePost({ status: "SCHEDULED", retryCount: 0 });
+    (post as any).socialAccount = { ...mockSocialAccount, platform: "INSTAGRAM" };
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      expect.stringContaining("requires at least one image or video"),
+      expect.objectContaining({
+        url: "cron/publish",
+        metadata: expect.objectContaining({
+          postId: "post-1",
+          platform: "INSTAGRAM",
+          source: "blotato-publish",
+        }),
+      })
+    );
+  });
+
+  it("does not crash if reportServerError throws (fire-and-forget)", async () => {
+    const post = makePost({ status: "SCHEDULED", retryCount: 0 });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockRejectedValue(new Error("Boom"));
+    prismaMock.post.update.mockResolvedValue(post as any);
+    mockReportServerError.mockRejectedValue(new Error("DB dead"));
+
+    // Should NOT throw despite reportServerError throwing
+    await expect(runScheduler()).resolves.toEqual({ processed: 1 });
   });
 
   it("recovers stuck PUBLISHING posts (older than 5 min) by resetting to RETRYING", async () => {

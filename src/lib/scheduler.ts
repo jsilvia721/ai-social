@@ -8,6 +8,7 @@ import { publishPost } from "@/lib/blotato/publish";
 import { getPostMetrics } from "@/lib/blotato/metrics";
 import { BlotatoApiError } from "@/lib/blotato/client";
 import { sendFailureAlert } from "@/lib/alerts";
+import { reportServerError } from "@/lib/server-error-reporter";
 import type { Post, SocialAccount, Business, BusinessMember, User, Platform } from "@prisma/client";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -80,6 +81,22 @@ async function handlePublishFailure(post: DuePost, err: unknown): Promise<void> 
         ].join("\n"),
       );
     }
+  }
+
+  // Log to ErrorReport table — fire-and-forget (must never crash the publisher)
+  try {
+    await reportServerError(errorMessage, {
+      url: "cron/publish",
+      metadata: {
+        postId: post.id,
+        platform: post.socialAccount.platform,
+        businessId: post.businessId,
+        retryCount,
+        source: "blotato-publish",
+      },
+    });
+  } catch {
+    // Swallow — error reporting must not interfere with publishing
   }
 }
 
