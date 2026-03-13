@@ -57,6 +57,31 @@ cloudwatch_query_errors() {
     '.[] | . + {logGroup: $lg}' 2>/dev/null || true
 }
 
+# Extract the SST stage (environment) from a CloudWatch log group name.
+# SST convention: /aws/lambda/<app>-<function>-<stage>
+# The stage is the last hyphen-separated segment of the final path component.
+# Only returns known stage names (staging, production, dev); defaults to "unknown".
+#
+# Arguments:
+#   $1 — log group name (e.g., /aws/lambda/ai-social-SiteFn-staging)
+#
+# Outputs the stage name (e.g., "staging", "production") or "unknown".
+cloudwatch_extract_stage() {
+  local log_group="${1:-}"
+  local basename="${log_group##*/}"
+
+  if [[ "$basename" == *-* ]]; then
+    local segment="${basename##*-}"
+    # Validate against known SST stages
+    case "$segment" in
+      staging|production|dev) echo "$segment" ;;
+      *) echo "unknown" ;;
+    esac
+  else
+    echo "unknown"
+  fi
+}
+
 # Normalize dynamic values (UUIDs, IDs, timestamps, numbers, query strings)
 # to stable placeholders for consistent fingerprinting.
 # Must match the TypeScript normalizeMessage() from issue #113.

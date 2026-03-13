@@ -160,11 +160,17 @@ set_cooldown() {
 # Returns the issue URL if a matching open issue exists, empty string otherwise
 find_existing_issue() {
   local fingerprint="$1"
+  local environment="${2:-}"
   local prefix="${fingerprint:0:12}"
+
+  local labels="$LABEL_BUG"
+  if [ -n "$environment" ]; then
+    labels="${labels},env:${environment}"
+  fi
 
   gh issue list \
     --state open \
-    --label "$LABEL_BUG" \
+    --label "$labels" \
     --search "$prefix" \
     --json number,url \
     -q '.[0].url' 2>/dev/null || echo ""
@@ -175,6 +181,7 @@ comment_existing_issue() {
   local issue_url="$1"
   local count="$2"
   local last_seen="$3"
+  local environment="${4:-}"
 
   local issue_number
   issue_number=$(echo "$issue_url" | grep -oE '[0-9]+$')
@@ -184,9 +191,15 @@ comment_existing_issue() {
     return
   fi
 
+  local env_line=""
+  if [ -n "$environment" ]; then
+    env_line="
+**Environment:** ${environment}"
+  fi
+
   gh issue comment "$issue_number" --body "$(cat <<EOF
 **New occurrences detected:** +${count}
-**Last seen:** ${last_seen}
+**Last seen:** ${last_seen}${env_line}
 
 _Automated by bug-monitor daemon_
 EOF
@@ -204,10 +217,16 @@ create_bug_issue() {
   local last_seen="$7"
   local fingerprint="$8"
   local metadata="${9:-}"
+  local environment="${10:-}"
 
   local summary
   summary=$(extract_error_summary "$error_message")
-  local title="Bug: ${summary}"
+  local title
+  if [ -n "$environment" ]; then
+    title="Bug [${environment}]: ${summary}"
+  else
+    title="Bug: ${summary}"
+  fi
 
   # Extract suggested files from stack trace
   local suggested_files=""
@@ -228,6 +247,10 @@ ${error_message}
 ## Source
 \`${source}\`
 
+$(if [ -n "$environment" ]; then
+  echo "## Environment"
+  echo "\`${environment}\`"
+fi)
 $(if [ -n "$stack_trace" ]; then
   echo "## Stack Trace"
   echo "\`\`\`"
@@ -260,16 +283,21 @@ _Filed automatically by bug-monitor daemon_
 EOF
 )
 
+  local labels="${LABEL_BUG},${LABEL_TRIAGE}"
+  if [ -n "$environment" ]; then
+    labels="${labels},env:${environment}"
+  fi
+
   if [ "$DRY_RUN" = true ]; then
     log "[DRY RUN] Would create issue: ${title}"
-    log "[DRY RUN] Labels: ${LABEL_BUG}, ${LABEL_TRIAGE}"
+    log "[DRY RUN] Labels: ${labels}"
     return
   fi
 
   local issue_url
   issue_url=$(gh issue create \
     --title "$title" \
-    --label "${LABEL_BUG},${LABEL_TRIAGE}" \
+    --label "$labels" \
     --body "$body" 2>/dev/null || echo "")
 
   if [ -n "$issue_url" ]; then
@@ -301,10 +329,17 @@ process_error() {
   local metadata="${9:-}"
   local source_type="${10:-CLOUDWATCH}"
   local existing_issue_number="${11:-}"
+  local environment="${12:-}"
+
+  # Environment-scoped cooldown key
+  local cooldown_key="$fp"
+  if [ -n "$environment" ]; then
+    cooldown_key="${environment}:${fp}"
+  fi
 
   # CloudWatch: check file-based cooldown and count threshold
   if [ "$source_type" = "CLOUDWATCH" ]; then
-    if is_in_cooldown "$fp"; then
+    if is_in_cooldown "$cooldown_key"; then
       echo "0"
       return
     fi
@@ -318,7 +353,7 @@ process_error() {
     # Skip low-count non-fatal errors
     if [ "$err_count" -lt "$MIN_COUNT_THRESHOLD" ] && [ "$is_fatal" = false ]; then
       log "Skipping low-count error (${err_count}x): $(echo "$msg" | head -c 80)"
-      set_cooldown "$fp"
+      set_cooldown "$cooldown_key"
       echo "0"
       return
     fi
@@ -339,8 +374,8 @@ process_error() {
       # Issue is still open — comment on it
       local issue_url
       issue_url="https://github.com/$(gh repo view --json nameWithOwner -q '.nameWithOwner')/issues/${existing_issue_number}"
-      comment_existing_issue "$issue_url" "$err_count" "$last_seen"
-      [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$fp"
+      comment_existing_issue "$issue_url" "$err_count" "$last_seen" "$environment"
+      [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$cooldown_key"
       echo "0"
       return
     fi
@@ -350,11 +385,11 @@ process_error() {
 
   # Check for existing open issue by fingerprint search
   local existing_url
-  existing_url=$(find_existing_issue "$fp")
+  existing_url=$(find_existing_issue "$fp" "$environment")
 
   if [ -n "$existing_url" ]; then
-    comment_existing_issue "$existing_url" "$err_count" "$last_seen"
-    [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$fp"
+    comment_existing_issue "$existing_url" "$err_count" "$last_seen" "$environment"
+    [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$cooldown_key"
     echo "0"
     return
   fi
@@ -363,9 +398,9 @@ process_error() {
   local issue_number
   issue_number=$(create_bug_issue \
     "$msg" "$source" "$stack" "$url" \
-    "$err_count" "$first_seen" "$last_seen" "$fp" "$metadata")
+    "$err_count" "$first_seen" "$last_seen" "$fp" "$metadata" "$environment")
 
-  [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$fp"
+  [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$cooldown_key"
 
   if [ -n "$issue_number" ]; then
     echo "$issue_number"
@@ -417,22 +452,28 @@ poll_cloudwatch() {
 
       [ -z "$msg" ] && continue
 
-      local fp
+      local fp stage agg_key
       fp=$(generate_fingerprint "SERVER" "$msg")
+      stage=$(cloudwatch_extract_stage "$group")
+      # Aggregate by fingerprint + stage so the same error in different
+      # environments produces separate issues.
+      agg_key="${fp}_${stage}"
 
-      if [ ! -d "$cw_tmp/$fp" ]; then
-        mkdir -p "$cw_tmp/$fp"
-        printf '%s' "$msg" > "$cw_tmp/$fp/message"
-        echo "1" > "$cw_tmp/$fp/count"
-        echo "$ts" > "$cw_tmp/$fp/first_seen"
-        echo "$ts" > "$cw_tmp/$fp/last_seen"
-        echo "$group" > "$cw_tmp/$fp/log_group"
+      if [ ! -d "$cw_tmp/$agg_key" ]; then
+        mkdir -p "$cw_tmp/$agg_key"
+        printf '%s' "$msg" > "$cw_tmp/$agg_key/message"
+        echo "1" > "$cw_tmp/$agg_key/count"
+        echo "$ts" > "$cw_tmp/$agg_key/first_seen"
+        echo "$ts" > "$cw_tmp/$agg_key/last_seen"
+        echo "$group" > "$cw_tmp/$agg_key/log_group"
+        echo "$fp" > "$cw_tmp/$agg_key/fingerprint"
+        echo "$stage" > "$cw_tmp/$agg_key/stage"
       else
         local prev_count
-        prev_count=$(cat "$cw_tmp/$fp/count")
-        echo $((prev_count + 1)) > "$cw_tmp/$fp/count"
-        if [ "$ts" -gt "$(cat "$cw_tmp/$fp/last_seen")" ] 2>/dev/null; then
-          echo "$ts" > "$cw_tmp/$fp/last_seen"
+        prev_count=$(cat "$cw_tmp/$agg_key/count")
+        echo $((prev_count + 1)) > "$cw_tmp/$agg_key/count"
+        if [ "$ts" -gt "$(cat "$cw_tmp/$agg_key/last_seen")" ] 2>/dev/null; then
+          echo "$ts" > "$cw_tmp/$agg_key/last_seen"
         fi
       fi
     done < <(cloudwatch_query_errors "$since_ms" "$group" "$SEVERITY")
@@ -440,28 +481,32 @@ poll_cloudwatch() {
 
   # Process collected errors
   local count="$issues_created"
-  for fp_dir in "$cw_tmp"/*/; do
-    [ -d "$fp_dir" ] || continue
-    local fp
-    fp=$(basename "$fp_dir")
+  for agg_dir in "$cw_tmp"/*/; do
+    [ -d "$agg_dir" ] || continue
 
     if [ "$count" -ge "$MAX_ISSUES_PER_CYCLE" ]; then
       log "Max issues per cycle reached, stopping"
       break
     fi
 
+    local fp stage
+    fp=$(cat "$agg_dir/fingerprint")
+    stage=$(cat "$agg_dir/stage" 2>/dev/null || echo "")
+
     local result
     result=$(process_error \
       "$fp" \
-      "$(cat "$cw_tmp/$fp/message")" \
-      "$(cat "$cw_tmp/$fp/count")" \
+      "$(cat "$agg_dir/message")" \
+      "$(cat "$agg_dir/count")" \
       "SERVER" \
       "" \
-      "$(cat "$cw_tmp/$fp/log_group")" \
-      "$(ms_to_human "$(cat "$cw_tmp/$fp/first_seen")")" \
-      "$(ms_to_human "$(cat "$cw_tmp/$fp/last_seen")")" \
+      "$(cat "$agg_dir/log_group")" \
+      "$(ms_to_human "$(cat "$agg_dir/first_seen")")" \
+      "$(ms_to_human "$(cat "$agg_dir/last_seen")")" \
       "" \
-      "CLOUDWATCH")
+      "CLOUDWATCH" \
+      "" \
+      "$stage")
 
     if [ "$result" != "0" ]; then
       count=$((count + 1))
@@ -476,6 +521,8 @@ poll_cloudwatch() {
 # --- Poll ErrorReport table ---------------------------------------------------
 poll_error_reports() {
   local issues_created="$1"
+  local db_url="${2:-${DATABASE_URL:-}}"
+  local environment="${3:-}"
 
   if [ "$issues_created" -ge "$MAX_ISSUES_PER_CYCLE" ]; then
     log "Max issues per cycle reached, skipping DB poll"
@@ -483,13 +530,21 @@ poll_error_reports() {
     return
   fi
 
-  if [ -z "${DATABASE_URL:-}" ]; then
-    log "Warning: DATABASE_URL not set, skipping ErrorReport poll"
+  if [ -z "$db_url" ]; then
+    if [ -n "$environment" ]; then
+      log "Warning: DATABASE_URL_${environment^^} not set, skipping ErrorReport poll (${environment})"
+    else
+      log "Warning: DATABASE_URL not set, skipping ErrorReport poll"
+    fi
     echo "$issues_created"
     return
   fi
 
-  log "Polling ErrorReport table for NEW and re-triage errors..."
+  local env_label=""
+  if [ -n "$environment" ]; then
+    env_label=" (${environment})"
+  fi
+  log "Polling ErrorReport table${env_label} for NEW and re-triage errors..."
 
   local query="SELECT json_agg(row_to_json(t)) FROM (
     SELECT fingerprint, message, stack, source, url, metadata::text, count,
@@ -506,7 +561,7 @@ poll_error_reports() {
   ) t;"
 
   local result
-  result=$(psql "$DATABASE_URL" -t -A -c "$query" 2>>"$LOG_DIR/daemon.log" || echo "null")
+  result=$(psql "$db_url" -t -A -c "$query" 2>>"$LOG_DIR/daemon.log" || echo "null")
 
   if [ "$result" = "null" ] || [ -z "$result" ]; then
     log "No actionable error reports found"
@@ -541,7 +596,7 @@ poll_error_reports() {
     issue_number=$(process_error \
       "$fp" "$msg" "$err_count" "$err_source" \
       "$stack" "$url" "$first_seen" "$last_seen" "$metadata" \
-      "DB" "$existing_issue_num")
+      "DB" "$existing_issue_num" "$environment")
 
     if [ "$issue_number" != "0" ] && [ -n "$issue_number" ]; then
       # Validate inputs before SQL interpolation (prevent injection)
@@ -556,7 +611,7 @@ poll_error_reports() {
 
       # Update ErrorReport status and set acknowledgedAt
       if [ "$DRY_RUN" = false ]; then
-        psql "$DATABASE_URL" -c \
+        psql "$db_url" -c \
           "UPDATE \"ErrorReport\" SET status = 'ISSUE_CREATED', \"githubIssueNumber\" = ${issue_number}, \"acknowledgedAt\" = NOW() WHERE fingerprint = '${fp}';" \
           2>>"$LOG_DIR/daemon.log" || log "Warning: failed to update ErrorReport for fingerprint ${fp}"
       else
@@ -573,7 +628,7 @@ poll_error_reports() {
         fi
 
         if [ "$DRY_RUN" = false ]; then
-          psql "$DATABASE_URL" -c \
+          psql "$db_url" -c \
             "UPDATE \"ErrorReport\" SET \"acknowledgedAt\" = NOW() WHERE fingerprint = '${fp}';" \
             2>>"$LOG_DIR/daemon.log" || log "Warning: failed to update acknowledgedAt for fingerprint ${fp}"
         else
@@ -621,8 +676,16 @@ while true; do
   # Poll CloudWatch
   local_issues_created=$(poll_cloudwatch "$since_ms" "$local_issues_created")
 
-  # Poll ErrorReport table
-  local_issues_created=$(poll_error_reports "$local_issues_created")
+  # Poll ErrorReport table (multi-environment or single-env fallback)
+  if [ -n "${DATABASE_URL_STAGING:-}" ]; then
+    local_issues_created=$(poll_error_reports "$local_issues_created" "$DATABASE_URL_STAGING" "staging")
+  fi
+  if [ -n "${DATABASE_URL_PRODUCTION:-}" ]; then
+    local_issues_created=$(poll_error_reports "$local_issues_created" "$DATABASE_URL_PRODUCTION" "production")
+  fi
+  if [ -z "${DATABASE_URL_STAGING:-}" ] && [ -z "${DATABASE_URL_PRODUCTION:-}" ]; then
+    local_issues_created=$(poll_error_reports "$local_issues_created")
+  fi
 
   # Save current time for next poll
   save_poll_time
