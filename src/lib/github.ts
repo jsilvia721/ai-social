@@ -68,27 +68,31 @@ function repoParams() {
 }
 
 /**
- * Check if an error is a GitHub 403 permission error.
- * These occur when the GITHUB_TOKEN lacks required scopes (e.g., issues:write).
+ * Run a GitHub API call with graceful 403 handling.
+ * When the token lacks required scopes, logs a warning and returns the fallback
+ * instead of throwing. Non-403 errors are re-thrown.
  */
-function isPermissionError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "status" in error &&
-    (error as Record<string, unknown>).status === 403
-  );
-}
-
-/**
- * Log a warning about a GitHub permission error.
- * Includes guidance on which token scope is likely missing.
- */
-function warnPermissionError(operation: string, error: unknown): void {
-  const msg = error instanceof Error ? error.message : String(error);
-  console.warn(
-    `GitHub API permission error in ${operation}: ${msg}. ` +
-      `Ensure GITHUB_TOKEN has the required scopes (e.g., "issues:write" or "repo").`,
-  );
+async function withPermissionFallback<T>(
+  operation: string,
+  fallback: T,
+  fn: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "status" in error &&
+      (error as Record<string, unknown>).status === 403
+    ) {
+      console.warn(
+        `GitHub API permission error in ${operation}: ${error.message}. ` +
+          `Ensure GITHUB_TOKEN has the required scopes (e.g., "issues:write" or "repo").`,
+      );
+      return fallback;
+    }
+    throw error;
+  }
 }
 
 // ── Public helpers ──────────────────────────────────────────────────────────
@@ -103,7 +107,7 @@ export async function createIssue(
   const octokit = getOctokit();
   if (!octokit) return { number: 0, title, html_url: "" };
 
-  try {
+  return withPermissionFallback("createIssue", { number: 0, title, html_url: "" }, async () => {
     const { data } = await octokit.issues.create({
       ...repoParams(),
       title,
@@ -111,13 +115,7 @@ export async function createIssue(
       labels,
     });
     return { number: data.number, title: data.title, html_url: data.html_url };
-  } catch (error) {
-    if (isPermissionError(error)) {
-      warnPermissionError("createIssue", error);
-      return { number: 0, title, html_url: "" };
-    }
-    throw error;
-  }
+  });
 }
 
 export async function updateIssueBody(
@@ -129,19 +127,13 @@ export async function updateIssueBody(
   const octokit = getOctokit();
   if (!octokit) return;
 
-  try {
+  await withPermissionFallback("updateIssueBody", undefined, async () => {
     await octokit.issues.update({
       ...repoParams(),
       issue_number: issueNumber,
       body,
     });
-  } catch (error) {
-    if (isPermissionError(error)) {
-      warnPermissionError("updateIssueBody", error);
-      return;
-    }
-    throw error;
-  }
+  });
 }
 
 export async function getIssueBody(issueNumber: number): Promise<string> {
@@ -193,19 +185,13 @@ export async function closeIssue(issueNumber: number): Promise<void> {
   const octokit = getOctokit();
   if (!octokit) return;
 
-  try {
+  await withPermissionFallback("closeIssue", undefined, async () => {
     await octokit.issues.update({
       ...repoParams(),
       issue_number: issueNumber,
       state: "closed",
     });
-  } catch (error) {
-    if (isPermissionError(error)) {
-      warnPermissionError("closeIssue", error);
-      return;
-    }
-    throw error;
-  }
+  });
 }
 
 export async function listComments(
@@ -247,20 +233,14 @@ export async function createComment(
   const octokit = getOctokit();
   if (!octokit) return { id: 0, body };
 
-  try {
+  return withPermissionFallback("createComment", { id: 0, body }, async () => {
     const { data } = await octokit.issues.createComment({
       ...repoParams(),
       issue_number: issueNumber,
       body,
     });
     return { id: data.id, body: data.body ?? "" };
-  } catch (error) {
-    if (isPermissionError(error)) {
-      warnPermissionError("createComment", error);
-      return { id: 0, body };
-    }
-    throw error;
-  }
+  });
 }
 
 export async function getRepoFile(path: string): Promise<string> {
