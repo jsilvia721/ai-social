@@ -32,6 +32,8 @@ export default $config({
       blotatoApiKey:       new sst.Secret("BlotatoApiKey"),
       // SES_FROM_EMAIL: optional — set SesFromEmail secret to enable failure alert emails
       sesFromEmail:        null,
+      // GitHub: optional — set GitHubToken secret to enable brainstorm agent
+      githubToken:         null,
       // ADMIN_EMAILS: optional — comma-separated emails to auto-promote to admin on sign-in
       adminEmails:         new sst.Secret("AdminEmails"),
     };
@@ -84,6 +86,9 @@ export default $config({
       // SES failure alerts: disabled until SesFromEmail secret is configured
       // Admin role bootstrap: optional, comma-separated emails granted isAdmin on sign-in
       ...(secrets.adminEmails ? { ADMIN_EMAILS: secrets.adminEmails.value } : {}),
+      ...(secrets.githubToken ? { GITHUB_TOKEN: secrets.githubToken.value } : {}),
+      GITHUB_REPO_OWNER: "jsilvia721",
+      GITHUB_REPO_NAME: "ai-social",
     };
 
     // ── Next.js App ───────────────────────────────────────────────
@@ -159,6 +164,17 @@ export default $config({
       schedule: "cron(0 2 ? * SUN *)",
       job: {
         handler: "src/cron/optimize.handler",
+        environment,
+        timeout: "5 minutes",
+        logging: { retention: "1 month" },
+        concurrency: 1,
+      },
+    });
+    // ── Cron: Brainstorm Agent (every 60 minutes) ─────────────────
+    new sst.aws.Cron("BrainstormAgent", {
+      schedule: "rate(60 minutes)",
+      job: {
+        handler: "src/cron/brainstorm.handler",
         environment,
         timeout: "5 minutes",
         logging: { retention: "1 month" },

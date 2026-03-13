@@ -272,6 +272,22 @@ model StrategyDigest {
   @@index([businessId, createdAt])
 }
 
+// ── Brainstorm Agent ─────────────────────────────────────────────────────────
+
+model BrainstormSession {
+  id                     String    @id @default(cuid())
+  githubIssueNumber      Int       @unique
+  status                 String    @default("OPEN")
+  lastProcessedCommentId Int?
+  itemCount              Int       @default(0)
+  approvedCount          Int       @default(0)
+  closedAt               DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([status])
+}
+
 // ── Error Tracking ──────────────────────────────────────────────────────────
 
 model ErrorReport {
