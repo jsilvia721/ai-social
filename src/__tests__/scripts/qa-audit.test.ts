@@ -190,12 +190,12 @@ describe("getLabelsForFinding", () => {
     expect(labels).toEqual(["qa-audit", "needs-triage", "simple-fix"]);
   });
 
-  it("returns needs-plan labels for complex findings", () => {
+  it("returns complex labels for complex findings", () => {
     const labels = getLabelsForFinding({
       ...baseFinding,
       complexity: "complex",
     });
-    expect(labels).toEqual(["qa-audit", "needs-triage", "needs-plan"]);
+    expect(labels).toEqual(["qa-audit", "needs-triage", "complex"]);
   });
 
   it("always includes qa-audit and needs-triage", () => {
