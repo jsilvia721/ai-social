@@ -452,7 +452,11 @@ while true; do
       log "Worker PID $w_pid for issue #${w_issue} exceeded wall-clock timeout (${elapsed_min}m > ${WALL_TIMEOUT}m)"
       commit_wip_if_needed "$w_issue"
       kill -TERM "$w_pid" 2>/dev/null || true
-      sleep 10
+      # Poll for graceful exit (10s max, 1s intervals to stay responsive to signals)
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "$w_pid" 2>/dev/null || break
+        sleep 1
+      done
       if kill -0 "$w_pid" 2>/dev/null; then
         kill -KILL "$w_pid" 2>/dev/null || true
       fi

@@ -116,6 +116,10 @@ record_worker() {
 # $1 — PID to remove
 remove_worker() {
   local pid="$1"
+  # Validate PID is numeric to prevent regex injection
+  case "$pid" in
+    *[!0-9]*|"") return 1 ;;
+  esac
   local file="${WORKER_PID_FILE:-./logs/issue-daemon/.active_pids}"
   [ -f "$file" ] || return 0
   local tmp
