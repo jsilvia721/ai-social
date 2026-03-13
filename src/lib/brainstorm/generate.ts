@@ -15,6 +15,8 @@ import { prisma } from "@/lib/db";
 
 const client = new Anthropic();
 
+// NOTE: This JSON Schema must stay in sync with BrainstormOutputSchema in types.ts.
+// The Anthropic tool-use API requires raw JSON Schema, so we cannot derive this from Zod.
 const brainstormTool: Anthropic.Tool = {
   name: "generate_brainstorm",
   description:
@@ -69,12 +71,12 @@ const brainstormTool: Anthropic.Tool = {
 
 /**
  * Generate a brainstorm issue: gather context, call Claude, create GitHub issue, save DB record.
- * Returns the issue number and URL, or null on failure.
+ * Throws on failure — callers should handle errors explicitly.
  */
 export async function generateBrainstorm(): Promise<{
   issueNumber: number;
   url: string;
-} | null> {
+}> {
   if (shouldMockExternalApis()) {
     return mockGenerateBrainstorm();
   }

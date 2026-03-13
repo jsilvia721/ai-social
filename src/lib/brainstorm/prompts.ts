@@ -19,6 +19,7 @@ export interface GenerationContext {
   visionDoc: string;
 }
 
+/** Escape XML content characters. Quotes/apostrophes not needed — values are element content, not attributes. */
 function escapeXml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

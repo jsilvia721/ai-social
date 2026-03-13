@@ -70,7 +70,3 @@ export function mockGenerateBrainstorm(): {
   };
 }
 
-/** Exposed for tests that need the raw output shape. */
-export function getMockBrainstormOutput(): BrainstormOutput {
-  return { ...MOCK_OUTPUT, items: [...MOCK_OUTPUT.items] };
-}

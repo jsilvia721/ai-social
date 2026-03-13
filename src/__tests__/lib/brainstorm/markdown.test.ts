@@ -199,6 +199,26 @@ describe("updateItemWithPlanLink", () => {
     );
   });
 
+  it("is idempotent — does not duplicate plan link on second call", () => {
+    const md = renderBrainstormIssue(sampleOutput);
+    const first = updateItemWithPlanLink(
+      md,
+      "AI Content Calendar",
+      42,
+      "https://github.com/test/issues/42"
+    );
+    const second = updateItemWithPlanLink(
+      first,
+      "AI Content Calendar",
+      42,
+      "https://github.com/test/issues/42"
+    );
+    expect(second).toBe(first);
+    // Count occurrences of the plan link — should be exactly 1
+    const matches = second.match(/→ \[Plan #42\]/g);
+    expect(matches).toHaveLength(1);
+  });
+
   it("returns original markdown when title not found", () => {
     const md = renderBrainstormIssue(sampleOutput);
     const updated = updateItemWithPlanLink(
