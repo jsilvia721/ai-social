@@ -394,7 +394,7 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
         socialAccountId: selectedAccountId,
         mediaUrls,
         ...(activeBusinessId ? { businessId: activeBusinessId } : {}),
-        ...(coverImageUrl ? { coverImageUrl } : {}),
+        ...(selectedPlatform === "INSTAGRAM" && hasVideo ? { coverImageUrl } : {}),
       };
 
       if (scheduleMode === "now") {
@@ -500,7 +500,6 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
         className="hidden"
         onChange={handleFileSelect}
       />
-      {/* hidden cover image file input */}
       <input
         ref={coverInputRef}
         type="file"

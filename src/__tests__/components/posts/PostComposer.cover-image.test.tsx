@@ -191,7 +191,7 @@ describe("PostComposer cover image", () => {
       });
     });
 
-    it("does not include coverImageUrl when not set", async () => {
+    it("sends coverImageUrl as null when cover image is removed in edit mode", async () => {
       const fetchMock = jest.fn()
         .mockResolvedValueOnce({
           ok: true,
@@ -207,6 +207,47 @@ describe("PostComposer cover image", () => {
             socialAccountId: "acc-ig",
             platform: "INSTAGRAM",
             username: "testgram",
+            scheduledAt: null,
+            mediaUrls: ["https://example.com/video.mp4"],
+            coverImageUrl: "https://example.com/cover.jpg",
+          }}
+        />
+      );
+
+      // Remove the cover image
+      const removeButton = screen.getByLabelText("Remove cover image");
+      fireEvent.click(removeButton);
+
+      // Submit the form
+      const submitButton = screen.getByRole("button", { name: /save draft/i });
+      fireEvent.click(submitButton);
+
+      await waitFor(() => {
+        const patchCall = fetchMock.mock.calls.find(
+          (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("/api/posts/")
+        );
+        expect(patchCall).toBeDefined();
+        const body = JSON.parse((patchCall![1] as { body: string }).body);
+        expect(body.coverImageUrl).toBeNull();
+      });
+    });
+
+    it("does not include coverImageUrl for non-Instagram platform", async () => {
+      const fetchMock = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ id: "p1" }),
+        });
+      global.fetch = fetchMock;
+
+      render(
+        <PostComposer
+          editPost={{
+            id: "p1",
+            content: "hello",
+            socialAccountId: "acc-tw",
+            platform: "TWITTER",
+            username: "testbird",
             scheduledAt: null,
             mediaUrls: ["https://example.com/video.mp4"],
           }}
