@@ -112,7 +112,10 @@ jobs:
   e2e:
     name: E2E Tests (Playwright)
     needs: [changes]
-    if: github.event_name == 'push' || needs.changes.outputs.ui == 'true' || contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    if: |
+      always() &&
+      !cancelled() &&
+      (github.event_name == 'push' || needs.changes.outputs.ui == 'true' || contains(github.event.pull_request.labels.*.name, 'run-e2e'))
     runs-on: ubuntu-latest
 
     services:
@@ -202,8 +205,14 @@ jobs:
   # ── Deploy to Staging (automatic on merge to main) ─────────────────────────
   deploy-staging:
     name: Deploy to Staging
-    needs: [lint, test, e2e, changes]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [lint, test, e2e]
+    if: |
+      always() &&
+      !cancelled() &&
+      github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.lint.result == 'success' &&
+      needs.test.result == 'success' &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
     concurrency:
       group: deploy-staging
       cancel-in-progress: true
