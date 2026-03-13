@@ -110,13 +110,8 @@ heartbeat_indicator() {
 # Returns the tag (e.g., "step_3_implement") or empty string.
 get_progress_tag() {
   local issue="$1"
-  local comment
-  comment=$(gh issue view "$issue" --json comments \
-    -q '[.comments[] | select(.body | test("<!-- progress:")) | .body] | last' 2>/dev/null || echo "")
-  if [ -n "$comment" ]; then
-    # Extract tag from <!-- progress:TAG -->
-    echo "$comment" | sed -n 's/.*<!-- progress:\([a-z0-9_]*\) -->.*/\1/p' | head -1
-  fi
+  gh issue view "$issue" --json comments \
+    -q '[.comments[].body | capture("<!-- progress:(?<t>[a-z0-9_]+) -->") | .t] | last // empty' 2>/dev/null || true
 }
 
 # --- Display ------------------------------------------------------------------

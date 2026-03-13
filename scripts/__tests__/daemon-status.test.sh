@@ -285,14 +285,14 @@ echo "x" > "$TEST_LOG_DIR/issue-90.log"
 output=$(run_status)
 assert_not_contains "without -g, no progress tag shown" "step_" "$output"
 
-# With -g flag, uses a mock gh command that returns a progress comment
-# Create a mock gh script
+# With -g flag, uses a mock gh command that returns the extracted tag
+# (simulates what gh --json -q would return after jq processing)
 MOCK_BIN_DIR=$(mktemp -d)
 cat > "$MOCK_BIN_DIR/gh" <<'MOCK_GH'
 #!/usr/bin/env bash
-# Mock gh that returns a progress comment for issue queries
+# Mock gh that returns the extracted progress tag (as jq capture would)
 if [[ "$*" == *"issue view"* ]]; then
-  echo "<!-- progress:step_3_implement -->**[Progress]** Implementation complete."
+  echo "step_3_implement"
 fi
 MOCK_GH
 chmod +x "$MOCK_BIN_DIR/gh"
