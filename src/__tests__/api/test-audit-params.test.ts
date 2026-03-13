@@ -3,11 +3,6 @@ import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 
 import { GET } from "@/app/api/test/audit-params/route";
-import { NextRequest } from "next/server";
-
-function makeRequest() {
-  return new NextRequest(new URL("/api/test/audit-params", "http://localhost"));
-}
 
 beforeEach(() => {
   resetPrismaMock();
@@ -25,7 +20,7 @@ describe("GET /api/test/audit-params", () => {
     });
 
     it("returns 404 when PLAYWRIGHT_E2E is absent", async () => {
-      const res = await GET(makeRequest());
+      const res = await GET();
       expect(res.status).toBe(404);
       expect(prismaMock.business.findFirst).not.toHaveBeenCalled();
     });
@@ -52,7 +47,7 @@ describe("GET /api/test/audit-params", () => {
           createdAt: new Date(),
         } as never);
 
-      const res = await GET(makeRequest());
+      const res = await GET();
       expect(res.status).toBe(200);
 
       const body = await res.json();
@@ -90,7 +85,7 @@ describe("GET /api/test/audit-params", () => {
           createdAt: new Date(),
         } as never);
 
-      const res = await GET(makeRequest());
+      const res = await GET();
       expect(res.status).toBe(200);
 
       const body = await res.json();
@@ -108,7 +103,7 @@ describe("GET /api/test/audit-params", () => {
       prismaMock.business.findFirst.mockResolvedValue(null);
       prismaMock.post.findFirst.mockResolvedValue(null);
 
-      const res = await GET(makeRequest());
+      const res = await GET();
       expect(res.status).toBe(200);
 
       const body = await res.json();
