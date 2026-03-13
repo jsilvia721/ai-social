@@ -95,3 +95,52 @@ is_drain_mode() {
 clear_drain_mode() {
   rm -f "$DAEMON_STATE_DIR/drain"
 }
+
+# --- Worker PID metadata tracking -------------------------------------------
+# File format: PID:ISSUE_NUMBER:START_EPOCH:TYPE (one entry per line)
+# Override path via WORKER_PID_FILE env var for testing.
+
+# Record a new worker entry.
+# $1 — PID, $2 — issue number, $3 — type ("worker" or "plan")
+record_worker() {
+  local pid="$1"
+  local issue="$2"
+  local type="$3"
+  local start_epoch
+  start_epoch=$(date +%s)
+  local file="${WORKER_PID_FILE:-./logs/issue-daemon/.active_pids}"
+  echo "${pid}:${issue}:${start_epoch}:${type}" >> "$file"
+}
+
+# Remove a worker entry by PID.
+# $1 — PID to remove
+remove_worker() {
+  local pid="$1"
+  # Validate PID is numeric to prevent regex injection
+  case "$pid" in
+    *[!0-9]*|"") return 1 ;;
+  esac
+  local file="${WORKER_PID_FILE:-./logs/issue-daemon/.active_pids}"
+  [ -f "$file" ] || return 0
+  local tmp
+  tmp=$(mktemp)
+  grep -v "^${pid}:" "$file" > "$tmp" || true
+  mv "$tmp" "$file"
+}
+
+# List all worker entries (caller filters dead PIDs).
+# Outputs lines in PID:ISSUE:START_EPOCH:TYPE format.
+list_workers() {
+  local file="${WORKER_PID_FILE:-./logs/issue-daemon/.active_pids}"
+  [ -f "$file" ] || return 0
+  cat "$file"
+}
+
+# Get the start epoch for a given PID.
+# $1 — PID to look up. Outputs epoch or empty string.
+get_worker_start() {
+  local pid="$1"
+  local file="${WORKER_PID_FILE:-./logs/issue-daemon/.active_pids}"
+  [ -f "$file" ] || return 0
+  awk -F: -v pid="$pid" '$1 == pid { print $3 }' "$file"
+}
