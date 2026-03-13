@@ -53,13 +53,19 @@ export async function GET(req: NextRequest) {
   });
 
   // Cookie name: NextAuth uses "next-auth.session-token" over HTTP (localhost).
-  // Over HTTPS it would be "__Secure-next-auth.session-token" — not needed for tests.
+  // Over HTTPS it uses "__Secure-next-auth.session-token" with `secure: true`.
+  const isHttps = req.url.startsWith("https://") ||
+    req.headers.get("x-forwarded-proto") === "https";
+  const cookieName = isHttps
+    ? "__Secure-next-auth.session-token"
+    : "next-auth.session-token";
+
   const response = NextResponse.json({ ok: true, userId: user.id });
-  response.cookies.set("next-auth.session-token", token, {
+  response.cookies.set(cookieName, token, {
     httpOnly: true,
     path: "/",
     sameSite: "lax",
-    // No `secure: true` — tests run over http://localhost
+    ...(isHttps && { secure: true }),
     maxAge: 60 * 60 * 24,
   });
   return response;
