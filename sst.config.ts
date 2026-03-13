@@ -33,7 +33,7 @@ export default $config({
       // SES_FROM_EMAIL: optional — set SesFromEmail secret to enable failure alert emails
       sesFromEmail:        null,
       // GitHub: optional — set GitHubToken secret to enable brainstorm agent
-      githubToken:         null as null | InstanceType<typeof sst.Secret>,
+      githubToken:         new sst.Secret("GithubToken"),
       // ADMIN_EMAILS: optional — comma-separated emails to auto-promote to admin on sign-in
       adminEmails:         new sst.Secret("AdminEmails"),
     };
@@ -89,6 +89,7 @@ export default $config({
       ...(secrets.githubToken ? { GITHUB_TOKEN: secrets.githubToken.value } : {}),
       GITHUB_REPO_OWNER: "jsilvia721",
       GITHUB_REPO_NAME: "ai-social",
+      GITHUB_BOT_USERNAME: "jsilvia721",
       // Enable test auth endpoint on non-production stages for Playwright E2E
       PLAYWRIGHT_E2E: $app.stage !== "production" ? "true" : "",
     };
