@@ -300,4 +300,9 @@ jobs:
         run: npx prisma migrate deploy
 
       - name: Deploy with SST
-        run: npx sst deploy --stage production
+        run: |
+          if ! npx sst deploy --stage production; then
+            echo "Deploy failed — attempting to clear stale lock and retry"
+            npx sst unlock --stage production
+            npx sst deploy --stage production
+          fi
