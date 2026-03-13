@@ -28,24 +28,10 @@ describe("GET /api/test/audit-params", () => {
 
   describe("when PLAYWRIGHT_E2E is set", () => {
     it("returns all params when data exists", async () => {
-      prismaMock.business.findFirst.mockResolvedValue({
-        id: "biz-1",
-        name: "Test Biz",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        description: null,
-        industry: null,
-        targetAudience: null,
-        brandVoice: null,
-        onboardingCompleted: false,
-      } as never);
+      prismaMock.business.findFirst.mockResolvedValue({ id: "biz-1" } as never);
 
       prismaMock.post.findFirst
-        .mockResolvedValueOnce({
-          id: "post-1",
-          repurposeGroupId: "rpg-1",
-          createdAt: new Date(),
-        } as never);
+        .mockResolvedValueOnce({ id: "post-1", repurposeGroupId: "rpg-1" } as never);
 
       const res = await GET();
       expect(res.status).toBe(200);
@@ -59,31 +45,13 @@ describe("GET /api/test/audit-params", () => {
     });
 
     it("searches for a separate post with repurposeGroupId when first post lacks one", async () => {
-      prismaMock.business.findFirst.mockResolvedValue({
-        id: "biz-2",
-        name: "Test Biz",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        description: null,
-        industry: null,
-        targetAudience: null,
-        brandVoice: null,
-        onboardingCompleted: false,
-      } as never);
+      prismaMock.business.findFirst.mockResolvedValue({ id: "biz-2" } as never);
 
       // First findFirst call: most recent post (no repurposeGroupId)
       prismaMock.post.findFirst
-        .mockResolvedValueOnce({
-          id: "post-2",
-          repurposeGroupId: null,
-          createdAt: new Date(),
-        } as never)
+        .mockResolvedValueOnce({ id: "post-2", repurposeGroupId: null } as never)
         // Second findFirst call: post with repurposeGroupId
-        .mockResolvedValueOnce({
-          id: "post-3",
-          repurposeGroupId: "rpg-2",
-          createdAt: new Date(),
-        } as never);
+        .mockResolvedValueOnce({ id: "post-3", repurposeGroupId: "rpg-2" } as never);
 
       const res = await GET();
       expect(res.status).toBe(200);
