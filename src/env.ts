@@ -23,6 +23,12 @@ const serverSchema = z.object({
   SERPAPI_KEY: z.string().optional(),
   REDDIT_CLIENT_ID: z.string().optional(),
   REDDIT_CLIENT_SECRET: z.string().optional(),
+  // GitHub integration: optional — brainstorm agent uses these to manage issues
+  GITHUB_TOKEN: z.string().optional(),
+  GITHUB_REPO_OWNER: z.string().optional(),
+  GITHUB_REPO_NAME: z.string().optional(),
+  GITHUB_BOT_USERNAME: z.string().optional(),
+  BRAINSTORM_FREQUENCY_DAYS: z.coerce.number().optional(),
   MOCK_EXTERNAL_APIS: z.enum(["true", "false"]).optional(),
   NODE_ENV: z
     .enum(["development", "production", "test"])
