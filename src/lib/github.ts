@@ -67,6 +67,30 @@ function repoParams() {
   };
 }
 
+/**
+ * Check if an error is a GitHub 403 permission error.
+ * These occur when the GITHUB_TOKEN lacks required scopes (e.g., issues:write).
+ */
+function isPermissionError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "status" in error &&
+    (error as { status: number }).status === 403
+  );
+}
+
+/**
+ * Log a warning about a GitHub permission error.
+ * Includes guidance on which token scope is likely missing.
+ */
+function warnPermissionError(operation: string, error: unknown): void {
+  const msg = error instanceof Error ? error.message : String(error);
+  console.warn(
+    `GitHub API permission error in ${operation}: ${msg}. ` +
+      `Ensure GITHUB_TOKEN has the required scopes (e.g., "issues:write" or "repo").`,
+  );
+}
+
 // ── Public helpers ──────────────────────────────────────────────────────────
 
 export async function createIssue(
@@ -79,13 +103,21 @@ export async function createIssue(
   const octokit = getOctokit();
   if (!octokit) return { number: 0, title, html_url: "" };
 
-  const { data } = await octokit.issues.create({
-    ...repoParams(),
-    title,
-    body,
-    labels,
-  });
-  return { number: data.number, title: data.title, html_url: data.html_url };
+  try {
+    const { data } = await octokit.issues.create({
+      ...repoParams(),
+      title,
+      body,
+      labels,
+    });
+    return { number: data.number, title: data.title, html_url: data.html_url };
+  } catch (error) {
+    if (isPermissionError(error)) {
+      warnPermissionError("createIssue", error);
+      return { number: 0, title, html_url: "" };
+    }
+    throw error;
+  }
 }
 
 export async function updateIssueBody(
@@ -97,11 +129,19 @@ export async function updateIssueBody(
   const octokit = getOctokit();
   if (!octokit) return;
 
-  await octokit.issues.update({
-    ...repoParams(),
-    issue_number: issueNumber,
-    body,
-  });
+  try {
+    await octokit.issues.update({
+      ...repoParams(),
+      issue_number: issueNumber,
+      body,
+    });
+  } catch (error) {
+    if (isPermissionError(error)) {
+      warnPermissionError("updateIssueBody", error);
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function getIssueBody(issueNumber: number): Promise<string> {
@@ -153,11 +193,19 @@ export async function closeIssue(issueNumber: number): Promise<void> {
   const octokit = getOctokit();
   if (!octokit) return;
 
-  await octokit.issues.update({
-    ...repoParams(),
-    issue_number: issueNumber,
-    state: "closed",
-  });
+  try {
+    await octokit.issues.update({
+      ...repoParams(),
+      issue_number: issueNumber,
+      state: "closed",
+    });
+  } catch (error) {
+    if (isPermissionError(error)) {
+      warnPermissionError("closeIssue", error);
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function listComments(
@@ -199,12 +247,20 @@ export async function createComment(
   const octokit = getOctokit();
   if (!octokit) return { id: 0, body };
 
-  const { data } = await octokit.issues.createComment({
-    ...repoParams(),
-    issue_number: issueNumber,
-    body,
-  });
-  return { id: data.id, body: data.body ?? "" };
+  try {
+    const { data } = await octokit.issues.createComment({
+      ...repoParams(),
+      issue_number: issueNumber,
+      body,
+    });
+    return { id: data.id, body: data.body ?? "" };
+  } catch (error) {
+    if (isPermissionError(error)) {
+      warnPermissionError("createComment", error);
+      return { id: 0, body };
+    }
+    throw error;
+  }
 }
 
 export async function getRepoFile(path: string): Promise<string> {

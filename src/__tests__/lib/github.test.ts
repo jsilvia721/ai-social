@@ -250,6 +250,73 @@ describe("GitHub client", () => {
     });
   });
 
+  describe("403 permission error handling", () => {
+    const permissionError = Object.assign(
+      new Error("Resource not accessible by personal access token"),
+      { status: 403, name: "HttpError" },
+    );
+
+    it("createIssue returns safe default on 403", async () => {
+      mockIssuesCreate.mockRejectedValue(permissionError);
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+
+      const result = await createIssue("Title", "Body", ["label"]);
+
+      expect(result).toEqual({ number: 0, title: "Title", html_url: "" });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("GitHub API permission error"),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("updateIssueBody returns silently on 403", async () => {
+      mockIssuesUpdate.mockRejectedValue(permissionError);
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+
+      await expect(updateIssueBody(42, "body")).resolves.toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("GitHub API permission error"),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("createComment returns safe default on 403", async () => {
+      mockIssuesCreateComment.mockRejectedValue(permissionError);
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+
+      const result = await createComment(42, "comment");
+
+      expect(result).toEqual({ id: 0, body: "comment" });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("GitHub API permission error"),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("closeIssue returns silently on 403", async () => {
+      mockIssuesUpdate.mockRejectedValue(permissionError);
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+
+      await expect(closeIssue(42)).resolves.toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("GitHub API permission error"),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("re-throws non-403 errors", async () => {
+      const serverError = Object.assign(
+        new Error("Internal Server Error"),
+        { status: 500, name: "HttpError" },
+      );
+      mockIssuesCreate.mockRejectedValue(serverError);
+
+      await expect(createIssue("Title", "Body", ["label"])).rejects.toThrow(
+        "Internal Server Error",
+      );
+    });
+  });
+
   describe("mock guard", () => {
     it("returns canned data when shouldMockExternalApis is true", async () => {
       mockedShouldMock.mockReturnValue(true);
