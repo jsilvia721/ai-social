@@ -47,7 +47,7 @@ Process items in topological order (roots first, then dependents). For each item
 ```bash
 gh issue create \
   --title "<title from plan item>" \
-  --label "<label>" \
+  --label "<needs-triage OR blocked>" \
   --body "$(cat <<'ISSUE_EOF'
 ### Objective
 
@@ -74,7 +74,7 @@ ISSUE_EOF
 
 **Labeling rules:**
 - Items with NO dependencies: label `needs-triage` (requires human approval before work begins)
-- Items WITH dependencies: do NOT add `needs-triage`. Instead, add a Dependencies section:
+- Items WITH dependencies: label `blocked` (waiting on dependency issues). Also add a Dependencies section:
 
 ```
 ### Dependencies
