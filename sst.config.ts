@@ -89,6 +89,8 @@ export default $config({
       ...(secrets.githubToken ? { GITHUB_TOKEN: secrets.githubToken.value } : {}),
       GITHUB_REPO_OWNER: "jsilvia721",
       GITHUB_REPO_NAME: "ai-social",
+      // Enable test auth endpoint on non-production stages for Playwright E2E
+      PLAYWRIGHT_E2E: $app.stage !== "production" ? "true" : "",
     };
 
     // ── Next.js App ───────────────────────────────────────────────

@@ -6,8 +6,8 @@ jest.mock("next-auth/jwt", () => ({ encode: jest.fn().mockResolvedValue("mock-jw
 import { GET } from "@/app/api/test/session/route";
 import { NextRequest } from "next/server";
 
-function makeRequest(params?: Record<string, string>) {
-  const url = new URL("http://localhost/api/test/session");
+function makeRequest(params?: Record<string, string>, baseUrl = "http://localhost") {
+  const url = new URL("/api/test/session", baseUrl);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
   return new NextRequest(url.toString());
 }
@@ -66,9 +66,32 @@ describe("GET /api/test/session", () => {
       expect(body.ok).toBe(true);
       expect(body.userId).toBe("user-e2e-1");
 
-      // Session cookie should be set
+      // Session cookie should be set (HTTP — no __Secure- prefix, no secure flag)
       const cookieHeader = res.headers.get("set-cookie");
       expect(cookieHeader).toContain("next-auth.session-token=mock-jwt-token");
+      expect(cookieHeader).not.toContain("__Secure-");
+      expect(cookieHeader).not.toContain("Secure");
+    });
+
+    it("uses __Secure- cookie name and secure flag over HTTPS", async () => {
+      prismaMock.user.upsert.mockResolvedValue({
+        id: "user-e2e-2",
+        email: "test@example.com",
+        name: "Test User",
+        emailVerified: null,
+        image: null,
+        isAdmin: false,
+        activeBusinessId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const res = await GET(makeRequest({ email: "test@example.com" }, "https://staging.example.com"));
+
+      expect(res.status).toBe(200);
+      const cookieHeader = res.headers.get("set-cookie");
+      expect(cookieHeader).toContain("__Secure-next-auth.session-token=mock-jwt-token");
+      expect(cookieHeader).toContain("Secure");
     });
   });
 });
