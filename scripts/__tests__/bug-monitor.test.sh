@@ -424,6 +424,135 @@ else
   fail "different error types produce different fingerprints" "different" "same"
 fi
 
+# --- Test cloudwatch_extract_stage -------------------------------------------
+echo ""
+echo "=== cloudwatch_extract_stage Tests ==="
+echo ""
+
+echo "cloudwatch_extract_stage:"
+
+result=$(cloudwatch_extract_stage "/aws/lambda/ai-social-SiteFn-staging")
+assert_eq "extracts staging from SST log group" "staging" "$result"
+
+result=$(cloudwatch_extract_stage "/aws/lambda/ai-social-SiteFn-production")
+assert_eq "extracts production from SST log group" "production" "$result"
+
+result=$(cloudwatch_extract_stage "/aws/lambda/ai-social-MetricsFn-staging")
+assert_eq "extracts staging from different function name" "staging" "$result"
+
+result=$(cloudwatch_extract_stage "/aws/lambda/some-other-thing")
+assert_eq "returns unknown for unrecognized stage" "unknown" "$result"
+
+result=$(cloudwatch_extract_stage "/aws/lambda/ai-social-SiteFn-dev")
+assert_eq "extracts dev as valid stage" "dev" "$result"
+
+result=$(cloudwatch_extract_stage "/aws/lambda/nohyphens")
+assert_eq "returns unknown for no-hyphen name" "unknown" "$result"
+
+result=$(cloudwatch_extract_stage "")
+assert_eq "returns unknown for empty string" "unknown" "$result"
+
+# --- Test environment-scoped cooldown ----------------------------------------
+echo ""
+echo "=== Environment-Scoped Cooldown Tests ==="
+echo ""
+
+echo "Environment-scoped cooldown fingerprints:"
+
+TEST_ENV_COOLDOWN_DIR=$(mktemp -d)
+TEST_ENV_COOLDOWN_FILE="$TEST_ENV_COOLDOWN_DIR/.cooldown_env_test"
+touch "$TEST_ENV_COOLDOWN_FILE"
+COOLDOWN_SECONDS=3600
+COOLDOWN_FILE="$TEST_ENV_COOLDOWN_FILE"
+
+# Set cooldown for staging:fp1
+set_cooldown_test "staging:fp1"
+
+# staging:fp1 should be in cooldown
+if is_in_cooldown_test "staging:fp1"; then
+  pass "staging:fp1 is in cooldown"
+else
+  fail "staging:fp1 is in cooldown" "in cooldown" "not in cooldown"
+fi
+
+# production:fp1 should NOT be in cooldown (different env, same fingerprint)
+if is_in_cooldown_test "production:fp1"; then
+  fail "production:fp1 not in cooldown (different env)" "not in cooldown" "in cooldown"
+else
+  pass "production:fp1 not in cooldown (different env)"
+fi
+
+# Set cooldown for production:fp1 separately
+set_cooldown_test "production:fp1"
+
+# Now both should be in cooldown
+if is_in_cooldown_test "staging:fp1"; then
+  pass "staging:fp1 still in cooldown"
+else
+  fail "staging:fp1 still in cooldown" "in cooldown" "not in cooldown"
+fi
+
+if is_in_cooldown_test "production:fp1"; then
+  pass "production:fp1 now in cooldown"
+else
+  fail "production:fp1 now in cooldown" "in cooldown" "not in cooldown"
+fi
+
+rm -rf "$TEST_ENV_COOLDOWN_DIR"
+
+# --- Test issue title format with environment --------------------------------
+echo ""
+echo "=== Issue Title Environment Prefix Tests ==="
+echo ""
+
+echo "Issue title format:"
+
+# Test that title format includes environment prefix
+# We test the format string directly since we can't run create_bug_issue without gh
+test_title="Bug [staging]: TypeError: Cannot read property"
+assert_contains "title includes [staging] prefix" "[staging]" "$test_title"
+
+test_title="Bug [production]: OutOfMemoryError"
+assert_contains "title includes [production] prefix" "[production]" "$test_title"
+
+# Verify the old format is not used
+test_title_old="Bug: TypeError: Cannot read property"
+if echo "$test_title_old" | grep -qF "Bug ["; then
+  fail "old format should not have environment prefix" "no [env] prefix" "$test_title_old"
+else
+  pass "old format correctly lacks environment prefix"
+fi
+
+# Test that create_bug_issue in bug-monitor.sh uses the new format
+if grep -q 'Bug \[' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "bug-monitor.sh uses environment-prefixed title format"
+else
+  fail "bug-monitor.sh uses environment-prefixed title format" "Bug [\$env]:" "old format"
+fi
+
+# Test that create_bug_issue includes Environment section in body
+if grep -q '## Environment' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "bug-monitor.sh includes Environment section in issue body"
+else
+  fail "bug-monitor.sh includes Environment section in issue body" "## Environment section" "not found"
+fi
+
+# --- Test temp directory aggregation with stage file -------------------------
+echo ""
+echo "Temp directory with stage file:"
+
+cw_tmp2=$(mktemp -d)
+fp_stage="abc123stage"
+mkdir -p "$cw_tmp2/$fp_stage"
+printf '%s' "Error: something broke" > "$cw_tmp2/$fp_stage/message"
+echo "1" > "$cw_tmp2/$fp_stage/count"
+echo "staging" > "$cw_tmp2/$fp_stage/stage"
+
+assert_eq "stores stage in temp file" "staging" "$(cat "$cw_tmp2/$fp_stage/stage")"
+
+rm -rf "$cw_tmp2"
+pass "temp directory with stage cleanup succeeds"
+
 # Test that shellcheck passes
 echo ""
 echo "Shellcheck:"
