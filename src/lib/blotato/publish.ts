@@ -19,6 +19,8 @@ export async function publishPost(
 
   const blotatoPlatform = platform.toLowerCase();
 
+  const target = buildTarget(blotatoPlatform);
+
   const body = {
     post: {
       accountId: blotatoAccountId,
@@ -27,9 +29,7 @@ export async function publishPost(
         mediaUrls,
         platform: blotatoPlatform,
       },
-      target: {
-        targetType: blotatoPlatform,
-      },
+      target,
     },
   };
 
@@ -39,4 +39,36 @@ export async function publishPost(
   });
 
   return { blotatoPostId: result.postSubmissionId };
+}
+
+interface BaseTarget {
+  targetType: string;
+}
+
+interface TikTokTarget extends BaseTarget {
+  privacyLevel: string;
+  disabledComments: boolean;
+  disabledDuet: boolean;
+  disabledStitch: boolean;
+  isBrandedContent: boolean;
+  isYourBrand: boolean;
+  isAiGenerated: boolean;
+}
+
+/** Build platform-specific target object for the Blotato API. */
+function buildTarget(platform: string): BaseTarget | TikTokTarget {
+  if (platform === "tiktok") {
+    return {
+      targetType: platform,
+      privacyLevel: "PUBLIC_TO_EVERYONE",
+      disabledComments: false,
+      disabledDuet: false,
+      disabledStitch: false,
+      isBrandedContent: false,
+      isYourBrand: false,
+      isAiGenerated: true,
+    };
+  }
+
+  return { targetType: platform };
 }

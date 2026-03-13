@@ -58,6 +58,38 @@ describe("publishPost", () => {
     expect(body.post.target.targetType).toBe("instagram");
   });
 
+  it("includes TikTok-specific target properties for TIKTOK platform", async () => {
+    fetchSpy.mockResolvedValue(makeSuccessResponse());
+
+    await publishPost("acct-xyz", "TikTok content", "TIKTOK", [
+      "https://storage.example.com/video.mp4",
+    ]);
+
+    const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(options.body as string);
+    expect(body.post.target).toEqual({
+      targetType: "tiktok",
+      privacyLevel: "PUBLIC_TO_EVERYONE",
+      disabledComments: false,
+      disabledDuet: false,
+      disabledStitch: false,
+      isBrandedContent: false,
+      isYourBrand: false,
+      isAiGenerated: true,
+    });
+  });
+
+  it("does not include TikTok-specific target properties for non-TikTok platforms", async () => {
+    fetchSpy.mockResolvedValue(makeSuccessResponse());
+
+    await publishPost("acct-xyz", "Twitter content", "TWITTER");
+
+    const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(options.body as string);
+    expect(body.post.target).toEqual({ targetType: "twitter" });
+    expect(body.post.target).not.toHaveProperty("privacyLevel");
+  });
+
   it("converts uppercase platform to lowercase for Blotato API", async () => {
     fetchSpy.mockResolvedValue(makeSuccessResponse());
 
