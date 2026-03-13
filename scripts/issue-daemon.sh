@@ -6,6 +6,9 @@
 #   ./scripts/issue-daemon.sh                  # defaults: 1 worker, 60s poll, $10 budget
 #   ./scripts/issue-daemon.sh -w 3 -i 30 -b 15 # 3 parallel workers, 30s poll, $15 budget
 #
+# Signals:
+#   SIGUSR1 — toggle drain mode (finish active workers, then exit)
+#
 # Requirements:
 #   - gh CLI authenticated
 #   - claude CLI on PATH
@@ -22,9 +25,11 @@ LABEL_READY="claude-ready"
 LABEL_WIP="claude-wip"
 LABEL_DONE="claude-done"
 LABEL_BLOCKED="claude-blocked"
+LABEL_INTERRUPTED="claude-interrupted"
 LABEL_PLAN_REVIEW="claude-plan-review"
 LABEL_APPROVED="claude-approved"
 LOG_DIR="./logs/issue-daemon"
+RATE_LIMIT_PAUSE_SECONDS=900
 
 # --- Parse flags --------------------------------------------------------------
 while getopts "w:i:b:t:" opt; do
@@ -42,8 +47,16 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 mkdir -p "$LOG_DIR"
 
+# Source the shared state library
+# shellcheck source=scripts/lib/daemon-state.sh
+source "scripts/lib/daemon-state.sh"
+ensure_state_dir
+
 PID_FILE="$LOG_DIR/.active_pids"
 : > "$PID_FILE"  # truncate on start
+
+DAEMON_PID_FILE="$LOG_DIR/.issue-daemon.pid"
+echo $$ > "$DAEMON_PID_FILE"
 
 cleanup() {
   echo "[daemon] Shutting down..."
@@ -53,28 +66,117 @@ cleanup() {
       kill "$pid" 2>/dev/null || true
     fi
   done < "$PID_FILE"
-  rm -f "$PID_FILE"
+  rm -f "$PID_FILE" "$DAEMON_PID_FILE"
   exit 0
 }
 trap cleanup SIGINT SIGTERM
 
+toggle_drain() {
+  if is_drain_mode; then
+    clear_drain_mode
+    log "Drain mode DISABLED (resuming normal operation)"
+  else
+    set_drain_mode
+    log "Drain mode ENABLED (will exit after active workers finish)"
+  fi
+}
+trap toggle_drain USR1
+
 log() {
   echo "[daemon $(date '+%H:%M:%S')] $*"
+}
+
+# --- Rate limit detection -----------------------------------------------------
+# Returns 0 if rate limited, 1 if not.
+# Arguments: $1=exit_code, $2=runtime_seconds, $3=log_file
+detect_rate_limit() {
+  local exit_code="$1"
+  local runtime="$2"
+  local log_file="$3"
+
+  # Successful exit is not a rate limit
+  if [ "$exit_code" -eq 0 ]; then
+    return 1
+  fi
+
+  # Short runtime suggests rate limit hit before real work started
+  if [ "$runtime" -lt 120 ]; then
+    return 0
+  fi
+
+  # Check log file for rate limit indicators
+  if grep -qiE 'rate.?limit|429|quota|budget.*exceeded|overloaded' "$log_file" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
+# --- WIP commit ---------------------------------------------------------------
+# Commit and push any uncommitted work in a worktree for the given issue.
+# Arguments: $1=issue_number
+commit_wip_if_needed() {
+  local issue_number="$1"
+
+  # Scan worktrees for a branch matching issue-{N}-*
+  for wt in .claude/worktrees/*/; do
+    [ -d "$wt" ] || continue
+
+    local branch
+    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+    if [[ "$branch" == issue-${issue_number}-* ]]; then
+      # Check for uncommitted changes
+      if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+        log "Committing WIP changes in worktree for issue #${issue_number}"
+        git -C "$wt" add -A 2>/dev/null || true
+        git -C "$wt" commit -m "WIP: interrupted by rate limit (issue #${issue_number})" 2>/dev/null || true
+      fi
+
+      # Push any unpushed commits
+      git -C "$wt" push -u origin "$branch" 2>/dev/null || true
+      return
+    fi
+  done
 }
 
 # --- Worker function ----------------------------------------------------------
 run_worker() {
   local issue_number="$1"
   local issue_title="$2"
+  local is_retry="${3:-false}"
   local log_file="$LOG_DIR/issue-${issue_number}.log"
 
   log "Starting worker for issue #${issue_number}: ${issue_title}"
 
-  # Label as in-progress
-  gh issue edit "$issue_number" --remove-label "$LABEL_READY" --add-label "$LABEL_WIP" 2>/dev/null || true
+  if [ "$is_retry" = "true" ]; then
+    # Remove interrupted label for retry
+    gh issue edit "$issue_number" --remove-label "$LABEL_INTERRUPTED" --add-label "$LABEL_WIP" 2>/dev/null || true
+  else
+    # Label as in-progress
+    gh issue edit "$issue_number" --remove-label "$LABEL_READY" --add-label "$LABEL_WIP" 2>/dev/null || true
+  fi
 
-  # Run Claude in an isolated worktree (--worktree ensures --max-turns applies to the session)
-  claude -p "$(cat <<EOF
+  # Build the prompt (with retry context if applicable)
+  local prompt
+  if [ "$is_retry" = "true" ]; then
+    prompt="$(cat <<EOF
+You are the issue-worker agent. RETRY: Retrying interrupted issue #${issue_number}.
+
+This issue was previously interrupted by an API rate limit. Check for an existing WIP branch:
+  git branch -r --list "origin/issue-${issue_number}-*"
+If a WIP branch exists, check it out and continue from where the previous attempt left off.
+
+Read the full issue with: gh issue view ${issue_number} --json title,body,labels,assignees
+
+Follow your agent instructions exactly — assess complexity, plan if needed,
+implement with TDD, run ci:check, review based on complexity tier, and create a PR.
+
+If you get stuck, comment on the issue and add the label "claude-blocked".
+EOF
+)"
+  else
+    prompt="$(cat <<EOF
 You are the issue-worker agent. Implement GitHub issue #${issue_number}.
 
 Read the full issue with: gh issue view ${issue_number} --json title,body,labels,assignees
@@ -84,7 +186,15 @@ implement with TDD, run ci:check, review based on complexity tier, and create a 
 
 If you get stuck, comment on the issue and add the label "claude-blocked".
 EOF
-)" \
+)"
+  fi
+
+  # Record start time
+  local start_time
+  start_time=$(date +%s)
+
+  # Run Claude in an isolated worktree (--worktree ensures --max-turns applies to the session)
+  claude -p "$prompt" \
     --agent "issue-worker" \
     --worktree \
     --max-turns "$MAX_TURNS" \
@@ -93,6 +203,19 @@ EOF
     > "$log_file" 2>&1
 
   local exit_code=$?
+  local end_time
+  end_time=$(date +%s)
+  local runtime=$(( end_time - start_time ))
+
+  # Check for rate limit first
+  if detect_rate_limit "$exit_code" "$runtime" "$log_file"; then
+    log "Worker for issue #${issue_number} hit rate limit (runtime: ${runtime}s)"
+    set_rate_limit_pause "$RATE_LIMIT_PAUSE_SECONDS"
+    commit_wip_if_needed "$issue_number"
+    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
+    gh issue comment "$issue_number" --body "Worker interrupted by API rate limit (runtime: ${runtime}s). Will auto-retry after cooldown (~$((RATE_LIMIT_PAUSE_SECONDS / 60)) minutes)." 2>/dev/null || true
+    return
+  fi
 
   # Verify a PR was actually created for this issue (regardless of exit code)
   local pr_url
@@ -136,6 +259,10 @@ run_plan_executor() {
   # Label as in-progress
   gh issue edit "$issue_number" --remove-label "$LABEL_APPROVED" --add-label "$LABEL_WIP" 2>/dev/null || true
 
+  # Record start time
+  local start_time
+  start_time=$(date +%s)
+
   # Run Claude with plan-executor agent (read-only, no worktree needed)
   claude -p "$(cat <<EOF
 You are the plan-executor agent. Process approved plan issue #${issue_number}.
@@ -155,6 +282,18 @@ EOF
     > "$log_file" 2>&1
 
   local exit_code=$?
+  local end_time
+  end_time=$(date +%s)
+  local runtime=$(( end_time - start_time ))
+
+  # Check for rate limit first
+  if detect_rate_limit "$exit_code" "$runtime" "$log_file"; then
+    log "Plan-executor for issue #${issue_number} hit rate limit (runtime: ${runtime}s)"
+    set_rate_limit_pause "$RATE_LIMIT_PAUSE_SECONDS"
+    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
+    gh issue comment "$issue_number" --body "Plan-executor interrupted by API rate limit (runtime: ${runtime}s). Will auto-retry after cooldown (~$((RATE_LIMIT_PAUSE_SECONDS / 60)) minutes)." 2>/dev/null || true
+    return
+  fi
 
   if [ $exit_code -eq 0 ]; then
     log "Plan-executor for issue #${issue_number} completed successfully"
@@ -189,49 +328,102 @@ active_worker_count() {
 
 # --- Main loop ----------------------------------------------------------------
 log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, turns=$MAX_TURNS)"
-log "Watching for issues labeled '${LABEL_APPROVED}' and '${LABEL_READY}'..."
+log "Watching for issues labeled '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', and '${LABEL_READY}'..."
+log "PID file: ${DAEMON_PID_FILE} (send SIGUSR1 to toggle drain mode)"
 
 while true; do
+  # --- 1. Drain mode check ---
+  if is_drain_mode; then
+    active=$(active_worker_count)
+    if [ "$active" -eq 0 ]; then
+      clear_drain_mode
+      log "All workers finished. Drain complete, exiting."
+      rm -f "$PID_FILE" "$DAEMON_PID_FILE"
+      exit 0
+    fi
+    log "Drain mode: waiting for $active worker(s) to finish..."
+    sleep "$POLL_INTERVAL"
+    continue
+  fi
+
+  # --- 2. Rate limit pause check ---
+  if is_rate_limit_paused; then
+    log "Rate-limit paused until $(get_pause_until_display)"
+    sleep "$POLL_INTERVAL"
+    continue
+  fi
+
   active=$(active_worker_count)
   available_slots=$(( MAX_WORKERS - active ))
 
   if [ "$available_slots" -gt 0 ]; then
-    # --- Priority 1: Approved plans (create work issues quickly) ---
-    approved_issues=$(gh issue list \
+    # --- Priority 0: Retry interrupted issues ---
+    interrupted_issues=$(gh issue list \
       --state open \
-      --label "$LABEL_APPROVED" \
+      --label "$LABEL_INTERRUPTED" \
       --limit "$available_slots" \
-      --json number,title,body \
+      --json number,title \
       -q '.[] | @json' 2>/dev/null || echo "")
 
-    if [ -n "$approved_issues" ]; then
+    if [ -n "$interrupted_issues" ]; then
       while IFS= read -r issue_json; do
         number=$(echo "$issue_json" | jq -r '.number')
         title=$(echo "$issue_json" | jq -r '.title')
-        body=$(echo "$issue_json" | jq -r '.body')
 
         wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
         if [ "$wip_check" -gt 0 ]; then
-          log "Skipping plan #${number} (already WIP)"
+          log "Skipping interrupted issue #${number} (already WIP)"
           continue
         fi
 
-        # Check if this is a plan (has plan markers) or a single work item
-        if echo "$body" | grep -q "PLAN_ITEMS_START"; then
-          run_plan_executor "$number" "$title" &
-          echo "$!" >> "$PID_FILE"
-          log "Spawned plan-executor PID $! for issue #${number}"
-        else
-          # Single work item — route to needs-triage for human review
-          log "Issue #${number} is a single work item (no plan markers), routing to needs-triage"
-          gh issue edit "$number" --remove-label "$LABEL_APPROVED" --add-label "needs-triage" 2>/dev/null || true
-          gh issue comment "$number" --body "This is a single work item (not a multi-item plan). Routing to \`needs-triage\` for human review before work begins." 2>/dev/null || true
-        fi
-      done <<< "$approved_issues"
+        run_worker "$number" "$title" "true" &
+        echo "$!" >> "$PID_FILE"
+        log "Spawned retry worker PID $! for interrupted issue #${number}"
+      done <<< "$interrupted_issues"
 
-      # Recalculate available slots after spawning plan executors
+      # Recalculate available slots
       active=$(active_worker_count)
       available_slots=$(( MAX_WORKERS - active ))
+    fi
+
+    # --- Priority 1: Approved plans (create work issues quickly) ---
+    if [ "$available_slots" -gt 0 ]; then
+      approved_issues=$(gh issue list \
+        --state open \
+        --label "$LABEL_APPROVED" \
+        --limit "$available_slots" \
+        --json number,title,body \
+        -q '.[] | @json' 2>/dev/null || echo "")
+
+      if [ -n "$approved_issues" ]; then
+        while IFS= read -r issue_json; do
+          number=$(echo "$issue_json" | jq -r '.number')
+          title=$(echo "$issue_json" | jq -r '.title')
+          body=$(echo "$issue_json" | jq -r '.body')
+
+          wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
+          if [ "$wip_check" -gt 0 ]; then
+            log "Skipping plan #${number} (already WIP)"
+            continue
+          fi
+
+          # Check if this is a plan (has plan markers) or a single work item
+          if echo "$body" | grep -q "PLAN_ITEMS_START"; then
+            run_plan_executor "$number" "$title" &
+            echo "$!" >> "$PID_FILE"
+            log "Spawned plan-executor PID $! for issue #${number}"
+          else
+            # Single work item — route to needs-triage for human review
+            log "Issue #${number} is a single work item (no plan markers), routing to needs-triage"
+            gh issue edit "$number" --remove-label "$LABEL_APPROVED" --add-label "needs-triage" 2>/dev/null || true
+            gh issue comment "$number" --body "This is a single work item (not a multi-item plan). Routing to \`needs-triage\` for human review before work begins." 2>/dev/null || true
+          fi
+        done <<< "$approved_issues"
+
+        # Recalculate available slots after spawning plan executors
+        active=$(active_worker_count)
+        available_slots=$(( MAX_WORKERS - active ))
+      fi
     fi
 
     # --- Priority 2: Ready work issues ---
