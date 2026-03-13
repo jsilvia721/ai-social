@@ -37,6 +37,7 @@ yarn-error.log*
 .env
 .env.local
 .env.*.local
+.env.bug-monitor*
 
 # vercel
 .vercel
@@ -55,12 +56,16 @@ next-env.d.ts
 # Playwright artifacts
 playwright-report/
 test-results/
+.playwright-mcp/
 
 # SST
 .sst/
 
 # Git worktrees (parallel Claude Code sessions)
-.worktrees/
+.claude/worktrees/
+
+# Stray screenshots (root-level PNGs only)
+/*.png
 
 # Issue daemon logs
 logs/

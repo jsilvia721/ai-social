@@ -55,6 +55,7 @@ When creating a PR that touches UI files (`src/components/**`, `src/app/**/*.tsx
 2. Use Playwright MCP to navigate to each affected page
 3. Take screenshots at **mobile (375px)** and **desktop (1440px)** widths
 4. Upload each screenshot to S3 via `uploadBuffer()` from `src/lib/storage.ts` with key `screenshots/pr/<branch>/<page>-<width>.png`
+   - **Do NOT save screenshots to the local filesystem.** Use `uploadBuffer()` from `src/lib/storage.ts` to upload directly to S3. Never use `fs.writeFileSync()` or Playwright's `screenshot({ path })` to save files locally.
 5. Embed the S3 URLs as markdown images in the PR description under a `## Screenshots` section
 
 If the dev server cannot be started (e.g., missing env vars, database not running), skip screenshots and note it in the PR description.
@@ -70,6 +71,7 @@ If the dev server cannot be started (e.g., missing env vars, database not runnin
 - **Every `schema.prisma` change MUST have a migration** — run `npx prisma migrate dev --name <name>`, never just `npx prisma generate`. CI enforces this with `prisma migrate diff --exit-code`.
 - **New SST secrets require environment setup** — when adding a `new sst.Secret()` to `sst.config.ts`, the PR description MUST list every new secret and the exact `npx sst secret set <Name> "<value>" --stage staging` and `--stage production` commands. If the secret isn't ready, make it optional (set to `null` in sst.config.ts, `z.string().optional()` in env.ts) following the BlotatoApiKey pattern. See `docs/solutions/deployment-issues/sst-secret-not-set-causes-deploy-failure.md`.
 - **Always use `/create-issue` skill for GitHub issues** — never use `gh issue create` directly. The `/create-issue` skill handles decomposition and formatting for the issue-worker agent. This applies everywhere: after `/ce:plan`, from bug findings, self-improvement issues, etc.
+- **Workspace hygiene** — never leave untracked files in the working directory. Clean up temp files (screenshots, scratch files) before finishing. If generating docs (brainstorms, plans), commit them to the branch or delete them. Run `git status` before finishing work to verify no stray files remain.
 
 ### Branching & Worktrees
 - **Always branch from `main`** — run `git fetch origin main` then branch from `origin/main`. PRs target `main`.
