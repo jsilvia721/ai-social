@@ -154,6 +154,27 @@ describe("iterateBrainstorm", () => {
     });
   });
 
+  it("throws when GITHUB_BOT_USERNAME is not set", async () => {
+    mockListComments.mockResolvedValue([
+      {
+        id: 100,
+        body: "Some feedback",
+        user: { login: "josh" },
+        created_at: "2024-01-01T12:00:00Z",
+      },
+    ]);
+    const envModule = await import("@/env");
+    const original = envModule.env.GITHUB_BOT_USERNAME;
+    (envModule.env as Record<string, unknown>).GITHUB_BOT_USERNAME = undefined;
+
+    const session = makeSession();
+    await expect(iterateBrainstorm(session)).rejects.toThrow(
+      "GITHUB_BOT_USERNAME must be set",
+    );
+
+    (envModule.env as Record<string, unknown>).GITHUB_BOT_USERNAME = original;
+  });
+
   it("does nothing when there are no new comments", async () => {
     mockListComments.mockResolvedValue([]);
     const session = makeSession();

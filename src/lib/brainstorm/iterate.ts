@@ -85,8 +85,13 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
     session.lastProcessedCommentId ?? undefined,
   );
 
-  // Filter out bot comments to prevent infinite loops
+  // Filter out bot comments to prevent infinite loops.
+  // CRITICAL: botUsername must be set — without it, the bot's own reply comments
+  // would be fed back as "human feedback", creating an infinite loop.
   const botUsername = env.GITHUB_BOT_USERNAME;
+  if (!botUsername) {
+    throw new Error("GITHUB_BOT_USERNAME must be set to filter bot comments");
+  }
   const humanComments = comments.filter(
     (c) => c.user.login !== botUsername,
   );
