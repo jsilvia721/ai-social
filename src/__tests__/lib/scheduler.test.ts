@@ -295,6 +295,102 @@ describe("runScheduler", () => {
     );
   });
 
+  it("fails immediately when Instagram post has no media (no API call made)", async () => {
+    const post = makePost({
+      status: "SCHEDULED",
+      retryCount: 0,
+    });
+    // Override socialAccount to Instagram
+    (post as any).socialAccount = { ...mockSocialAccount, platform: "INSTAGRAM" };
+    post.mediaUrls = [];
+
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    // Should NOT call the Blotato API
+    expect(mockPublishPost).not.toHaveBeenCalled();
+    // Should go straight to FAILED (400 is non-retryable)
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          errorMessage: expect.stringContaining("requires at least one image or video"),
+        }),
+      })
+    );
+    // Should send failure alert
+    expect(mockSendFailureAlert).toHaveBeenCalled();
+  });
+
+  it("fails immediately when TikTok post has no media (no API call made)", async () => {
+    const post = makePost({
+      status: "SCHEDULED",
+      retryCount: 0,
+    });
+    (post as any).socialAccount = { ...mockSocialAccount, platform: "TIKTOK" };
+    post.mediaUrls = [];
+
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(mockPublishPost).not.toHaveBeenCalled();
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          errorMessage: expect.stringContaining("TIKTOK requires at least one image or video"),
+        }),
+      })
+    );
+  });
+
+  it("publishes normally when Instagram post has media", async () => {
+    const post = makePost({ status: "SCHEDULED", retryCount: 0 });
+    (post as any).socialAccount = { ...mockSocialAccount, platform: "INSTAGRAM" };
+    (post as any).mediaUrls = ["https://example.com/image.jpg"];
+
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockResolvedValue({ blotatoPostId: "blotato-ig-1" });
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(mockPublishPost).toHaveBeenCalled();
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "PUBLISHED" }),
+      })
+    );
+  });
+
+  it("publishes normally when non-media-required platform has no media", async () => {
+    const post = makePost({ status: "SCHEDULED", retryCount: 0 });
+    // TWITTER is not media-required, and mediaUrls is already []
+    (post as any).socialAccount = { ...mockSocialAccount, platform: "TWITTER" };
+    post.mediaUrls = [];
+
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockResolvedValue({ blotatoPostId: "blotato-tw-1" });
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    expect(mockPublishPost).toHaveBeenCalled();
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "PUBLISHED" }),
+      })
+    );
+  });
+
   it("recovers stuck PUBLISHING posts (older than 5 min) by resetting to RETRYING", async () => {
     // First findMany: no due posts; stuck-post recovery still runs via updateMany
     prismaMock.post.findMany.mockResolvedValueOnce([]);
