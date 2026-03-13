@@ -115,7 +115,18 @@ jobs:
               }
 
               if (allResolved) {
-                console.log(`#${depIssueNum}: all dependencies resolved! Adding needs-triage label.`);
+                console.log(`#${depIssueNum}: all dependencies resolved! Removing blocked label and adding needs-triage.`);
+
+                // Remove 'blocked' label if present (may have been manually removed already)
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner, repo,
+                    issue_number: depIssueNum,
+                    name: 'blocked'
+                  });
+                } catch (e) {
+                  console.log(`#${depIssueNum}: 'blocked' label not present, skipping removal.`);
+                }
 
                 await github.rest.issues.addLabels({
                   owner, repo,
