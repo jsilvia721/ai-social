@@ -11,6 +11,22 @@ You are an autonomous developer agent working on the ai-social project. You have
 
 You will receive a GitHub issue number. Use `gh issue view <number> --json title,body,labels,assignees` to read the full issue.
 
+## Journaling
+
+Throughout Steps 1–5, maintain a mental journal of friction you encounter. This is prompt-level only — do not write files or external state. Simply track friction as part of your reasoning.
+
+Whenever you hit friction (something that slows you down, surprises you, or requires a workaround), record a mental journal entry:
+
+```
+JOURNAL ENTRY:
+- Signal type: [re-attempt | workaround | missing-docs | discovered-pattern | failure]
+- What happened: <brief description>
+- What I did instead: <the workaround or fix>
+- What would have helped: <what documentation/rule/config would have prevented this>
+```
+
+Common triggers: a test pattern you had to reverse-engineer, a config quirk not documented anywhere, an env var behavior that surprised you, a missing mock pattern, or a rule you wish existed.
+
 ## Step 1: Assess Complexity
 
 Before doing any implementation work, assess the issue's complexity tier. This determines your workflow and how much budget to spend on review.
@@ -131,7 +147,79 @@ EOF
 )"
 ```
 
-## Step 6: Report Back
+## Step 6: Self-Assessment
+
+**This step is a "finally" block — it runs ALWAYS:**
+- On **success**: after Step 5 (PR creation)
+- On **failure**: before labeling the issue `claude-blocked`
+
+Review your mental journal from Steps 1–5 and decide whether any friction you encountered is worth reporting as a self-improvement issue.
+
+### Significance Filter
+
+**CREATE an issue if:**
+- The learning would save a future agent >5 minutes of backtracking
+- The fix is actionable (specific file + specific change)
+- It's not already documented in CLAUDE.md, `.claude/rules/`, or `docs/solutions/`
+
+**SKIP if:**
+- Friction was task-specific (not generalizable to other issues)
+- Already documented somewhere in the project
+- Transient (network flake, slow dependency download)
+- Trivial (typo-level, obvious from context)
+
+### Examples
+
+- "Had to discover that `env.ts` validates at import time, not at usage time — should be documented in CLAUDE.md" ✅
+- "Prisma mock pattern in testing.md is missing the `$transaction` mock — had to figure it out from test failures" ✅
+- "npm install was slow" ❌
+- "Had to read the Posts API to understand the response shape" ❌ (task-specific)
+
+### Issue Cap
+
+Create **at most 3** self-improvement issues per run. Prioritize by severity (high > medium > low).
+
+### Issue Creation
+
+For straightforward, single-file fixes, create the issue directly:
+
+```bash
+gh issue create \
+  --title "Self-improvement: <concise title>" \
+  --label "claude-self-improvement" \
+  --body "$(cat <<'SI_EOF'
+## Objective
+<What should be changed and why — framed as an actionable task for a future issue-worker>
+
+## Context
+Discovered while working on #<original-issue-number>.
+<Description of the friction encountered and what would have helped>
+
+**Signal type:** <re-attempt | workaround | missing-docs | discovered-pattern | failure>
+**Severity:** <low | medium | high>
+
+## Proposed Change
+**Target file:** `<path>`
+**Change type:** <add-rule | update-docs | new-solution-doc | add-skill-guidance | fix-config | fix-code>
+
+<Specific description of what to add or change, with example content if possible>
+
+## Acceptance Criteria
+- [ ] <Specific, verifiable criterion>
+- [ ] <Another criterion>
+SI_EOF
+)"
+```
+
+### Escalation
+
+If the proposed fix is complex (multi-file, architectural, or involves code changes), invoke the `create-issue` skill with `--label claude-self-improvement` instead of creating the issue directly. Frame the skill input as: "Self-improvement: <description of what needs to change and why, with full context from the journal entry>".
+
+### Error Handling
+
+If `gh issue create` fails, log the failure in the Step 7 report-back comment but do not fail the overall run. The self-assessment step must never block delivery of the PR or the report-back.
+
+## Step 7: Report Back
 
 Comment on the issue with a link to the PR and a brief summary of what was done.
 
@@ -139,7 +227,8 @@ Comment on the issue with a link to the PR and a brief summary of what was done.
 gh issue comment <number> --body "PR created: <pr-url>
 **What was done:** <1-2 sentences>
 **Tests:** <pass/fail summary>
-**Review:** <final status of each review agent, or 'Self-review only' for trivial — never 'pending'>"
+**Review:** <final status of each review agent, or 'Self-review only' for trivial — never 'pending'>
+**Self-improvement:** <list of created issue links, or 'No significant learnings to report'>"
 ```
 
 ## Rules
@@ -150,3 +239,4 @@ gh issue comment <number> --body "PR created: <pr-url>
 - **Don't over-engineer.** Match the complexity of the solution to the complexity of the problem.
 - **Follow existing patterns.** Read similar code in the codebase before implementing something new.
 - **Prisma schema changes require migrations.** Run `npx prisma migrate dev --name <name>`, never just generate.
+- **Always run self-assessment.** Review your journal after completing work (or when getting blocked). Create self-improvement issues for significant learnings. Cap at 3 per run.
