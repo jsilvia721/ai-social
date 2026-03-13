@@ -60,6 +60,7 @@ cloudwatch_query_errors() {
 # Extract the SST stage (environment) from a CloudWatch log group name.
 # SST convention: /aws/lambda/<app>-<function>-<stage>
 # The stage is the last hyphen-separated segment of the final path component.
+# Only returns known stage names (staging, production, dev); defaults to "unknown".
 #
 # Arguments:
 #   $1 — log group name (e.g., /aws/lambda/ai-social-SiteFn-staging)
@@ -67,19 +68,15 @@ cloudwatch_query_errors() {
 # Outputs the stage name (e.g., "staging", "production") or "unknown".
 cloudwatch_extract_stage() {
   local log_group="${1:-}"
+  local basename="${log_group##*/}"
 
-  if [ -z "$log_group" ]; then
-    echo "unknown"
-    return
-  fi
-
-  # Get the last path component (e.g., "ai-social-SiteFn-staging")
-  local basename
-  basename=$(echo "$log_group" | awk -F'/' '{print $NF}')
-
-  # Extract the last hyphen-separated segment
-  if echo "$basename" | grep -q '-'; then
-    echo "$basename" | awk -F'-' '{print $NF}'
+  if [[ "$basename" == *-* ]]; then
+    local segment="${basename##*-}"
+    # Validate against known SST stages
+    case "$segment" in
+      staging|production|dev) echo "$segment" ;;
+      *) echo "unknown" ;;
+    esac
   else
     echo "unknown"
   fi

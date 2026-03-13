@@ -193,14 +193,14 @@ comment_existing_issue() {
 
   local env_line=""
   if [ -n "$environment" ]; then
-    env_line="**Environment:** ${environment}
-"
+    env_line="
+**Environment:** ${environment}"
   fi
 
   gh issue comment "$issue_number" --body "$(cat <<EOF
 **New occurrences detected:** +${count}
-**Last seen:** ${last_seen}
-${env_line}
+**Last seen:** ${last_seen}${env_line}
+
 _Automated by bug-monitor daemon_
 EOF
 )" 2>/dev/null || log "Warning: failed to comment on issue #${issue_number}"
@@ -250,9 +250,7 @@ ${error_message}
 $(if [ -n "$environment" ]; then
   echo "## Environment"
   echo "\`${environment}\`"
-  echo ""
 fi)
-
 $(if [ -n "$stack_trace" ]; then
   echo "## Stack Trace"
   echo "\`\`\`"
@@ -454,23 +452,28 @@ poll_cloudwatch() {
 
       [ -z "$msg" ] && continue
 
-      local fp
+      local fp stage agg_key
       fp=$(generate_fingerprint "SERVER" "$msg")
+      stage=$(cloudwatch_extract_stage "$group")
+      # Aggregate by fingerprint + stage so the same error in different
+      # environments produces separate issues.
+      agg_key="${fp}_${stage}"
 
-      if [ ! -d "$cw_tmp/$fp" ]; then
-        mkdir -p "$cw_tmp/$fp"
-        printf '%s' "$msg" > "$cw_tmp/$fp/message"
-        echo "1" > "$cw_tmp/$fp/count"
-        echo "$ts" > "$cw_tmp/$fp/first_seen"
-        echo "$ts" > "$cw_tmp/$fp/last_seen"
-        echo "$group" > "$cw_tmp/$fp/log_group"
-        cloudwatch_extract_stage "$group" > "$cw_tmp/$fp/stage"
+      if [ ! -d "$cw_tmp/$agg_key" ]; then
+        mkdir -p "$cw_tmp/$agg_key"
+        printf '%s' "$msg" > "$cw_tmp/$agg_key/message"
+        echo "1" > "$cw_tmp/$agg_key/count"
+        echo "$ts" > "$cw_tmp/$agg_key/first_seen"
+        echo "$ts" > "$cw_tmp/$agg_key/last_seen"
+        echo "$group" > "$cw_tmp/$agg_key/log_group"
+        echo "$fp" > "$cw_tmp/$agg_key/fingerprint"
+        echo "$stage" > "$cw_tmp/$agg_key/stage"
       else
         local prev_count
-        prev_count=$(cat "$cw_tmp/$fp/count")
-        echo $((prev_count + 1)) > "$cw_tmp/$fp/count"
-        if [ "$ts" -gt "$(cat "$cw_tmp/$fp/last_seen")" ] 2>/dev/null; then
-          echo "$ts" > "$cw_tmp/$fp/last_seen"
+        prev_count=$(cat "$cw_tmp/$agg_key/count")
+        echo $((prev_count + 1)) > "$cw_tmp/$agg_key/count"
+        if [ "$ts" -gt "$(cat "$cw_tmp/$agg_key/last_seen")" ] 2>/dev/null; then
+          echo "$ts" > "$cw_tmp/$agg_key/last_seen"
         fi
       fi
     done < <(cloudwatch_query_errors "$since_ms" "$group" "$SEVERITY")
@@ -478,29 +481,28 @@ poll_cloudwatch() {
 
   # Process collected errors
   local count="$issues_created"
-  for fp_dir in "$cw_tmp"/*/; do
-    [ -d "$fp_dir" ] || continue
-    local fp
-    fp=$(basename "$fp_dir")
+  for agg_dir in "$cw_tmp"/*/; do
+    [ -d "$agg_dir" ] || continue
 
     if [ "$count" -ge "$MAX_ISSUES_PER_CYCLE" ]; then
       log "Max issues per cycle reached, stopping"
       break
     fi
 
-    local stage
-    stage=$(cat "$cw_tmp/$fp/stage" 2>/dev/null || echo "")
+    local fp stage
+    fp=$(cat "$agg_dir/fingerprint")
+    stage=$(cat "$agg_dir/stage" 2>/dev/null || echo "")
 
     local result
     result=$(process_error \
       "$fp" \
-      "$(cat "$cw_tmp/$fp/message")" \
-      "$(cat "$cw_tmp/$fp/count")" \
+      "$(cat "$agg_dir/message")" \
+      "$(cat "$agg_dir/count")" \
       "SERVER" \
       "" \
-      "$(cat "$cw_tmp/$fp/log_group")" \
-      "$(ms_to_human "$(cat "$cw_tmp/$fp/first_seen")")" \
-      "$(ms_to_human "$(cat "$cw_tmp/$fp/last_seen")")" \
+      "$(cat "$agg_dir/log_group")" \
+      "$(ms_to_human "$(cat "$agg_dir/first_seen")")" \
+      "$(ms_to_human "$(cat "$agg_dir/last_seen")")" \
       "" \
       "CLOUDWATCH" \
       "" \
@@ -529,7 +531,11 @@ poll_error_reports() {
   fi
 
   if [ -z "$db_url" ]; then
-    log "Warning: DATABASE_URL not set, skipping ErrorReport poll"
+    if [ -n "$environment" ]; then
+      log "Warning: DATABASE_URL_${environment^^} not set, skipping ErrorReport poll (${environment})"
+    else
+      log "Warning: DATABASE_URL not set, skipping ErrorReport poll"
+    fi
     echo "$issues_created"
     return
   fi
@@ -671,14 +677,13 @@ while true; do
   local_issues_created=$(poll_cloudwatch "$since_ms" "$local_issues_created")
 
   # Poll ErrorReport table (multi-environment or single-env fallback)
-  if [ -n "${DATABASE_URL_STAGING:-}" ] || [ -n "${DATABASE_URL_PRODUCTION:-}" ]; then
-    if [ -n "${DATABASE_URL_STAGING:-}" ]; then
-      local_issues_created=$(poll_error_reports "$local_issues_created" "$DATABASE_URL_STAGING" "staging")
-    fi
-    if [ -n "${DATABASE_URL_PRODUCTION:-}" ]; then
-      local_issues_created=$(poll_error_reports "$local_issues_created" "$DATABASE_URL_PRODUCTION" "production")
-    fi
-  else
+  if [ -n "${DATABASE_URL_STAGING:-}" ]; then
+    local_issues_created=$(poll_error_reports "$local_issues_created" "$DATABASE_URL_STAGING" "staging")
+  fi
+  if [ -n "${DATABASE_URL_PRODUCTION:-}" ]; then
+    local_issues_created=$(poll_error_reports "$local_issues_created" "$DATABASE_URL_PRODUCTION" "production")
+  fi
+  if [ -z "${DATABASE_URL_STAGING:-}" ] && [ -z "${DATABASE_URL_PRODUCTION:-}" ]; then
     local_issues_created=$(poll_error_reports "$local_issues_created")
   fi
 

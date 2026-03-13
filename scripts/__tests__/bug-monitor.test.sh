@@ -441,7 +441,10 @@ result=$(cloudwatch_extract_stage "/aws/lambda/ai-social-MetricsFn-staging")
 assert_eq "extracts staging from different function name" "staging" "$result"
 
 result=$(cloudwatch_extract_stage "/aws/lambda/some-other-thing")
-assert_eq "returns last segment for unknown patterns" "thing" "$result"
+assert_eq "returns unknown for unrecognized stage" "unknown" "$result"
+
+result=$(cloudwatch_extract_stage "/aws/lambda/ai-social-SiteFn-dev")
+assert_eq "extracts dev as valid stage" "dev" "$result"
 
 result=$(cloudwatch_extract_stage "/aws/lambda/nohyphens")
 assert_eq "returns unknown for no-hyphen name" "unknown" "$result"
