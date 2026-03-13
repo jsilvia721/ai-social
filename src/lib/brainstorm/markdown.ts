@@ -96,6 +96,9 @@ export function updateItemWithPlanLink(
   planIssueNumber: number,
   planUrl: string,
 ): string {
+  // Only allow GitHub URLs to prevent injection of arbitrary links
+  if (!planUrl.startsWith("https://github.com/")) return markdown;
+
   // Escape special regex chars in the title
   const escapedTitle = itemTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(

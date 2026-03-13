@@ -4,18 +4,18 @@
 import { z } from "zod";
 
 export const BrainstormItemSchema = z.object({
-  title: z.string().min(1),
-  rationale: z.string().min(1),
+  title: z.string().min(1).max(200),
+  rationale: z.string().min(1).max(1000),
   scope: z.enum(["Small", "Medium", "Large"]),
-  visionAlignment: z.string().min(1),
+  visionAlignment: z.string().min(1).max(1000),
   category: z.enum(["Intelligence", "Infrastructure", "UX", "Growth", "Operations"]),
 });
 
 export type BrainstormItem = z.infer<typeof BrainstormItemSchema>;
 
 export const BrainstormOutputSchema = z.object({
-  projectSummary: z.string().min(1),
-  researchInsights: z.string().min(1),
+  projectSummary: z.string().min(1).max(2000),
+  researchInsights: z.string().min(1).max(2000),
   items: z.array(BrainstormItemSchema).min(5).max(7),
 });
 
