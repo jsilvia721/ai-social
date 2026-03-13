@@ -170,6 +170,33 @@ commit_wip_if_needed() {
   done
 }
 
+# --- Worktree cleanup ---------------------------------------------------------
+# Run git clean -fd in the worktree for a given issue to remove untracked files.
+# Arguments: $1=issue_number
+clean_worktree() {
+  local issue_number="$1"
+
+  # Scan worktrees for a branch matching issue-{N}-*
+  for wt in .claude/worktrees/*/; do
+    [ -d "$wt" ] || continue
+
+    local branch
+    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+    if [[ "$branch" == issue-${issue_number}-* ]]; then
+      local cleaned
+      cleaned=$(git -C "$wt" clean -fd 2>&1 || true)
+      if [ -n "$cleaned" ]; then
+        log "Cleaned untracked files in worktree for issue #${issue_number}:"
+        echo "$cleaned" | while IFS= read -r line; do
+          log "  $line"
+        done
+      fi
+      return
+    fi
+  done
+}
+
 # --- Heartbeat helper ---------------------------------------------------------
 # Start a background heartbeat writer for a given issue/PID.
 # $1 — issue_number, $2 — PID to monitor
@@ -277,6 +304,7 @@ EOF
   if detect_rate_limit "$exit_code" "$log_file"; then
     commit_wip_if_needed "$issue_number"
     handle_rate_limit_exit "$issue_number" "$runtime" "Worker"
+    clean_worktree "$issue_number"
     remove_worker "$self_pid"
     return
   fi
@@ -311,6 +339,7 @@ EOF
     fi
   fi
 
+  clean_worktree "$issue_number"
   remove_worker "$self_pid"
 }
 
@@ -370,6 +399,7 @@ EOF
   # Check for rate limit first
   if detect_rate_limit "$exit_code" "$log_file"; then
     handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor"
+    clean_worktree "$issue_number"
     remove_worker "$self_pid"
     return
   fi
@@ -389,6 +419,7 @@ EOF
     fi
   fi
 
+  clean_worktree "$issue_number"
   remove_worker "$self_pid"
 }
 
