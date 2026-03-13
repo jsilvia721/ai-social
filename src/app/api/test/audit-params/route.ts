@@ -10,11 +10,13 @@ export async function GET() {
 
   // Most recent business
   const business = await prisma.business.findFirst({
+    select: { id: true },
     orderBy: { createdAt: "desc" },
   });
 
   // Most recent post
   const post = await prisma.post.findFirst({
+    select: { id: true, repurposeGroupId: true },
     orderBy: { createdAt: "desc" },
   });
 
@@ -22,6 +24,7 @@ export async function GET() {
   let repurposeGroupId = post?.repurposeGroupId ?? null;
   if (!repurposeGroupId) {
     const repurposePost = await prisma.post.findFirst({
+      select: { repurposeGroupId: true },
       where: { repurposeGroupId: { not: null } },
       orderBy: { createdAt: "desc" },
     });
