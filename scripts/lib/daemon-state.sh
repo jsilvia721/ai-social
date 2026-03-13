@@ -23,42 +23,39 @@ ensure_state_dir() {
   mkdir -p "$DAEMON_STATE_DIR"
 }
 
-# Set rate limit pause. Creates rate-limit-pause and pause-until files.
+# Set rate limit pause. Writes expiry epoch to pause-until file.
 # $1 — duration in seconds (default: 900 = 15 minutes)
 set_rate_limit_pause() {
   local duration="${1:-900}"
   local until_epoch=$(( $(date +%s) + duration ))
   ensure_state_dir
-  touch "$DAEMON_STATE_DIR/rate-limit-pause"
   echo "$until_epoch" > "$DAEMON_STATE_DIR/pause-until"
 }
 
 # Check if rate limit pause is active.
 # Returns 0 if paused, 1 if not. Auto-clears expired pauses.
 is_rate_limit_paused() {
-  if [ ! -f "$DAEMON_STATE_DIR/rate-limit-pause" ]; then
+  if [ ! -f "$DAEMON_STATE_DIR/pause-until" ]; then
     return 1
   fi
 
-  # Check if pause has expired
-  if [ -f "$DAEMON_STATE_DIR/pause-until" ]; then
-    local until_epoch
-    until_epoch=$(cat "$DAEMON_STATE_DIR/pause-until")
-    local now
-    now=$(date +%s)
-    if [ "$now" -ge "$until_epoch" ]; then
-      # Expired — auto-clear
-      clear_rate_limit_pause
-      return 1
-    fi
+  local until_epoch
+  until_epoch=$(cat "$DAEMON_STATE_DIR/pause-until" 2>/dev/null || echo "0")
+  local now
+  now=$(date +%s)
+
+  if [ "$now" -ge "$until_epoch" ]; then
+    # Expired — auto-clear
+    clear_rate_limit_pause
+    return 1
   fi
 
   return 0
 }
 
-# Remove rate limit pause files.
+# Remove rate limit pause file.
 clear_rate_limit_pause() {
-  rm -f "$DAEMON_STATE_DIR/rate-limit-pause" "$DAEMON_STATE_DIR/pause-until"
+  rm -f "$DAEMON_STATE_DIR/pause-until"
 }
 
 # Return human-readable expiry time (HH:MM:SS), or "unknown" if no pause set.
@@ -69,7 +66,12 @@ get_pause_until_display() {
   fi
 
   local until_epoch
-  until_epoch=$(cat "$DAEMON_STATE_DIR/pause-until")
+  until_epoch=$(cat "$DAEMON_STATE_DIR/pause-until" 2>/dev/null || echo "")
+
+  if [ -z "$until_epoch" ]; then
+    echo "unknown"
+    return
+  fi
 
   # macOS: date -r <epoch>; Linux: date -d @<epoch>
   date -r "$until_epoch" '+%H:%M:%S' 2>/dev/null || \

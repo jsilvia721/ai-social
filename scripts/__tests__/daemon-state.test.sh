@@ -38,17 +38,6 @@ assert_eq() {
   fi
 }
 
-assert_contains() {
-  local description="$1"
-  local needle="$2"
-  local haystack="$3"
-  if echo "$haystack" | grep -qF "$needle"; then
-    pass "$description"
-  else
-    fail "$description" "contains '$needle'" "$haystack"
-  fi
-}
-
 assert_not_empty() {
   local description="$1"
   local value="$2"
@@ -105,19 +94,6 @@ else
   fail "paused after set_rate_limit_pause" "paused" "not paused"
 fi
 
-# Files exist after set
-if [ -f "$TEST_STATE_DIR/rate-limit-pause" ]; then
-  pass "rate-limit-pause file exists after set"
-else
-  fail "rate-limit-pause file exists after set" "file exists" "file missing"
-fi
-
-if [ -f "$TEST_STATE_DIR/pause-until" ]; then
-  pass "pause-until file exists after set"
-else
-  fail "pause-until file exists after set" "file exists" "file missing"
-fi
-
 # pause-until contains future epoch
 pause_epoch=$(cat "$TEST_STATE_DIR/pause-until")
 now_epoch=$(date +%s)
@@ -144,19 +120,6 @@ else
   pass "not paused after clear"
 fi
 
-# Files removed after clear
-if [ ! -f "$TEST_STATE_DIR/rate-limit-pause" ]; then
-  pass "rate-limit-pause file removed after clear"
-else
-  fail "rate-limit-pause file removed after clear" "file missing" "file exists"
-fi
-
-if [ ! -f "$TEST_STATE_DIR/pause-until" ]; then
-  pass "pause-until file removed after clear"
-else
-  fail "pause-until file removed after clear" "file missing" "file exists"
-fi
-
 # --- Test auto-expiry --------------------------------------------------------
 echo ""
 echo "Auto-expiry:"
@@ -171,13 +134,7 @@ else
   pass "expired pause auto-clears"
 fi
 
-# Files should be cleaned up by auto-expiry
-if [ ! -f "$TEST_STATE_DIR/rate-limit-pause" ]; then
-  pass "rate-limit-pause file cleaned up on expiry"
-else
-  fail "rate-limit-pause file cleaned up on expiry" "file missing" "file exists"
-fi
-
+# File should be cleaned up by auto-expiry
 if [ ! -f "$TEST_STATE_DIR/pause-until" ]; then
   pass "pause-until file cleaned up on expiry"
 else

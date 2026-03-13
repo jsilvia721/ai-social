@@ -52,6 +52,11 @@ mkdir -p "$LOG_DIR"
 source "scripts/lib/daemon-state.sh"
 ensure_state_dir
 
+# Clear stale drain mode from a previous run (drain is runtime-only)
+if is_drain_mode; then
+  clear_drain_mode
+fi
+
 PID_FILE="$LOG_DIR/.active_pids"
 : > "$PID_FILE"  # truncate on start
 
@@ -88,28 +93,36 @@ log() {
 
 # --- Rate limit detection -----------------------------------------------------
 # Returns 0 if rate limited, 1 if not.
-# Arguments: $1=exit_code, $2=runtime_seconds, $3=log_file
+# Arguments: $1=exit_code, $2=log_file
 detect_rate_limit() {
   local exit_code="$1"
-  local runtime="$2"
-  local log_file="$3"
+  local log_file="$2"
 
   # Successful exit is not a rate limit
   if [ "$exit_code" -eq 0 ]; then
     return 1
   fi
 
-  # Short runtime suggests rate limit hit before real work started
-  if [ "$runtime" -lt 120 ]; then
-    return 0
-  fi
-
   # Check log file for rate limit indicators
-  if grep -qiE 'rate.?limit|429|quota|budget.*exceeded|overloaded' "$log_file" 2>/dev/null; then
+  if grep -qiE 'rate.?limit|HTTP.?429|status.?429|quota|budget.*exceeded|overloaded' "$log_file" 2>/dev/null; then
     return 0
   fi
 
   return 1
+}
+
+# --- Rate limit exit handler --------------------------------------------------
+# Shared handler for when a worker/executor hits a rate limit.
+# Arguments: $1=issue_number, $2=runtime, $3=worker_type ("Worker"|"Plan-executor")
+handle_rate_limit_exit() {
+  local issue_number="$1"
+  local runtime="$2"
+  local worker_type="$3"
+
+  log "${worker_type} for issue #${issue_number} hit rate limit (runtime: ${runtime}s)"
+  set_rate_limit_pause "$RATE_LIMIT_PAUSE_SECONDS"
+  gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
+  gh issue comment "$issue_number" --body "${worker_type} interrupted by API rate limit (runtime: ${runtime}s). Will auto-retry after cooldown (~$((RATE_LIMIT_PAUSE_SECONDS / 60)) minutes)." 2>/dev/null || true
 }
 
 # --- WIP commit ---------------------------------------------------------------
@@ -126,10 +139,10 @@ commit_wip_if_needed() {
     branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 
     if [[ "$branch" == issue-${issue_number}-* ]]; then
-      # Check for uncommitted changes
+      # Check for uncommitted changes (only tracked files to avoid committing secrets)
       if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
         log "Committing WIP changes in worktree for issue #${issue_number}"
-        git -C "$wt" add -A 2>/dev/null || true
+        git -C "$wt" add -u 2>/dev/null || true
         git -C "$wt" commit -m "WIP: interrupted by rate limit (issue #${issue_number})" 2>/dev/null || true
       fi
 
@@ -158,36 +171,29 @@ run_worker() {
   fi
 
   # Build the prompt (with retry context if applicable)
-  local prompt
+  local retry_prefix=""
   if [ "$is_retry" = "true" ]; then
-    prompt="$(cat <<EOF
-You are the issue-worker agent. RETRY: Retrying interrupted issue #${issue_number}.
+    retry_prefix="RETRY: Retrying interrupted issue #${issue_number}.
 
 This issue was previously interrupted by an API rate limit. Check for an existing WIP branch:
-  git branch -r --list "origin/issue-${issue_number}-*"
+  git branch -r --list \"origin/issue-${issue_number}-*\"
 If a WIP branch exists, check it out and continue from where the previous attempt left off.
 
-Read the full issue with: gh issue view ${issue_number} --json title,body,labels,assignees
-
-Follow your agent instructions exactly — assess complexity, plan if needed,
-implement with TDD, run ci:check, review based on complexity tier, and create a PR.
-
-If you get stuck, comment on the issue and add the label "claude-blocked".
-EOF
-)"
-  else
-    prompt="$(cat <<EOF
-You are the issue-worker agent. Implement GitHub issue #${issue_number}.
-
-Read the full issue with: gh issue view ${issue_number} --json title,body,labels,assignees
-
-Follow your agent instructions exactly — assess complexity, plan if needed,
-implement with TDD, run ci:check, review based on complexity tier, and create a PR.
-
-If you get stuck, comment on the issue and add the label "claude-blocked".
-EOF
-)"
+"
   fi
+
+  local prompt
+  prompt="$(cat <<EOF
+You are the issue-worker agent. ${retry_prefix}Implement GitHub issue #${issue_number}.
+
+Read the full issue with: gh issue view ${issue_number} --json title,body,labels,assignees
+
+Follow your agent instructions exactly — assess complexity, plan if needed,
+implement with TDD, run ci:check, review based on complexity tier, and create a PR.
+
+If you get stuck, comment on the issue and add the label "claude-blocked".
+EOF
+)"
 
   # Record start time
   local start_time
@@ -208,12 +214,9 @@ EOF
   local runtime=$(( end_time - start_time ))
 
   # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$runtime" "$log_file"; then
-    log "Worker for issue #${issue_number} hit rate limit (runtime: ${runtime}s)"
-    set_rate_limit_pause "$RATE_LIMIT_PAUSE_SECONDS"
+  if detect_rate_limit "$exit_code" "$log_file"; then
     commit_wip_if_needed "$issue_number"
-    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
-    gh issue comment "$issue_number" --body "Worker interrupted by API rate limit (runtime: ${runtime}s). Will auto-retry after cooldown (~$((RATE_LIMIT_PAUSE_SECONDS / 60)) minutes)." 2>/dev/null || true
+    handle_rate_limit_exit "$issue_number" "$runtime" "Worker"
     return
   fi
 
@@ -287,11 +290,8 @@ EOF
   local runtime=$(( end_time - start_time ))
 
   # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$runtime" "$log_file"; then
-    log "Plan-executor for issue #${issue_number} hit rate limit (runtime: ${runtime}s)"
-    set_rate_limit_pause "$RATE_LIMIT_PAUSE_SECONDS"
-    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
-    gh issue comment "$issue_number" --body "Plan-executor interrupted by API rate limit (runtime: ${runtime}s). Will auto-retry after cooldown (~$((RATE_LIMIT_PAUSE_SECONDS / 60)) minutes)." 2>/dev/null || true
+  if detect_rate_limit "$exit_code" "$log_file"; then
+    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor"
     return
   fi
 
