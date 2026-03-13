@@ -13,7 +13,7 @@ You will receive a GitHub issue number. Use `gh issue view <number> --json title
 
 ## Journaling
 
-Throughout Steps 1–5, maintain a mental journal of friction you encounter. This is prompt-level only — do not write files or external state. Simply track friction as part of your reasoning.
+Throughout Steps 1–6, maintain a mental journal of friction you encounter. This is prompt-level only — do not write files or external state. Simply track friction as part of your reasoning.
 
 Whenever you hit friction (something that slows you down, surprises you, or requires a workaround), record a mental journal entry:
 
@@ -114,7 +114,71 @@ This is where you save budget on simpler work:
 
 Fix any issues the reviews surface, then re-run ci:check.
 
-## Step 5: Create the PR
+## Step 5: Validate Test Plan
+
+Before creating the PR, execute every item in your test plan to verify the implementation actually works end-to-end.
+
+### 1. Infrastructure Setup
+
+Before executing test plan items, check if any require local services:
+- **Database:** If tests need a database, run `docker compose up -d db` and wait for `pg_isready -h localhost -p 5432` to succeed.
+- **Dev server:** If tests need a running app, run `npm run dev` in the background.
+- **Other services:** Start any other required local services.
+
+### 2. Execute Each Test Plan Item
+
+Run every command or verification listed in your test plan. For each item:
+- Execute the command or check
+- Mark `[x]` on success
+- Record the output/evidence
+
+### 3. Fix and Retry on Failure
+
+If a test plan step fails and the failure is fixable (code bug, missing seed data, wrong assertion, etc.):
+1. Fix the issue
+2. Re-run `npm run ci:check` to ensure the fix doesn't break anything
+3. Retry the failed test plan step
+
+### 4. Create Issue for Blocked Steps
+
+If a test plan step is truly blocked (missing infrastructure, external service unavailable, capability gap), create a GitHub issue:
+
+```bash
+gh issue create \
+  --title "[Agent Infra] Cannot verify: <description of what couldn't be verified>" \
+  --label "agent-infra" \
+  --body "$(cat <<'BLOCKED_EOF'
+## What was attempted
+<exact command or verification step>
+
+## Error / Blocker
+<exact error message or description of why this is blocked>
+
+## What would unblock this
+<capability, infrastructure, or configuration needed>
+
+## Context
+Discovered while working on #<original-issue-number>, PR #<pr-number-if-known>.
+BLOCKED_EOF
+)"
+```
+
+In the test plan, leave the item unchecked and add a note: `— blocked, see #<issue-number>`
+
+### 5. Cleanup
+
+Stop any services you started during validation:
+- Kill the dev server if you started one
+- Stop Docker containers if you started them (unless they were already running before)
+- Don't leave background processes running
+
+### 6. Gate
+
+Proceed to Step 6 (Create PR) only after **all** test plan items are either:
+- `[x]` — verified successfully, or
+- `[ ] — blocked, see #<issue-number>` — with a linked `agent-infra` issue
+
+## Step 6: Create the PR
 
 ```bash
 gh pr create \
@@ -131,7 +195,9 @@ Closes #<issue-number>
 <bulleted list of changes>
 
 ## Test plan
-<how to verify this works>
+<!-- Each item must show verification status: [x] verified or [ ] — blocked, see #N -->
+- [x] <verified item description>
+- [ ] <blocked item> — blocked, see #<issue-number>
 
 ## Review results
 <!-- For trivial issues use: "Self-review only (trivial)" -->
@@ -147,13 +213,13 @@ EOF
 )"
 ```
 
-## Step 6: Self-Assessment
+## Step 7: Self-Assessment
 
 **This step is a "finally" block — it runs ALWAYS:**
-- On **success**: after Step 5 (PR creation)
+- On **success**: after Step 6 (PR creation)
 - On **failure**: before labeling the issue `claude-blocked`
 
-Review your mental journal from Steps 1–5 and decide whether any friction you encountered is worth reporting as a self-improvement issue.
+Review your mental journal from Steps 1–6 and decide whether any friction you encountered is worth reporting as a self-improvement issue.
 
 ### Significance Filter
 
@@ -217,9 +283,9 @@ If the proposed fix is complex (multi-file, architectural, or involves code chan
 
 ### Error Handling
 
-If `gh issue create` fails, log the failure in the Step 7 report-back comment but do not fail the overall run. The self-assessment step must never block delivery of the PR or the report-back.
+If `gh issue create` fails, log the failure in the Step 8 report-back comment but do not fail the overall run. The self-assessment step must never block delivery of the PR or the report-back.
 
-## Step 7: Report Back
+## Step 8: Report Back
 
 Comment on the issue with a link to the PR and a brief summary of what was done.
 
@@ -227,6 +293,7 @@ Comment on the issue with a link to the PR and a brief summary of what was done.
 gh issue comment <number> --body "PR created: <pr-url>
 **What was done:** <1-2 sentences>
 **Tests:** <pass/fail summary>
+**Test plan validation:** <N/M items verified, K blocked — see #issue1, #issue2> or <All N items verified>
 **Review:** <final status of each review agent, or 'Self-review only' for trivial — never 'pending'>
 **Self-improvement:** <list of created issue links, or 'No significant learnings to report'>"
 ```
