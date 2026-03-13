@@ -41,6 +41,7 @@ export default async function EditPostPage({ params }: Props) {
           username: post.socialAccount.username,
           scheduledAt: post.scheduledAt?.toISOString() ?? null,
           mediaUrls: post.mediaUrls,
+          coverImageUrl: post.coverImageUrl,
         }}
       />
     </div>
