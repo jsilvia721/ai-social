@@ -1,6 +1,9 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 
+// Contract tests: the issue-worker prompt structure is load-bearing for agent behavior.
+// Specific field names, section ordering, and content are intentionally asserted here
+// to prevent accidental regressions when editing the prompt.
 describe("issue-worker agent prompt", () => {
   let content: string;
 
@@ -146,7 +149,9 @@ describe("issue-worker agent prompt", () => {
  */
 function extractSection(content: string, heading: string): string {
   const startIndex = content.indexOf(heading);
-  if (startIndex === -1) return "";
+  if (startIndex === -1) {
+    throw new Error(`Section "${heading}" not found in content`);
+  }
 
   const headingLevel = heading.match(/^#+/)?.[0].length ?? 2;
   const afterHeading = content.slice(startIndex + heading.length);
