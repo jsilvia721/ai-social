@@ -2,29 +2,7 @@
  * Mock data for GitHub API calls.
  * Returns realistic responses without hitting the GitHub API.
  */
-
-export interface MockIssue {
-  number: number;
-  title: string;
-  body: string;
-  state: string;
-  labels: { name: string }[];
-  html_url: string;
-}
-
-export interface MockComment {
-  id: number;
-  body: string;
-  user: { login: string };
-  created_at: string;
-}
-
-export interface MockPR {
-  number: number;
-  title: string;
-  merged_at: string | null;
-  html_url: string;
-}
+import type { GitHubIssue, GitHubComment, GitHubPR } from "@/lib/github";
 
 let mockIssueCounter = 100;
 
@@ -41,7 +19,7 @@ export function mockCreateIssue(
   };
 }
 
-export function mockGetIssue(issueNumber: number): MockIssue {
+export function mockGetIssue(issueNumber: number): GitHubIssue {
   return {
     number: issueNumber,
     title: `Mock Issue #${issueNumber}`,
@@ -56,7 +34,7 @@ export function mockGetIssueBody(issueNumber: number): string {
   return `This is the body of mock issue #${issueNumber}.`;
 }
 
-export function mockListComments(_issueNumber: number): MockComment[] {
+export function mockListComments(_issueNumber: number): GitHubComment[] {
   return [
     {
       id: 1,
@@ -87,7 +65,7 @@ export function mockGetRepoFile(_path: string): string {
 export function mockListIssues(
   _labels: string[],
   _state: string
-): MockIssue[] {
+): GitHubIssue[] {
   return [
     {
       number: 1,
@@ -100,7 +78,7 @@ export function mockListIssues(
   ];
 }
 
-export function mockListRecentPRs(_days: number): MockPR[] {
+export function mockListRecentPRs(_days: number): GitHubPR[] {
   return [
     {
       number: 10,

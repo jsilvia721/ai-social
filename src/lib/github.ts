@@ -21,11 +21,39 @@ import {
   mockListRecentPRs,
 } from "@/lib/mocks/github";
 
+// ── Canonical return types ──────────────────────────────────────────────────
+
+export interface GitHubIssue {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  labels: { name: string }[];
+  html_url: string;
+}
+
+export interface GitHubComment {
+  id: number;
+  body: string;
+  user: { login: string };
+  created_at: string;
+}
+
+export interface GitHubPR {
+  number: number;
+  title: string;
+  merged_at: string | null;
+  html_url: string;
+}
+
+// ── Internals ───────────────────────────────────────────────────────────────
+
 // Lazy-init singleton — only created when token is available
 let _octokit: Octokit | null = null;
 
 function getOctokit(): Octokit | null {
   if (!env.GITHUB_TOKEN) return null;
+  if (!env.GITHUB_REPO_OWNER || !env.GITHUB_REPO_NAME) return null;
   if (!_octokit) {
     _octokit = new Octokit({ auth: env.GITHUB_TOKEN });
   }
@@ -89,7 +117,7 @@ export async function getIssueBody(issueNumber: number): Promise<string> {
   return data.body ?? "";
 }
 
-export async function getIssue(issueNumber: number) {
+export async function getIssue(issueNumber: number): Promise<GitHubIssue> {
   if (shouldMockExternalApis()) return mockGetIssue(issueNumber);
 
   const octokit = getOctokit();
@@ -99,7 +127,7 @@ export async function getIssue(issueNumber: number) {
       title: "",
       body: "",
       state: "open",
-      labels: [] as { name: string }[],
+      labels: [],
       html_url: "",
     };
 
@@ -135,7 +163,7 @@ export async function closeIssue(issueNumber: number): Promise<void> {
 export async function listComments(
   issueNumber: number,
   sinceId?: number
-): Promise<{ id: number; body: string; user: { login: string }; created_at: string }[]> {
+): Promise<GitHubComment[]> {
   if (shouldMockExternalApis()) {
     const comments = mockListComments(issueNumber);
     if (sinceId) return comments.filter((c) => c.id > sinceId);
@@ -151,7 +179,7 @@ export async function listComments(
     per_page: 100,
   });
 
-  const comments = data.map((c) => ({
+  const comments: GitHubComment[] = data.map((c) => ({
     id: c.id,
     body: c.body ?? "",
     user: { login: c.user?.login ?? "" },
@@ -200,7 +228,7 @@ export async function getRepoFile(path: string): Promise<string> {
 export async function listIssues(
   labels: string[],
   state: "open" | "closed" | "all"
-) {
+): Promise<GitHubIssue[]> {
   if (shouldMockExternalApis()) return mockListIssues(labels, state);
 
   const octokit = getOctokit();
@@ -225,7 +253,8 @@ export async function listIssues(
   }));
 }
 
-export async function listRecentPRs(days: number) {
+/** Note: caps at 100 most-recently-updated closed PRs — sufficient for typical repo volume. */
+export async function listRecentPRs(days: number): Promise<GitHubPR[]> {
   if (shouldMockExternalApis()) return mockListRecentPRs(days);
 
   const octokit = getOctokit();
