@@ -273,6 +273,52 @@ echo "$now_epoch" > "$TEST_LOG_DIR/heartbeat-81"
 output=$(run_status)
 assert_contains "shows MB for large files" "MB" "$output"
 
+# --- Test: GitHub progress flag (-g) ------------------------------------------
+echo ""
+echo "GitHub progress flag (-g):"
+
+# Without -g flag, no GitHub API calls (we test by checking output doesn't have progress tags)
+echo "$$:90:${now_epoch}:worker" > "$TEST_LOG_DIR/.active_pids"
+echo "$now_epoch" > "$TEST_LOG_DIR/heartbeat-90"
+echo "x" > "$TEST_LOG_DIR/issue-90.log"
+
+output=$(run_status)
+assert_not_contains "without -g, no progress tag shown" "step_" "$output"
+
+# With -g flag, uses a mock gh command that returns the extracted tag
+# (simulates what gh --json -q would return after jq processing)
+MOCK_BIN_DIR=$(mktemp -d)
+cat > "$MOCK_BIN_DIR/gh" <<'MOCK_GH'
+#!/usr/bin/env bash
+# Mock gh that returns the extracted progress tag (as jq capture would)
+if [[ "$*" == *"issue view"* ]]; then
+  echo "step_3_implement"
+fi
+MOCK_GH
+chmod +x "$MOCK_BIN_DIR/gh"
+
+output=$(PATH="$MOCK_BIN_DIR:$PATH" run_status -g)
+assert_contains "with -g, shows progress tag" "step_3_implement" "$output"
+rm -rf "$MOCK_BIN_DIR"
+
+# With -g flag but no progress comments found (mock returns empty)
+MOCK_BIN_DIR2=$(mktemp -d)
+cat > "$MOCK_BIN_DIR2/gh" <<'MOCK_GH2'
+#!/usr/bin/env bash
+echo ""
+MOCK_GH2
+chmod +x "$MOCK_BIN_DIR2/gh"
+
+output=$(PATH="$MOCK_BIN_DIR2:$PATH" run_status -g)
+assert_not_contains "with -g but no progress comments, no tag shown" "step_" "$output"
+rm -rf "$MOCK_BIN_DIR2"
+
+# --- Test: Usage includes -g flag ---------------------------------------------
+echo ""
+echo "Usage string:"
+output=$(LOG_DIR="$TEST_LOG_DIR" DAEMON_STATE_DIR="$TEST_STATE_DIR" bash "$STATUS_SCRIPT" -x 2>&1 || true)
+assert_contains "usage shows -g flag" "[-g]" "$output"
+
 # --- Test: Shellcheck ---------------------------------------------------------
 echo ""
 echo "Shellcheck:"
