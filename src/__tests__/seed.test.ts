@@ -2,8 +2,10 @@
  * Tests for prisma/seed.ts — verifies all E2E fixtures are created
  * with deterministic IDs and correct data.
  */
-import { mockDeep, mockReset, type DeepMockProxy } from "jest-mock-extended";
+import { mockDeep, mockReset } from "jest-mock-extended";
 import type { PrismaClient } from "@prisma/client";
+
+import { seedDatabase } from "../../prisma/seed-logic";
 
 // Create a deep mock of PrismaClient
 const prismaMock = mockDeep<PrismaClient>();
@@ -29,14 +31,6 @@ function setupMockReturns() {
 
   return { user, business, twitter, instagram };
 }
-
-// Dynamically import seed function (needs to be exported)
-let seedDatabase: (prisma: DeepMockProxy<PrismaClient>) => Promise<void>;
-
-beforeAll(async () => {
-  const mod = await import("../../prisma/seed-logic");
-  seedDatabase = mod.seedDatabase;
-});
 
 describe("seed-logic", () => {
   it("creates a test user with test@example.com", async () => {
