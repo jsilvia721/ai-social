@@ -8,7 +8,7 @@ import { publishPost } from "@/lib/blotato/publish";
 import { getPostMetrics } from "@/lib/blotato/metrics";
 import { BlotatoApiError } from "@/lib/blotato/client";
 import { sendFailureAlert } from "@/lib/alerts";
-import type { Post, SocialAccount, Business, BusinessMember, User } from "@prisma/client";
+import type { Post, SocialAccount, Business, BusinessMember, User, Platform } from "@prisma/client";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +26,7 @@ const MAX_RETRIES = 2; // 3 total attempts (0, 1, 2)
 const STUCK_THRESHOLD_MS = 5 * 60_000; // 5 minutes
 const RETRY_BASE_MS = 60_000; // 1 min base
 const RETRY_CAP_MS = 30 * 60_000; // 30 min cap
+const MEDIA_REQUIRED_PLATFORMS = new Set<Platform>(["INSTAGRAM", "TIKTOK"]);
 
 // ── Retry helpers ────────────────────────────────────────────────────────────
 
@@ -89,6 +90,14 @@ async function publishOne(post: DuePost, now: Date): Promise<void> {
     data: { status: "PUBLISHING" },
   });
   if (claimed.count === 0) return; // another invocation claimed it
+
+  // Validate media for platforms that require it
+  const platform = post.socialAccount.platform;
+  if (MEDIA_REQUIRED_PLATFORMS.has(platform) && post.mediaUrls.length === 0) {
+    const err = new BlotatoApiError(`${platform} requires at least one image or video`, 400);
+    await handlePublishFailure(post, err);
+    return;
+  }
 
   try {
     const { blotatoPostId } = await publishPost(
