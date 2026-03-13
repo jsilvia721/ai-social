@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         This issue requires human approval before Claude Code will pick it up.
-        Add the `claude-ready` label after reviewing to allow autonomous work.
+        Comment `/go` or 👍 after reviewing to approve.
         Be specific — Claude will read this as its only instructions.
 
   - type: textarea

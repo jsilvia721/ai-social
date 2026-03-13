@@ -137,7 +137,7 @@ jobs:
                 await github.rest.issues.createComment({
                   owner, repo,
                   issue_number: depIssueNum,
-                  body: `All dependencies resolved (merged via PR #${pr.number}). Marking as \`needs-triage\` for human review. Add \`claude-ready\` when approved.`
+                  body: `All dependencies resolved (merged via PR #${pr.number}). Marking as \`needs-triage\` for human review. Comment \`/go\` or 👍 to approve.`
                 });
               }
             }

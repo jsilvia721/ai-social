@@ -73,7 +73,7 @@ ISSUE_EOF
 ```
 
 **Labeling rules:**
-- Items with NO dependencies: label `needs-triage` (requires human approval before work begins)
+- Items with NO dependencies: label `needs-triage` (requires human approval — comment `/go` or 👍 to approve)
 - Items WITH dependencies: label `blocked` (waiting on dependency issues). Also add a Dependencies section:
 
 ```
@@ -82,7 +82,7 @@ ISSUE_EOF
 > Do not start until the following issues are merged:
 > - #<actual issue number> — <title>
 >
-> Once all dependencies are merged, this issue will be labeled `needs-triage` for human review.
+> Once all dependencies are merged, this issue will be labeled `needs-triage` for human review. Comment `/go` or 👍 to approve.
 ```
 
 Use the **actual issue numbers** returned by `gh issue create`, not the position numbers from the plan.
