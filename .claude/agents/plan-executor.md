@@ -102,14 +102,14 @@ Comment on the original plan issue with a summary table mapping position numbers
 
 ### 5. Close Out
 
-Remove the `claude-approved` label and add `claude-done` to the plan issue.
+Remove the `claude-approved` label and add `claude-active` to the plan issue.
 
 ## Error Handling
 
 If anything fails during issue creation:
 - Comment on the plan issue with what went wrong
 - Add label `claude-blocked`
-- Do NOT add `claude-done`
+- Do NOT add `claude-active`
 
 ## Rules
 
