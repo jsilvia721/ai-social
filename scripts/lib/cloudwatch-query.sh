@@ -18,7 +18,7 @@ set -euo pipefail
 # Outputs one log group name per line
 cloudwatch_discover_log_groups() {
   aws logs describe-log-groups \
-    --log-group-name-prefix "/aws/lambda" \
+    --log-group-name-prefix "/aws/lambda/ai-social" \
     --query 'logGroups[].logGroupName' \
     --output json 2>/dev/null \
   | jq -r '.[]' 2>/dev/null || true
@@ -58,25 +58,22 @@ cloudwatch_query_errors() {
 }
 
 # Extract the SST stage (environment) from a CloudWatch log group name.
-# SST convention: /aws/lambda/<app>-<function>-<stage>
-# The stage is the last hyphen-separated segment of the final path component.
-# Only returns known stage names (staging, production, dev); defaults to "unknown".
+# SST convention: /aws/lambda/ai-social-<stage>-<FunctionName>-<hash>
+# The stage is embedded in the middle of the log group name, not at the end.
 #
 # Arguments:
-#   $1 — log group name (e.g., /aws/lambda/ai-social-SiteFn-staging)
+#   $1 — log group name (e.g., /aws/lambda/ai-social-production-BriefFulfillmentHandlerFunction-bawdtexr)
 #
 # Outputs the stage name (e.g., "staging", "production") or "unknown".
 cloudwatch_extract_stage() {
   local log_group="${1:-}"
-  local basename="${log_group##*/}"
 
-  if [[ "$basename" == *-* ]]; then
-    local segment="${basename##*-}"
-    # Validate against known SST stages
-    case "$segment" in
-      staging|production|dev) echo "$segment" ;;
-      *) echo "unknown" ;;
-    esac
+  if [[ "$log_group" == *-production-* ]]; then
+    echo "production"
+  elif [[ "$log_group" == *-staging-* ]]; then
+    echo "staging"
+  elif [[ "$log_group" == *-dev-* ]]; then
+    echo "dev"
   else
     echo "unknown"
   fi

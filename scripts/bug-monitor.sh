@@ -164,7 +164,7 @@ find_existing_issue() {
   local prefix="${fingerprint:0:12}"
 
   local labels="$LABEL_BUG"
-  if [ -n "$environment" ]; then
+  if [ -n "$environment" ] && [ "$environment" != "unknown" ]; then
     labels="${labels},env:${environment}"
   fi
 
@@ -284,7 +284,7 @@ EOF
 )
 
   local labels="${LABEL_BUG},${LABEL_TRIAGE}"
-  if [ -n "$environment" ]; then
+  if [ -n "$environment" ] && [ "$environment" != "unknown" ]; then
     labels="${labels},env:${environment}"
   fi
 
