@@ -162,4 +162,4 @@ Report back to the user with:
 2. The execution strategy table from the issue body
 3. Your decomposition reasoning (why you split or kept as one)
 4. Total estimated files touched across all items
-5. Instruction: **"Review the plan on GitHub and comment `/approve` to kick off work."**
+5. Instruction: **"Review the plan on GitHub and comment `/go` (or `/approve` or 👍) to kick off work."**
