@@ -28,6 +28,10 @@ paths:
 
 **Responsive validation:** after UI changes, verify at multiple breakpoints — mobile-first is required per project conventions.
 
+## PR Screenshots
+
+When creating a PR that touches UI files, capture before/after screenshots and include them in the PR description. See the "PR Screenshots for UI Changes" section in CLAUDE.md for the full workflow. Upload screenshots to S3 under `screenshots/pr/<branch>/` using `uploadBuffer()` from `src/lib/storage.ts`.
+
 ## Requirements
 
 - Dev server must be running (`npm run dev`) before using browser tools
