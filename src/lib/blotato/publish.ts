@@ -41,13 +41,25 @@ export async function publishPost(
   return { blotatoPostId: result.postSubmissionId };
 }
 
-/** Build platform-specific target object for the Blotato API. */
-function buildTarget(platform: string): Record<string, unknown> {
-  const base = { targetType: platform };
+interface BaseTarget {
+  targetType: string;
+}
 
+interface TikTokTarget extends BaseTarget {
+  privacyLevel: string;
+  disabledComments: boolean;
+  disabledDuet: boolean;
+  disabledStitch: boolean;
+  isBrandedContent: boolean;
+  isYourBrand: boolean;
+  isAiGenerated: boolean;
+}
+
+/** Build platform-specific target object for the Blotato API. */
+function buildTarget(platform: string): BaseTarget | TikTokTarget {
   if (platform === "tiktok") {
     return {
-      ...base,
+      targetType: platform,
       privacyLevel: "PUBLIC_TO_EVERYONE",
       disabledComments: false,
       disabledDuet: false,
@@ -58,5 +70,5 @@ function buildTarget(platform: string): Record<string, unknown> {
     };
   }
 
-  return base;
+  return { targetType: platform };
 }
