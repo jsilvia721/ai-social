@@ -250,6 +250,109 @@ describe("GitHub client", () => {
     });
   });
 
+  describe("API error handling", () => {
+    it("createIssue returns safe default on HTTP 403", async () => {
+      const error = new Error("Resource not accessible by personal access token");
+      Object.assign(error, { status: 403 });
+      mockIssuesCreate.mockRejectedValue(error);
+
+      const result = await createIssue("Test", "Body", ["label"]);
+      expect(result).toEqual({ number: 0, title: "Test", html_url: "" });
+    });
+
+    it("updateIssueBody resolves on HTTP 403", async () => {
+      const error = new Error("Resource not accessible");
+      Object.assign(error, { status: 403 });
+      mockIssuesUpdate.mockRejectedValue(error);
+
+      await expect(updateIssueBody(42, "body")).resolves.toBeUndefined();
+    });
+
+    it("closeIssue resolves on HTTP 403", async () => {
+      const error = new Error("Resource not accessible");
+      Object.assign(error, { status: 403 });
+      mockIssuesUpdate.mockRejectedValue(error);
+
+      await expect(closeIssue(42)).resolves.toBeUndefined();
+    });
+
+    it("createComment returns safe default on HTTP 403", async () => {
+      const error = new Error("Resource not accessible");
+      Object.assign(error, { status: 403 });
+      mockIssuesCreateComment.mockRejectedValue(error);
+
+      const result = await createComment(42, "test");
+      expect(result).toEqual({ id: 0, body: "test" });
+    });
+
+    it("getIssue returns safe default on HTTP error", async () => {
+      const error = new Error("Not found");
+      Object.assign(error, { status: 404 });
+      mockIssuesGet.mockRejectedValue(error);
+
+      const result = await getIssue(42);
+      expect(result).toEqual({
+        number: 42,
+        title: "",
+        body: "",
+        state: "open",
+        labels: [],
+        html_url: "",
+      });
+    });
+
+    it("getIssueBody returns empty string on HTTP error", async () => {
+      const error = new Error("Not found");
+      Object.assign(error, { status: 404 });
+      mockIssuesGet.mockRejectedValue(error);
+
+      const result = await getIssueBody(42);
+      expect(result).toBe("");
+    });
+
+    it("listComments returns empty array on HTTP error", async () => {
+      const error = new Error("Forbidden");
+      Object.assign(error, { status: 403 });
+      mockIssuesListComments.mockRejectedValue(error);
+
+      const result = await listComments(42);
+      expect(result).toEqual([]);
+    });
+
+    it("getRepoFile returns empty string on HTTP error", async () => {
+      const error = new Error("Not found");
+      Object.assign(error, { status: 404 });
+      mockReposGetContent.mockRejectedValue(error);
+
+      const result = await getRepoFile("docs/test.md");
+      expect(result).toBe("");
+    });
+
+    it("listIssues returns empty array on HTTP error", async () => {
+      const error = new Error("Forbidden");
+      Object.assign(error, { status: 403 });
+      mockIssuesListForRepo.mockRejectedValue(error);
+
+      const result = await listIssues(["label"], "open");
+      expect(result).toEqual([]);
+    });
+
+    it("listRecentPRs returns empty array on HTTP error", async () => {
+      const error = new Error("Forbidden");
+      Object.assign(error, { status: 403 });
+      mockPullsList.mockRejectedValue(error);
+
+      const result = await listRecentPRs(7);
+      expect(result).toEqual([]);
+    });
+
+    it("re-throws non-HTTP errors", async () => {
+      mockIssuesCreate.mockRejectedValue(new Error("Network timeout"));
+
+      await expect(createIssue("Test", "Body", ["label"])).rejects.toThrow("Network timeout");
+    });
+  });
+
   describe("mock guard", () => {
     it("returns canned data when shouldMockExternalApis is true", async () => {
       mockedShouldMock.mockReturnValue(true);
