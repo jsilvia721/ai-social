@@ -14,7 +14,8 @@
     "test:coverage": "jest --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "prepare": "husky"
+    "prepare": "husky",
+    "qa:audit": "npx tsx scripts/qa-audit.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
@@ -44,6 +45,7 @@
     "replicate": "^1.4.0",
     "rss-parser": "^3.13.0",
     "tailwind-merge": "^3.5.0",
+    "sharp": "^0.33.5",
     "ws": "^8.19.0",
     "zod": "^4.3.6"
   },
