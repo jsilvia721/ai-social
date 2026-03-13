@@ -41,7 +41,7 @@ Before doing any implementation work, assess the issue's complexity tier. This d
 
 Write your assessment as a comment on the issue:
 ```bash
-gh issue comment <number> --body "**Complexity assessment:** <Tier>
+gh issue comment <number> --body "<!-- progress:step_1_assess -->**Complexity assessment:** <Tier>
 **Reasoning:** <1-2 sentences>
 **Approach:** <Brief plan>"
 ```
@@ -59,6 +59,11 @@ Skip this step for Trivial issues.
   - Risks or open questions
 
 For Complex issues, also research the codebase thoroughly before implementing — use the Explore agent to understand existing patterns you need to follow.
+
+After planning is complete (Moderate+Complex only), post a progress comment:
+```bash
+gh issue comment <number> --body "<!-- progress:step_2_plan -->**[Progress]** Plan complete. Proceeding to implementation."
+```
 
 ## Step 3: Implement with TDD
 
@@ -79,6 +84,11 @@ Follow the project's hard rules from CLAUDE.md:
    npm run ci:check  # lint + typecheck + coverage
    ```
    Fix any failures before proceeding.
+
+   After ci:check passes, post a progress comment:
+   ```bash
+   gh issue comment <number> --body "<!-- progress:step_3_implement -->**[Progress]** Implementation complete, ci:check passing. Starting review."
+   ```
 
 5. **Run E2E tests if you changed UI or API routes:**
    ```bash
@@ -113,6 +123,11 @@ This is where you save budget on simpler work:
 **BLOCKING REQUIREMENT:** Do NOT proceed to Step 5 until ALL launched review agents have returned results. Wait for every single one. If a review agent fails or times out, re-launch it exactly once. If it fails a second time, record its status as "failed after retry" — never leave any agent as "pending."
 
 Fix any issues the reviews surface, then re-run ci:check.
+
+After all review agents have returned (Moderate+Complex only), post a progress comment:
+```bash
+gh issue comment <number> --body "<!-- progress:step_4_review -->**[Progress]** Review complete. Proceeding to test plan validation."
+```
 
 ## Step 5: Validate Test Plan
 
@@ -177,6 +192,11 @@ Stop any services you started during validation:
 Proceed to Step 6 (Create PR) only after **all** test plan items are either:
 - `[x]` — verified successfully, or
 - `[ ] — blocked, see #<issue-number>` — with a linked `agent-infra` issue
+
+After test plan validation is complete, post a progress comment:
+```bash
+gh issue comment <number> --body "<!-- progress:step_5_validate -->**[Progress]** Test plan validated. Creating PR."
+```
 
 ## Step 6: Create the PR
 

@@ -5,7 +5,8 @@
 #   ./scripts/daemon-status.sh         # default status display
 #   ./scripts/daemon-status.sh -v      # verbose: show last 5 lines of each worker's log
 #   ./scripts/daemon-status.sh -w      # watch mode: refresh every 5 seconds
-#   ./scripts/daemon-status.sh -v -w   # verbose + watch
+#   ./scripts/daemon-status.sh -g      # fetch latest GitHub progress tag per active worker
+#   ./scripts/daemon-status.sh -v -w -g # all flags combined
 #
 # Requirements:
 #   - Run from the repo root (or set LOG_DIR and DAEMON_STATE_DIR env vars)
@@ -15,15 +16,17 @@ set -euo pipefail
 # --- Configuration -----------------------------------------------------------
 VERBOSE=0
 WATCH=0
+GITHUB=0
 LOG_DIR="${LOG_DIR:-./logs/issue-daemon}"
 WATCH_INTERVAL=5
 
 # --- Parse flags --------------------------------------------------------------
-while getopts "vw" opt; do
+while getopts "vwg" opt; do
   case $opt in
     v) VERBOSE=1 ;;
     w) WATCH=1 ;;
-    *) echo "Usage: $0 [-v] [-w]" && exit 1 ;;
+    g) GITHUB=1 ;;
+    *) echo "Usage: $0 [-v] [-w] [-g]" && exit 1 ;;
   esac
 done
 
@@ -99,6 +102,20 @@ heartbeat_indicator() {
   else
     local age_min=$((age / 60))
     echo "⚠ STALE ${age_min}m ago"
+  fi
+}
+
+# Get the latest progress tag for an issue from GitHub comments.
+# $1 — issue number
+# Returns the tag (e.g., "step_3_implement") or empty string.
+get_progress_tag() {
+  local issue="$1"
+  local comment
+  comment=$(gh issue view "$issue" --json comments \
+    -q '[.comments[] | select(.body | test("<!-- progress:")) | .body] | last' 2>/dev/null || echo "")
+  if [ -n "$comment" ]; then
+    # Extract tag from <!-- progress:TAG -->
+    echo "$comment" | sed -n 's/.*<!-- progress:\([a-z0-9_]*\) -->.*/\1/p' | head -1
   fi
 }
 
@@ -200,8 +217,17 @@ show_status() {
       size_str="$log_name ($(format_size "$size_bytes"))"
     fi
 
-    printf '  #%-4s %-9s %s elapsed  %s  %s\n' \
-      "$issue" "$type" "$elapsed_str" "$hb_str" "$size_str"
+    local progress_str=""
+    if [ "$GITHUB" -eq 1 ]; then
+      local tag
+      tag=$(get_progress_tag "$issue")
+      if [ -n "$tag" ]; then
+        progress_str="  [$tag]"
+      fi
+    fi
+
+    printf '  #%-4s %-9s %s elapsed  %s%s  %s\n' \
+      "$issue" "$type" "$elapsed_str" "$hb_str" "$progress_str" "$size_str"
 
     if [ "$VERBOSE" -eq 1 ] && [ -f "$log_path" ]; then
       echo "    --- last 5 lines ---"
