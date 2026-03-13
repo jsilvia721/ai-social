@@ -11,7 +11,7 @@ import { BrainstormOutputSchema } from "./types";
 import { BRAINSTORM_SYSTEM_PROMPT, buildGenerationPrompt } from "./prompts";
 import { renderBrainstormIssue } from "./markdown";
 import * as github from "@/lib/github";
-import { db } from "@/lib/db";
+import { prisma } from "@/lib/db";
 
 const client = new Anthropic();
 
@@ -123,7 +123,7 @@ export async function generateBrainstorm(): Promise<{
   );
 
   // 6. Create DB record
-  await db.brainstormSession.create({
+  await prisma.brainstormSession.create({
     data: {
       githubIssueNumber: issue.number,
       itemCount: output.items.length,

@@ -27,7 +27,7 @@ jest.mock("@/lib/github", () => ({
 
 // Mock Prisma
 jest.mock("@/lib/db", () => ({
-  db: {
+  prisma: {
     brainstormSession: {
       create: jest.fn().mockResolvedValue({ id: "cuid1" }),
     },
@@ -50,9 +50,9 @@ jest.mock("@/env", () => ({
 
 import { generateBrainstorm } from "@/lib/brainstorm/generate";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
-import { db } from "@/lib/db";
+import { prisma } from "@/lib/db";
 
-const mockBrainstormCreate = db.brainstormSession.create as jest.Mock;
+const mockBrainstormCreate = prisma.brainstormSession.create as jest.Mock;
 
 const mockedShouldMock = shouldMockExternalApis as jest.MockedFunction<
   typeof shouldMockExternalApis
