@@ -29,6 +29,8 @@ LABEL_BLOCKED="claude-blocked"
 LABEL_INTERRUPTED="claude-interrupted"
 LABEL_PLAN_REVIEW="claude-plan-review"
 LABEL_APPROVED="claude-approved"
+LABEL_BUG_INVESTIGATE="bug-investigate"
+LABEL_BUG_PLANNED="bug-planned"
 LOG_DIR="./logs/issue-daemon"
 RATE_LIMIT_PAUSE_SECONDS=900
 WALL_TIMEOUT=60            # wall-clock timeout in minutes per worker
@@ -390,6 +392,84 @@ EOF
   remove_worker "$self_pid"
 }
 
+# --- Bug investigator function ------------------------------------------------
+run_bug_investigator() {
+  local issue_number="$1"
+  local issue_title="$2"
+  local log_file="$LOG_DIR/bug-investigate-${issue_number}.log"
+
+  log "Starting bug-investigator for issue #${issue_number}: ${issue_title}"
+
+  # Label as in-progress
+  gh issue edit "$issue_number" --remove-label "$LABEL_BUG_INVESTIGATE" --add-label "$LABEL_WIP" 2>/dev/null || true
+
+  # Record start time
+  local start_time
+  start_time=$(date +%s)
+
+  # Run Claude in background so heartbeat can run concurrently
+  claude -p "$(cat <<EOF
+You are the bug-investigator agent. Investigate bug issue #${issue_number}.
+
+Read the full issue with: gh issue view ${issue_number} --json title,body,labels
+
+Follow your agent instructions exactly — read the bug issue, investigate the codebase
+to find the root cause, and create a plan issue for fixing it.
+
+If you get stuck, comment on the issue and add the label "claude-blocked".
+EOF
+)" \
+    --agent "bug-investigator" \
+    --max-turns "$MAX_TURNS" \
+    --max-budget-usd "$MAX_BUDGET" \
+    --allowedTools "Bash,Glob,Grep,Read" \
+    > "$log_file" 2>&1 &
+  local claude_pid=$!
+
+  # Start heartbeat writer
+  local hb_pid
+  hb_pid=$(start_heartbeat "$issue_number" "$claude_pid")
+
+  # Wait for Claude to finish
+  wait "$claude_pid"
+  local exit_code=$?
+
+  # Stop heartbeat
+  stop_heartbeat "$hb_pid" "$issue_number"
+
+  local end_time
+  end_time=$(date +%s)
+  local runtime=$(( end_time - start_time ))
+
+  # Get our own PID for cleanup (Bash 3 compatible)
+  local self_pid
+  self_pid=$(sh -c 'echo $PPID')
+
+  # Check for rate limit first
+  if detect_rate_limit "$exit_code" "$log_file"; then
+    handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator"
+    remove_worker "$self_pid"
+    return
+  fi
+
+  if [ $exit_code -eq 0 ]; then
+    log "Bug-investigator for issue #${issue_number} completed successfully"
+    # bug-investigator handles its own label transitions (bug-investigate -> bug-planned)
+    # but ensure WIP is removed if still present
+    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  else
+    log "Bug-investigator for issue #${issue_number} failed (exit code: $exit_code)"
+    local labels
+    labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
+    if ! echo "$labels" | grep -q "$LABEL_BLOCKED"; then
+      gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
+      gh issue comment "$issue_number" --body "Bug-investigator exited with code $exit_code. Check logs at \`$log_file\` for details." 2>/dev/null || true
+    fi
+  fi
+
+  remove_worker "$self_pid"
+}
+
 # --- Worker tracking via PID file ---------------------------------------------
 active_worker_count() {
   local count=0
@@ -407,7 +487,7 @@ active_worker_count() {
 
 # --- Main loop ----------------------------------------------------------------
 log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, turns=$MAX_TURNS, timeout=${WALL_TIMEOUT}m)"
-log "Watching for issues labeled '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', and '${LABEL_READY}'..."
+log "Watching for issues labeled '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', '${LABEL_BUG_INVESTIGATE}', and '${LABEL_READY}'..."
 log "PID file: ${DAEMON_PID_FILE} (send SIGUSR1 to toggle drain mode)"
 
 while true; do
@@ -479,6 +559,8 @@ while true; do
         stale_log_file="$LOG_DIR/issue-${w_issue}.log"
         if [ "$w_type" = "plan" ]; then
           stale_log_file="$LOG_DIR/plan-${w_issue}.log"
+        elif [ "$w_type" = "bug-investigate" ]; then
+          stale_log_file="$LOG_DIR/bug-investigate-${w_issue}.log"
         fi
         log "Worker PID $w_pid for issue #${w_issue} appears stalled (no heartbeat for ${stale_min}m)"
         gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
@@ -556,6 +638,37 @@ while true; do
         done <<< "$approved_issues"
 
         # Recalculate available slots after spawning plan executors
+        active=$(active_worker_count)
+        available_slots=$(( MAX_WORKERS - active ))
+      fi
+    fi
+
+    # --- Priority 1.5: Bug investigation issues ---
+    if [ "$available_slots" -gt 0 ]; then
+      bug_issues=$(gh issue list \
+        --state open \
+        --label "$LABEL_BUG_INVESTIGATE" \
+        --limit "$available_slots" \
+        --json number,title \
+        -q '.[] | @json' 2>/dev/null || echo "")
+
+      if [ -n "$bug_issues" ]; then
+        while IFS= read -r issue_json; do
+          number=$(echo "$issue_json" | jq -r '.number')
+          title=$(echo "$issue_json" | jq -r '.title')
+
+          wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
+          if [ "$wip_check" -gt 0 ]; then
+            log "Skipping bug issue #${number} (already WIP)"
+            continue
+          fi
+
+          run_bug_investigator "$number" "$title" &
+          record_worker "$!" "$number" "bug-investigate"
+          log "Spawned bug-investigator PID $! for issue #${number}"
+        done <<< "$bug_issues"
+
+        # Recalculate available slots
         active=$(active_worker_count)
         available_slots=$(( MAX_WORKERS - active ))
       fi
