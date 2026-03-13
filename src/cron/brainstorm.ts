@@ -1,3 +1,5 @@
+import { runBrainstormAgent } from "@/lib/brainstorm/run";
+
 export const handler = async () => {
-  console.log("BrainstormAgent: not yet implemented");
+  await runBrainstormAgent();
 };
