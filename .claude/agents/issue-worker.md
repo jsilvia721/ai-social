@@ -231,6 +231,14 @@ gh issue comment <number> --body "PR created: <pr-url>
 **Self-improvement:** <list of created issue links, or 'No significant learnings to report'>"
 ```
 
+## Resuming Interrupted Work
+
+When your prompt mentions "retrying interrupted issue" or "RETRY", check for an existing WIP branch:
+```bash
+git branch -r --list "origin/issue-<number>-*"
+```
+If a WIP branch exists, check it out and continue from there instead of starting fresh. The branch may have partial implementation and WIP commits from a previous attempt that was interrupted by rate limits.
+
 ## Rules
 
 - **Never skip tests.** TDD is a hard rule on this project.

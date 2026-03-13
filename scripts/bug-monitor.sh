@@ -64,6 +64,10 @@ mkdir -p "$LOG_DIR"
 # shellcheck source=scripts/lib/cloudwatch-query.sh
 source "scripts/lib/cloudwatch-query.sh"
 
+# Source the shared daemon state library
+# shellcheck source=scripts/lib/daemon-state.sh
+source "scripts/lib/daemon-state.sh"
+
 PID_FILE="$LOG_DIR/.bug-monitor.pid"
 COOLDOWN_FILE="$LOG_DIR/.cooldown_cache"
 LAST_POLL_FILE="$LOG_DIR/.last_poll_time"
@@ -609,6 +613,10 @@ while true; do
   since_ms=$(get_last_poll_ms)
 
   log "--- Poll cycle start (since=$(ms_to_human "$since_ms")) ---"
+
+  if is_rate_limit_paused; then
+    log "Note: issue-daemon is rate-limit paused, new issues will queue"
+  fi
 
   # Poll CloudWatch
   local_issues_created=$(poll_cloudwatch "$since_ms" "$local_issues_created")
