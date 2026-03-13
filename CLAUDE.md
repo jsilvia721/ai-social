@@ -49,6 +49,16 @@ See `.claude/rules/visual-testing.md` for usage patterns and requirements.
 - **Bug fix**: diagnose autonomously, fix it, run tests — stop before committing
 - **After any correction**: update auto-memory with the pattern to prevent recurrence
 
+### PR Screenshots for UI Changes
+When creating a PR that touches UI files (`src/components/**`, `src/app/**/*.tsx`), capture screenshots of affected pages before writing the PR description:
+1. Ensure the dev server is running (`npm run dev`)
+2. Use Playwright MCP to navigate to each affected page
+3. Take screenshots at **mobile (375px)** and **desktop (1440px)** widths
+4. Upload each screenshot to S3 via `uploadBuffer()` from `src/lib/storage.ts` with key `screenshots/pr/<branch>/<page>-<width>.png`
+5. Embed the S3 URLs as markdown images in the PR description under a `## Screenshots` section
+
+If the dev server cannot be started (e.g., missing env vars, database not running), skip screenshots and note it in the PR description.
+
 ### Hard Rules
 - **Never commit or push automatically** — always wait for explicit user request
 - **TDD** — write tests first, then implementation. No exceptions.
