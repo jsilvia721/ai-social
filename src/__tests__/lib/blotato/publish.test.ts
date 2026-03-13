@@ -112,6 +112,51 @@ describe("publishPost", () => {
     await expect(publishPost("acct", "content", "TWITTER")).rejects.toThrow(BlotatoApiError);
   });
 
+  it("includes coverImageUrl in target when platform is INSTAGRAM and coverImageUrl is provided", async () => {
+    fetchSpy.mockResolvedValue(makeSuccessResponse());
+
+    const mediaUrls = ["https://storage.example.com/video.mp4"];
+    await publishPost("acct-xyz", "Reel content", "INSTAGRAM", mediaUrls, {
+      coverImageUrl: "https://storage.example.com/cover.jpg",
+    });
+
+    const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(options.body as string);
+    expect(body.post.target.targetType).toBe("instagram");
+    expect(body.post.target.coverImageUrl).toBe("https://storage.example.com/cover.jpg");
+  });
+
+  it("does NOT include coverImageUrl in target for non-Instagram platforms", async () => {
+    fetchSpy.mockResolvedValue(makeSuccessResponse());
+
+    await publishPost("acct-xyz", "Twitter content", "TWITTER", [], {
+      coverImageUrl: "https://storage.example.com/cover.jpg",
+    });
+
+    const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(options.body as string);
+    expect(body.post.target).toEqual({ targetType: "twitter" });
+  });
+
+  it("does NOT include coverImageUrl in target when not provided for Instagram", async () => {
+    fetchSpy.mockResolvedValue(makeSuccessResponse());
+
+    const mediaUrls = ["https://storage.example.com/img.jpg"];
+    await publishPost("acct-xyz", "IG content", "INSTAGRAM", mediaUrls);
+
+    const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(options.body as string);
+    expect(body.post.target).toEqual({ targetType: "instagram" });
+  });
+
+  it("validates coverImageUrl with SSRF guard when provided", async () => {
+    await expect(
+      publishPost("acct-xyz", "content", "INSTAGRAM", ["https://storage.example.com/vid.mp4"], {
+        coverImageUrl: "https://evil.com/cover.jpg",
+      })
+    ).rejects.toThrow(/SSRF guard/);
+  });
+
   it("throws BlotatoRateLimitError on 429", async () => {
     fetchSpy.mockResolvedValue({
       ok: false,

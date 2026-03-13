@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { content, socialAccountId, scheduledAt, mediaUrls, businessId } = body;
+  const { content, socialAccountId, scheduledAt, mediaUrls, businessId, coverImageUrl } = body;
 
   if (!businessId) {
     return NextResponse.json({ error: "businessId is required" }, { status: 400 });
@@ -103,6 +103,17 @@ export async function POST(req: NextRequest) {
     mediaUrls.forEach(assertSafeMediaUrl);
   }
 
+  if (coverImageUrl) {
+    try {
+      assertSafeMediaUrl(coverImageUrl);
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Invalid cover image URL" },
+        { status: 400 }
+      );
+    }
+  }
+
   const post = await prisma.post.create({
     data: {
       content,
@@ -110,6 +121,7 @@ export async function POST(req: NextRequest) {
       businessId,
       scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
       mediaUrls: mediaUrls ?? [],
+      coverImageUrl: coverImageUrl ?? null,
       status: scheduledAt ? "SCHEDULED" : "DRAFT",
     },
   });

@@ -142,7 +142,8 @@ describe("runScheduler", () => {
       "blotato-acct-1",
       "Hello world",
       "TWITTER",
-      []
+      [],
+      { coverImageUrl: undefined },
     );
     expect(prismaMock.post.update).toHaveBeenCalledWith(
       expect.objectContaining({
