@@ -77,11 +77,9 @@ function extractItemDetails(
 export async function promoteBrainstormItems(
   session: BrainstormSession,
 ): Promise<void> {
-  // Read current issue body and state
-  const [body, issue] = await Promise.all([
-    github.getIssueBody(session.githubIssueNumber),
-    github.getIssue(session.githubIssueNumber),
-  ]);
+  // Single API call — getIssue returns both body and state
+  const issue = await github.getIssue(session.githubIssueNumber);
+  const body = issue.body;
 
   // Sync manually-closed issues
   if (issue.state === "closed") {

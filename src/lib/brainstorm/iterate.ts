@@ -93,11 +93,11 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
 
   if (humanComments.length === 0) return;
 
+  // Fetch body once, then carry forward locally after each update
+  let currentBody = await github.getIssueBody(session.githubIssueNumber);
+
   // Process each comment sequentially
   for (const comment of humanComments) {
-    // 1. Read current issue body
-    const currentBody = await github.getIssueBody(session.githubIssueNumber);
-
     // Parse current checked state to preserve it
     const currentItems = parseBrainstormIssue(currentBody);
 
@@ -133,8 +133,9 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
         checkedTitles.has(title) ? match.replace("[ ]", "[x]") : match,
     );
 
-    // 4. Update issue body
+    // 4. Update issue body and carry forward for next iteration
     await github.updateIssueBody(session.githubIssueNumber, updatedBody);
+    currentBody = updatedBody;
 
     // 5. Post reply comment
     await github.createComment(

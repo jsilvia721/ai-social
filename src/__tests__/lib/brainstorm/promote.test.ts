@@ -3,7 +3,6 @@
  */
 
 // Mock GitHub client
-const mockGetIssueBody = jest.fn();
 const mockGetIssue = jest.fn();
 const mockUpdateIssueBody = jest.fn();
 const mockCreateIssue = jest.fn();
@@ -12,7 +11,6 @@ const mockCloseIssue = jest.fn();
 const mockListComments = jest.fn();
 
 jest.mock("@/lib/github", () => ({
-  getIssueBody: (...args: unknown[]) => mockGetIssueBody(...args),
   getIssue: (...args: unknown[]) => mockGetIssue(...args),
   updateIssueBody: (...args: unknown[]) => mockUpdateIssueBody(...args),
   createIssue: (...args: unknown[]) => mockCreateIssue(...args),
@@ -116,18 +114,22 @@ const BODY_ALL_RESOLVED = `## 💡 Ideas
   **Category:** UX
   **Vision Alignment:** User experience.`;
 
+/** Helper to set mockGetIssue with a given body and state */
+function setIssue(body: string, state = "open") {
+  mockGetIssue.mockResolvedValue({
+    number: 42,
+    title: "Brainstorm: Week of Jan 1",
+    body,
+    state,
+    labels: [{ name: "brainstorm" }],
+    html_url: "https://github.com/test/issues/42",
+  });
+}
+
 describe("promoteBrainstormItems", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetIssue.mockResolvedValue({
-      number: 42,
-      title: "Brainstorm: Week of Jan 1",
-      body: BODY_UNCHECKED,
-      state: "open",
-      labels: [{ name: "brainstorm" }],
-      html_url: "https://github.com/test/issues/42",
-    });
-    mockGetIssueBody.mockResolvedValue(BODY_UNCHECKED);
+    setIssue(BODY_UNCHECKED);
     mockListIssues.mockResolvedValue([]);
     mockCreateIssue.mockResolvedValue({
       number: 99,
@@ -140,16 +142,13 @@ describe("promoteBrainstormItems", () => {
   });
 
   it("does nothing when no items are checked", async () => {
-    mockGetIssueBody.mockResolvedValue(BODY_UNCHECKED);
     const session = makeSession();
-
     await promoteBrainstormItems(session);
-
     expect(mockCreateIssue).not.toHaveBeenCalled();
   });
 
   it("creates a plan issue for a checked item", async () => {
-    mockGetIssueBody.mockResolvedValue(BODY_ONE_CHECKED);
+    setIssue(BODY_ONE_CHECKED);
     const session = makeSession();
 
     await promoteBrainstormItems(session);
@@ -164,7 +163,7 @@ describe("promoteBrainstormItems", () => {
   });
 
   it("updates brainstorm issue body with plan link", async () => {
-    mockGetIssueBody.mockResolvedValue(BODY_ONE_CHECKED);
+    setIssue(BODY_ONE_CHECKED);
     const session = makeSession();
 
     await promoteBrainstormItems(session);
@@ -175,12 +174,11 @@ describe("promoteBrainstormItems", () => {
   });
 
   it("increments approvedCount in DB (batched)", async () => {
-    mockGetIssueBody.mockResolvedValue(BODY_ONE_CHECKED);
+    setIssue(BODY_ONE_CHECKED);
     const session = makeSession();
 
     await promoteBrainstormItems(session);
 
-    // Batched — single update after all promotions
     expect(mockSessionUpdate).toHaveBeenCalledWith({
       where: { id: "session-1" },
       data: { approvedCount: { increment: 1 } },
@@ -188,7 +186,7 @@ describe("promoteBrainstormItems", () => {
   });
 
   it("skips already-linked items", async () => {
-    mockGetIssueBody.mockResolvedValue(BODY_ALREADY_LINKED);
+    setIssue(BODY_ALREADY_LINKED);
     const session = makeSession();
 
     await promoteBrainstormItems(session);
@@ -197,7 +195,7 @@ describe("promoteBrainstormItems", () => {
   });
 
   it("deduplicates — skips if plan issue with same title already exists", async () => {
-    mockGetIssueBody.mockResolvedValue(BODY_ONE_CHECKED);
+    setIssue(BODY_ONE_CHECKED);
     mockListIssues.mockResolvedValue([
       {
         number: 88,
@@ -217,16 +215,7 @@ describe("promoteBrainstormItems", () => {
 
   describe("auto-close", () => {
     it("closes issue when all items resolved and no recent comments", async () => {
-      mockGetIssueBody.mockResolvedValue(BODY_ALL_RESOLVED);
-      mockGetIssue.mockResolvedValue({
-        number: 42,
-        title: "Brainstorm",
-        body: BODY_ALL_RESOLVED,
-        state: "open",
-        labels: [],
-        html_url: "",
-      });
-      // Last comment was 2 days ago
+      setIssue(BODY_ALL_RESOLVED);
       const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
       mockListComments.mockResolvedValue([
         {
@@ -251,16 +240,7 @@ describe("promoteBrainstormItems", () => {
     });
 
     it("does not close when comments are recent (< 24h)", async () => {
-      mockGetIssueBody.mockResolvedValue(BODY_ALL_RESOLVED);
-      mockGetIssue.mockResolvedValue({
-        number: 42,
-        title: "Brainstorm",
-        body: BODY_ALL_RESOLVED,
-        state: "open",
-        labels: [],
-        html_url: "",
-      });
-      // Last comment was 1 hour ago
+      setIssue(BODY_ALL_RESOLVED);
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       mockListComments.mockResolvedValue([
         {
@@ -279,15 +259,7 @@ describe("promoteBrainstormItems", () => {
   });
 
   it("syncs status to CLOSED when GitHub issue is already closed", async () => {
-    mockGetIssueBody.mockResolvedValue(BODY_UNCHECKED);
-    mockGetIssue.mockResolvedValue({
-      number: 42,
-      title: "Brainstorm",
-      body: BODY_UNCHECKED,
-      state: "closed",
-      labels: [],
-      html_url: "",
-    });
+    setIssue(BODY_UNCHECKED, "closed");
     const session = makeSession();
 
     await promoteBrainstormItems(session);
