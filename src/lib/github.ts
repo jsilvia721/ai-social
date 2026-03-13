@@ -67,6 +67,21 @@ function repoParams() {
   };
 }
 
+// ── Error handling ─────────────────────────────────────────────────────────
+
+/**
+ * Returns true for Octokit HTTP errors (have a numeric `status` property).
+ * These are non-retryable API errors (403 permission denied, 404 not found, etc.)
+ * that should degrade gracefully rather than crash the caller.
+ */
+function isHttpError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "status" in error &&
+    typeof (error as unknown as { status: unknown }).status === "number"
+  );
+}
+
 // ── Public helpers ──────────────────────────────────────────────────────────
 
 export async function createIssue(
@@ -79,13 +94,21 @@ export async function createIssue(
   const octokit = getOctokit();
   if (!octokit) return { number: 0, title, html_url: "" };
 
-  const { data } = await octokit.issues.create({
-    ...repoParams(),
-    title,
-    body,
-    labels,
-  });
-  return { number: data.number, title: data.title, html_url: data.html_url };
+  try {
+    const { data } = await octokit.issues.create({
+      ...repoParams(),
+      title,
+      body,
+      labels,
+    });
+    return { number: data.number, title: data.title, html_url: data.html_url };
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] createIssue failed: ${(error as Error).message}`);
+      return { number: 0, title, html_url: "" };
+    }
+    throw error;
+  }
 }
 
 export async function updateIssueBody(
@@ -97,11 +120,19 @@ export async function updateIssueBody(
   const octokit = getOctokit();
   if (!octokit) return;
 
-  await octokit.issues.update({
-    ...repoParams(),
-    issue_number: issueNumber,
-    body,
-  });
+  try {
+    await octokit.issues.update({
+      ...repoParams(),
+      issue_number: issueNumber,
+      body,
+    });
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] updateIssueBody failed: ${(error as Error).message}`);
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function getIssueBody(issueNumber: number): Promise<string> {
@@ -110,11 +141,19 @@ export async function getIssueBody(issueNumber: number): Promise<string> {
   const octokit = getOctokit();
   if (!octokit) return "";
 
-  const { data } = await octokit.issues.get({
-    ...repoParams(),
-    issue_number: issueNumber,
-  });
-  return data.body ?? "";
+  try {
+    const { data } = await octokit.issues.get({
+      ...repoParams(),
+      issue_number: issueNumber,
+    });
+    return data.body ?? "";
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] getIssueBody failed: ${(error as Error).message}`);
+      return "";
+    }
+    throw error;
+  }
 }
 
 export async function getIssue(issueNumber: number): Promise<GitHubIssue> {
@@ -131,20 +170,35 @@ export async function getIssue(issueNumber: number): Promise<GitHubIssue> {
       html_url: "",
     };
 
-  const { data } = await octokit.issues.get({
-    ...repoParams(),
-    issue_number: issueNumber,
-  });
-  return {
-    number: data.number,
-    title: data.title,
-    body: data.body ?? "",
-    state: data.state,
-    labels: (data.labels ?? []).map((l) =>
-      typeof l === "string" ? { name: l } : { name: l.name ?? "" }
-    ),
-    html_url: data.html_url,
-  };
+  try {
+    const { data } = await octokit.issues.get({
+      ...repoParams(),
+      issue_number: issueNumber,
+    });
+    return {
+      number: data.number,
+      title: data.title,
+      body: data.body ?? "",
+      state: data.state,
+      labels: (data.labels ?? []).map((l) =>
+        typeof l === "string" ? { name: l } : { name: l.name ?? "" }
+      ),
+      html_url: data.html_url,
+    };
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] getIssue failed: ${(error as Error).message}`);
+      return {
+        number: issueNumber,
+        title: "",
+        body: "",
+        state: "open",
+        labels: [],
+        html_url: "",
+      };
+    }
+    throw error;
+  }
 }
 
 export async function closeIssue(issueNumber: number): Promise<void> {
@@ -153,11 +207,19 @@ export async function closeIssue(issueNumber: number): Promise<void> {
   const octokit = getOctokit();
   if (!octokit) return;
 
-  await octokit.issues.update({
-    ...repoParams(),
-    issue_number: issueNumber,
-    state: "closed",
-  });
+  try {
+    await octokit.issues.update({
+      ...repoParams(),
+      issue_number: issueNumber,
+      state: "closed",
+    });
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] closeIssue failed: ${(error as Error).message}`);
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function listComments(
@@ -173,21 +235,29 @@ export async function listComments(
   const octokit = getOctokit();
   if (!octokit) return [];
 
-  const { data } = await octokit.issues.listComments({
-    ...repoParams(),
-    issue_number: issueNumber,
-    per_page: 100,
-  });
+  try {
+    const { data } = await octokit.issues.listComments({
+      ...repoParams(),
+      issue_number: issueNumber,
+      per_page: 100,
+    });
 
-  const comments: GitHubComment[] = data.map((c) => ({
-    id: c.id,
-    body: c.body ?? "",
-    user: { login: c.user?.login ?? "" },
-    created_at: c.created_at,
-  }));
+    const comments: GitHubComment[] = data.map((c) => ({
+      id: c.id,
+      body: c.body ?? "",
+      user: { login: c.user?.login ?? "" },
+      created_at: c.created_at,
+    }));
 
-  if (sinceId) return comments.filter((c) => c.id > sinceId);
-  return comments;
+    if (sinceId) return comments.filter((c) => c.id > sinceId);
+    return comments;
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] listComments failed: ${(error as Error).message}`);
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function createComment(
@@ -199,12 +269,20 @@ export async function createComment(
   const octokit = getOctokit();
   if (!octokit) return { id: 0, body };
 
-  const { data } = await octokit.issues.createComment({
-    ...repoParams(),
-    issue_number: issueNumber,
-    body,
-  });
-  return { id: data.id, body: data.body ?? "" };
+  try {
+    const { data } = await octokit.issues.createComment({
+      ...repoParams(),
+      issue_number: issueNumber,
+      body,
+    });
+    return { id: data.id, body: data.body ?? "" };
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] createComment failed: ${(error as Error).message}`);
+      return { id: 0, body };
+    }
+    throw error;
+  }
 }
 
 export async function getRepoFile(path: string): Promise<string> {
@@ -213,16 +291,24 @@ export async function getRepoFile(path: string): Promise<string> {
   const octokit = getOctokit();
   if (!octokit) return "";
 
-  const { data } = await octokit.repos.getContent({
-    ...repoParams(),
-    path,
-  });
+  try {
+    const { data } = await octokit.repos.getContent({
+      ...repoParams(),
+      path,
+    });
 
-  // data is a single file object when path points to a file
-  if ("content" in data && typeof data.content === "string") {
-    return Buffer.from(data.content, "base64").toString("utf-8");
+    // data is a single file object when path points to a file
+    if ("content" in data && typeof data.content === "string") {
+      return Buffer.from(data.content, "base64").toString("utf-8");
+    }
+    return "";
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] getRepoFile failed: ${(error as Error).message}`);
+      return "";
+    }
+    throw error;
   }
-  return "";
 }
 
 export async function listIssues(
@@ -234,23 +320,31 @@ export async function listIssues(
   const octokit = getOctokit();
   if (!octokit) return [];
 
-  const { data } = await octokit.issues.listForRepo({
-    ...repoParams(),
-    labels: labels.join(","),
-    state,
-    per_page: 100,
-  });
+  try {
+    const { data } = await octokit.issues.listForRepo({
+      ...repoParams(),
+      labels: labels.join(","),
+      state,
+      per_page: 100,
+    });
 
-  return data.map((issue) => ({
-    number: issue.number,
-    title: issue.title,
-    body: issue.body ?? "",
-    state: issue.state,
-    labels: (issue.labels ?? []).map((l) =>
-      typeof l === "string" ? { name: l } : { name: l.name ?? "" }
-    ),
-    html_url: issue.html_url,
-  }));
+    return data.map((issue) => ({
+      number: issue.number,
+      title: issue.title,
+      body: issue.body ?? "",
+      state: issue.state,
+      labels: (issue.labels ?? []).map((l) =>
+        typeof l === "string" ? { name: l } : { name: l.name ?? "" }
+      ),
+      html_url: issue.html_url,
+    }));
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] listIssues failed: ${(error as Error).message}`);
+      return [];
+    }
+    throw error;
+  }
 }
 
 /** Note: caps at 100 most-recently-updated closed PRs — sufficient for typical repo volume. */
@@ -260,23 +354,31 @@ export async function listRecentPRs(days: number): Promise<GitHubPR[]> {
   const octokit = getOctokit();
   if (!octokit) return [];
 
-  const since = new Date();
-  since.setDate(since.getDate() - days);
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
 
-  const { data } = await octokit.pulls.list({
-    ...repoParams(),
-    state: "closed",
-    sort: "updated",
-    direction: "desc",
-    per_page: 100,
-  });
+    const { data } = await octokit.pulls.list({
+      ...repoParams(),
+      state: "closed",
+      sort: "updated",
+      direction: "desc",
+      per_page: 100,
+    });
 
-  return data
-    .filter((pr) => pr.merged_at && new Date(pr.merged_at) >= since)
-    .map((pr) => ({
-      number: pr.number,
-      title: pr.title,
-      merged_at: pr.merged_at,
-      html_url: pr.html_url,
-    }));
+    return data
+      .filter((pr) => pr.merged_at && new Date(pr.merged_at) >= since)
+      .map((pr) => ({
+        number: pr.number,
+        title: pr.title,
+        merged_at: pr.merged_at,
+        html_url: pr.html_url,
+      }));
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] listRecentPRs failed: ${(error as Error).message}`);
+      return [];
+    }
+    throw error;
+  }
 }
