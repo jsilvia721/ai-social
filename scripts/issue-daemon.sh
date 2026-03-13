@@ -201,13 +201,14 @@ while true; do
       --state open \
       --label "$LABEL_APPROVED" \
       --limit "$available_slots" \
-      --json number,title \
+      --json number,title,body \
       -q '.[] | @json' 2>/dev/null || echo "")
 
     if [ -n "$approved_issues" ]; then
       while IFS= read -r issue_json; do
         number=$(echo "$issue_json" | jq -r '.number')
         title=$(echo "$issue_json" | jq -r '.title')
+        body=$(echo "$issue_json" | jq -r '.body')
 
         wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
         if [ "$wip_check" -gt 0 ]; then
@@ -215,9 +216,17 @@ while true; do
           continue
         fi
 
-        run_plan_executor "$number" "$title" &
-        echo "$!" >> "$PID_FILE"
-        log "Spawned plan-executor PID $! for issue #${number}"
+        # Check if this is a plan (has plan markers) or a single work item
+        if echo "$body" | grep -q "PLAN_ITEMS_START"; then
+          run_plan_executor "$number" "$title" &
+          echo "$!" >> "$PID_FILE"
+          log "Spawned plan-executor PID $! for issue #${number}"
+        else
+          # Single work item — route to needs-triage for human review
+          log "Issue #${number} is a single work item (no plan markers), routing to needs-triage"
+          gh issue edit "$number" --remove-label "$LABEL_APPROVED" --add-label "needs-triage" 2>/dev/null || true
+          gh issue comment "$number" --body "This is a single work item (not a multi-item plan). Routing to \`needs-triage\` for human review before work begins." 2>/dev/null || true
+        fi
       done <<< "$approved_issues"
 
       # Recalculate available slots after spawning plan executors
