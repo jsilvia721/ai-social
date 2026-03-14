@@ -43,26 +43,12 @@ describe("GET /api/system/api-calls", () => {
   it("returns 200 with correct shape for admin (default range)", async () => {
     mockAuthenticatedAsAdmin();
 
-    // groupBy for summary
-    (prismaMock.apiCall.groupBy as jest.Mock).mockResolvedValue([
-      {
-        service: "blotato",
-        _count: { _all: 10 },
-        _avg: { latencyMs: 200 },
-      },
-    ]);
-
-    // findMany for time-series bucketing
     (prismaMock.apiCall.findMany as jest.Mock).mockResolvedValue([
       {
-        id: "ac-1",
         service: "blotato",
-        endpoint: "publishPost",
-        method: "POST",
         statusCode: 200,
         latencyMs: 150,
         error: null,
-        metadata: null,
         createdAt: new Date(),
       },
     ]);
@@ -71,19 +57,28 @@ describe("GET /api/system/api-calls", () => {
     expect(res.status).toBe(200);
 
     const body = await res.json();
-    expect(body).toHaveProperty("buckets");
-    expect(body).toHaveProperty("summary");
-    expect(Array.isArray(body.buckets)).toBe(true);
-    expect(body.summary).toHaveProperty("totalCalls");
-    expect(body.summary).toHaveProperty("avgLatencyMs");
-    expect(body.summary).toHaveProperty("errorRate");
-    expect(body.summary).toHaveProperty("byService");
+    expect(body).toMatchObject({
+      buckets: expect.arrayContaining([
+        expect.objectContaining({
+          timestamp: expect.any(String),
+          service: "blotato",
+          count: 1,
+          avgLatencyMs: 150,
+          errorCount: 0,
+        }),
+      ]),
+      summary: {
+        totalCalls: 1,
+        avgLatencyMs: 150,
+        errorRate: 0,
+        byService: { blotato: { count: 1, avgLatencyMs: 150 } },
+      },
+    });
   });
 
   it("returns empty response when no data", async () => {
     mockAuthenticatedAsAdmin();
 
-    (prismaMock.apiCall.groupBy as jest.Mock).mockResolvedValue([]);
     (prismaMock.apiCall.findMany as jest.Mock).mockResolvedValue([]);
 
     const res = await GET(makeRequest());
@@ -100,12 +95,20 @@ describe("GET /api/system/api-calls", () => {
   it("accepts valid range params", async () => {
     mockAuthenticatedAsAdmin();
 
-    (prismaMock.apiCall.groupBy as jest.Mock).mockResolvedValue([]);
     (prismaMock.apiCall.findMany as jest.Mock).mockResolvedValue([]);
 
     for (const range of ["24h", "7d", "30d"]) {
       const res = await GET(makeRequest(`?range=${range}`));
       expect(res.status).toBe(200);
     }
+  });
+
+  it("returns 500 when database query fails", async () => {
+    mockAuthenticatedAsAdmin();
+    (prismaMock.apiCall.findMany as jest.Mock).mockRejectedValue(
+      new Error("Connection refused")
+    );
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(500);
   });
 });

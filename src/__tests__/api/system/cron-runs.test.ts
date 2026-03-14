@@ -103,4 +103,13 @@ describe("GET /api/system/cron-runs", () => {
       expect(res.status).toBe(200);
     }
   });
+
+  it("returns 500 when database query fails", async () => {
+    mockAuthenticatedAsAdmin();
+    (prismaMock.cronRun.findMany as jest.Mock).mockRejectedValue(
+      new Error("Connection refused")
+    );
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(500);
+  });
 });
