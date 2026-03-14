@@ -88,6 +88,8 @@ export default $config({
       // SES failure alerts: disabled until SesFromEmail secret is configured
       // Admin role bootstrap: optional, comma-separated emails granted isAdmin on sign-in
       ...(secrets.adminEmails ? { ADMIN_EMAILS: secrets.adminEmails.value } : {}),
+      // GitHub token: requires `issues: write` + `contents: read` for fine-grained PATs,
+      // or `repo` scope for classic PATs. Used by brainstorm agent to create/read issues.
       ...(secrets.githubToken ? { GITHUB_TOKEN: secrets.githubToken.value } : {}),
       GITHUB_REPO_OWNER: "jsilvia721",
       GITHUB_REPO_NAME: "ai-social",
