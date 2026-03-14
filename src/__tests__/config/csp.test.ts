@@ -55,6 +55,11 @@ describe("CSP headers (common)", () => {
     expect(cspValue).toContain("default-src 'self'");
     expect(cspValue).toContain("frame-ancestors 'none'");
   });
+
+  it("should include media-src directive allowing self and https", () => {
+    const mediaSrc = extractDirective(cspValue, "media-src");
+    expect(mediaSrc).toBe("media-src 'self' https:");
+  });
 });
 
 describe("CSP connect-src with AWS_S3_PUBLIC_URL set (production)", () => {
