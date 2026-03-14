@@ -193,6 +193,14 @@ async function fetchCronRuns(
     const runs = await prisma.cronRun.findMany({
       where: { startedAt: { gte: since } },
       orderBy: { startedAt: "desc" },
+      select: {
+        id: true,
+        cronName: true,
+        status: true,
+        itemsProcessed: true,
+        durationMs: true,
+        startedAt: true,
+      },
     });
 
     const cronMap: Record<
@@ -246,6 +254,13 @@ async function fetchErrors(
     const errors = await prisma.errorReport.findMany({
       where: { lastSeenAt: { gte: since } },
       orderBy: { lastSeenAt: "desc" },
+      select: {
+        message: true,
+        source: true,
+        count: true,
+        status: true,
+        lastSeenAt: true,
+      },
     });
 
     const bucketMap = new Map<
