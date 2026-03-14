@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { Platform } from "@/types";
+import { trackApiCall } from "@/lib/system-metrics";
 import type { StrategyContext } from "./types";
 
 const client = new Anthropic();
@@ -170,6 +171,8 @@ Call generate_platform_variants with the results.`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
+  const startMs = Date.now();
+  let errorMessage: string | undefined;
   try {
     const response = await client.messages.create(
       {
@@ -189,7 +192,17 @@ Call generate_platform_variants with the results.`;
     }
 
     return RepurposeResultSchema.parse(toolUse.input);
+  } catch (err) {
+    errorMessage = err instanceof Error ? err.message : String(err);
+    throw err;
   } finally {
+    trackApiCall({
+      service: "anthropic",
+      endpoint: "repurposeContent",
+      statusCode: errorMessage ? undefined : 200,
+      latencyMs: Date.now() - startMs,
+      error: errorMessage,
+    });
     clearTimeout(timeout);
   }
 }
