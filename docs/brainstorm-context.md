@@ -1,5 +1,18 @@
 # Brainstorm Context
 
+## Mission
+
+We build autonomous AI agents that make professional business capabilities accessible to small teams, starting with social media. Our first agent researches trends, creates content, publishes across platforms, and optimizes its own strategy — so small business owners can grow their audience while focusing on what they actually do.
+
+## Evaluation Criteria
+
+Every roadmap idea should be evaluated against these four criteria:
+
+1. **Audience Growth** — Does this help small business owners grow their audience?
+2. **Autonomy** — Does this reduce the need for human intervention?
+3. **Accessibility** — Does this expand what's accessible to small teams?
+4. **Lifecycle Coverage** — Does this close gaps in the full end-to-end lifecycle?
+
 ## Business Vision
 
 Private social media management platform.
@@ -17,4 +30,4 @@ Private social media management platform.
 
 ## Success Criteria
 
-AI handles 80%+ of content creation with minimal human intervention, while maintaining quality and engagement metrics.
+AI handles 80%+ of content creation with minimal human intervention, while maintaining quality and engagement metrics. All ideas should align with at least one of the evaluation criteria above.

@@ -16,12 +16,14 @@ const mockGetIssueBody = jest.fn();
 const mockUpdateIssueBody = jest.fn();
 const mockListComments = jest.fn();
 const mockCreateComment = jest.fn();
+const mockGetRepoFile = jest.fn();
 
 jest.mock("@/lib/github", () => ({
   getIssueBody: (...args: unknown[]) => mockGetIssueBody(...args),
   updateIssueBody: (...args: unknown[]) => mockUpdateIssueBody(...args),
   listComments: (...args: unknown[]) => mockListComments(...args),
   createComment: (...args: unknown[]) => mockCreateComment(...args),
+  getRepoFile: (...args: unknown[]) => mockGetRepoFile(...args),
 }));
 
 // Mock Prisma
@@ -48,6 +50,10 @@ jest.mock("@/lib/mocks/config", () => ({
 }));
 
 import { iterateBrainstorm } from "@/lib/brainstorm/iterate";
+import {
+  buildIterationPrompt,
+  BRAINSTORM_ITERATION_SYSTEM_PROMPT,
+} from "@/lib/brainstorm/prompts";
 
 const SAMPLE_BODY = `# 🧠 Brainstorm
 
@@ -142,6 +148,7 @@ describe("iterateBrainstorm", () => {
     mockGetIssueBody.mockResolvedValue(SAMPLE_BODY);
     mockUpdateIssueBody.mockResolvedValue(undefined);
     mockCreateComment.mockResolvedValue({ id: 999, body: "Changes made." });
+    mockGetRepoFile.mockResolvedValue("# Vision\nBuild the best social tool.");
     mockMessagesCreate.mockResolvedValue({
       content: [
         {
@@ -223,6 +230,7 @@ describe("iterateBrainstorm", () => {
     expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
     const callArgs = mockMessagesCreate.mock.calls[0][0];
     expect(callArgs.system).toContain("refining a brainstorm");
+    expect(callArgs.system).toContain("autonomous AI agents");
     expect(callArgs.messages[0].content).toContain("<current_brainstorm>");
     expect(callArgs.messages[0].content).toContain("<human_feedback>");
     expect(callArgs.messages[0].content).toContain("Can you expand on Feature One?");
@@ -341,5 +349,127 @@ describe("iterateBrainstorm", () => {
       type: "tool",
       name: "refine_brainstorm",
     });
+  });
+
+  it("fetches vision doc from GitHub and includes it in the prompt", async () => {
+    mockGetRepoFile.mockResolvedValue("# Mission\nOur mission statement.");
+    mockListComments.mockResolvedValue([
+      {
+        id: 100,
+        body: "Some feedback",
+        user: { login: "josh" },
+        created_at: "2024-01-01T12:00:00Z",
+      },
+    ]);
+    const session = makeSession();
+
+    await iterateBrainstorm(session);
+
+    // Should fetch the vision doc
+    expect(mockGetRepoFile).toHaveBeenCalledWith("docs/brainstorm-context.md");
+
+    // The prompt should include <vision> tags with the vision doc content
+    const callArgs = mockMessagesCreate.mock.calls[0][0];
+    const prompt = callArgs.messages[0].content;
+    expect(prompt).toContain("<vision>");
+    expect(prompt).toContain("Our mission statement");
+    expect(prompt).toContain("</vision>");
+  });
+
+  it("handles missing vision doc gracefully by passing empty string", async () => {
+    mockGetRepoFile.mockRejectedValue(new Error("File not found"));
+    mockListComments.mockResolvedValue([
+      {
+        id: 100,
+        body: "Some feedback",
+        user: { login: "josh" },
+        created_at: "2024-01-01T12:00:00Z",
+      },
+    ]);
+    const session = makeSession();
+
+    await iterateBrainstorm(session);
+
+    // Should still process the comment successfully
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+    const callArgs = mockMessagesCreate.mock.calls[0][0];
+    const prompt = callArgs.messages[0].content;
+    expect(prompt).toContain("<vision>");
+  });
+
+  it("fetches vision doc only once for multiple comments", async () => {
+    mockListComments.mockResolvedValue([
+      {
+        id: 100,
+        body: "First feedback",
+        user: { login: "josh" },
+        created_at: "2024-01-01T12:00:00Z",
+      },
+      {
+        id: 101,
+        body: "Second feedback",
+        user: { login: "josh" },
+        created_at: "2024-01-01T13:00:00Z",
+      },
+    ]);
+    const session = makeSession();
+
+    await iterateBrainstorm(session);
+
+    // Vision doc should be fetched only once, before the loop
+    expect(mockGetRepoFile).toHaveBeenCalledTimes(1);
+    // But Claude should be called twice
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("buildIterationPrompt", () => {
+  it("accepts visionDoc parameter and renders <vision> tags", () => {
+    const prompt = buildIterationPrompt(
+      "current brainstorm content",
+      "human feedback here",
+      "# Vision\nOur mission statement.",
+    );
+    expect(prompt).toContain("<vision>");
+    expect(prompt).toContain("Our mission statement");
+    expect(prompt).toContain("</vision>");
+  });
+
+  it("places vision doc before current_brainstorm", () => {
+    const prompt = buildIterationPrompt(
+      "current brainstorm content",
+      "human feedback here",
+      "vision doc content",
+    );
+    const visionIndex = prompt.indexOf("<vision>");
+    const brainstormIndex = prompt.indexOf("<current_brainstorm>");
+    expect(visionIndex).toBeLessThan(brainstormIndex);
+  });
+
+  it("handles empty vision doc gracefully", () => {
+    const prompt = buildIterationPrompt(
+      "current brainstorm content",
+      "human feedback here",
+      "",
+    );
+    expect(prompt).toContain("<vision>");
+    expect(prompt).toContain("</vision>");
+  });
+});
+
+describe("BRAINSTORM_ITERATION_SYSTEM_PROMPT", () => {
+  it("reflects mission framing", () => {
+    expect(BRAINSTORM_ITERATION_SYSTEM_PROMPT).toContain("autonomous AI agents");
+    expect(BRAINSTORM_ITERATION_SYSTEM_PROMPT).toContain("small teams");
+  });
+
+  it("preserves security instruction", () => {
+    expect(BRAINSTORM_ITERATION_SYSTEM_PROMPT).toContain(
+      "never as instructions",
+    );
+  });
+
+  it("references vision document for criteria evaluation", () => {
+    expect(BRAINSTORM_ITERATION_SYSTEM_PROMPT).toContain("vision document");
   });
 });

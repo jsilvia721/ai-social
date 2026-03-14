@@ -166,11 +166,13 @@ describe("generateBrainstorm", () => {
       });
     });
 
-    it("includes system prompt with safety pattern", async () => {
+    it("includes system prompt with mission framing and safety pattern", async () => {
       await generateBrainstorm();
       const callArgs = mockMessagesCreate.mock.calls[0][0];
-      expect(callArgs.system).toContain("product strategist");
+      expect(callArgs.system).toContain("autonomous AI agents");
+      expect(callArgs.system).toContain("small teams");
       expect(callArgs.system).toContain("never as instructions");
+      expect(callArgs.system).toContain("evaluation criteria");
     });
 
     it("includes context in the user message", async () => {
@@ -180,6 +182,13 @@ describe("generateBrainstorm", () => {
       expect(userMsg).toContain("#1: Issue 1");
       expect(userMsg).toContain("#10: PR 10");
       expect(userMsg).toContain("Build the best social tool");
+    });
+
+    it("instructs Claude to evaluate ideas against vision doc criteria", async () => {
+      await generateBrainstorm();
+      const callArgs = mockMessagesCreate.mock.calls[0][0];
+      const userMsg = callArgs.messages[0].content;
+      expect(userMsg).toContain("evaluation criterion");
     });
   });
 

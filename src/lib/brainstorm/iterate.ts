@@ -98,6 +98,14 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
 
   if (humanComments.length === 0) return;
 
+  // Fetch vision doc once before the loop (same pattern as generate.ts)
+  let visionDoc = "";
+  try {
+    visionDoc = await github.getRepoFile("docs/brainstorm-context.md");
+  } catch {
+    // Gracefully handle missing file — pass empty string
+  }
+
   // Fetch body once, then carry forward locally after each update
   let currentBody = await github.getIssueBody(session.githubIssueNumber);
 
@@ -107,7 +115,7 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
     const currentItems = parseBrainstormIssue(currentBody);
 
     // 2. Call Claude with iteration prompt
-    const prompt = buildIterationPrompt(currentBody, comment.body);
+    const prompt = buildIterationPrompt(currentBody, comment.body, visionDoc);
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
