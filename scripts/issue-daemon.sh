@@ -107,6 +107,15 @@ log() {
   echo "[daemon $(date '+%H:%M:%S')] $*"
 }
 
+# Detect stdbuf for line-buffered output on worker spawns
+STDBUF_PREFIX=""
+if command -v stdbuf >/dev/null 2>&1; then
+  STDBUF_PREFIX="stdbuf -oL -eL"
+  log "Using stdbuf for line-buffered worker output"
+else
+  log "WARNING: stdbuf not found — worker logs may be block-buffered and incomplete on kill"
+fi
+
 # Source rate limit helpers (detect_rate_limit, parse_reset_time, format_reset_display,
 # record_failure, check_circuit_breaker)
 # shellcheck source=scripts/lib/rate-limit-helpers.sh
@@ -308,7 +317,7 @@ run_worker() {
     local resume_prompt
     resume_prompt="Continue working on issue #${issue_number}. You were previously interrupted. Pick up where you left off and complete the implementation. If you already created a PR, verify it's ready. If not, continue with the TDD workflow."
 
-    (cd "$worktree_path" && claude -p "$resume_prompt" \
+    (cd "$worktree_path" && $STDBUF_PREFIX claude -p "$resume_prompt" \
       --agent "issue-worker" \
       --resume "$session_id" \
       --max-budget-usd "$MAX_BUDGET" \
@@ -346,7 +355,7 @@ If you get stuck, comment on the issue and add the label "claude-blocked".
 EOF
 )"
 
-    claude -p "$prompt" \
+    $STDBUF_PREFIX claude -p "$prompt" \
       --agent "issue-worker" \
       --worktree \
       --session-id "$session_id" \
@@ -436,7 +445,7 @@ run_plan_executor() {
   start_time=$(date +%s)
 
   # Run Claude in background so heartbeat can run concurrently
-  claude -p "$(cat <<EOF
+  $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the plan-executor agent. Process approved plan issue #${issue_number}.
 
 Read the full issue with: gh issue view ${issue_number} --json title,body,labels
@@ -516,7 +525,7 @@ run_bug_investigator() {
   start_time=$(date +%s)
 
   # Run Claude in background so heartbeat can run concurrently
-  claude -p "$(cat <<EOF
+  $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the bug-investigator agent. Investigate bug issue #${issue_number}.
 
 Read the full issue with: gh issue view ${issue_number} --json title,body,labels
