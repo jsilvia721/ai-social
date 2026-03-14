@@ -40,6 +40,7 @@ export async function generatePostContent(
   }
 
   const startMs = Date.now();
+  let errorMessage: string | undefined;
   try {
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -56,24 +57,20 @@ Return only the post text, no explanation.`,
       ],
     });
 
-    trackApiCall({
-      service: "anthropic",
-      endpoint: "generatePostContent",
-      statusCode: 200,
-      latencyMs: Date.now() - startMs,
-    });
-
     const content = message.content[0];
     if (content.type !== "text") throw new Error("Unexpected response type from AI");
     return content.text;
   } catch (err) {
+    errorMessage = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
     trackApiCall({
       service: "anthropic",
       endpoint: "generatePostContent",
+      statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
-      error: (err as Error).message,
+      error: errorMessage,
     });
-    throw err;
   }
 }
 
@@ -212,6 +209,7 @@ export async function extractContentStrategy(
     return mockExtractContentStrategy(wizardAnswers);
   }
   const startMs = Date.now();
+  let errorMessage: string | undefined;
   try {
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -231,13 +229,6 @@ export async function extractContentStrategy(
       ],
     });
 
-    trackApiCall({
-      service: "anthropic",
-      endpoint: "extractContentStrategy",
-      statusCode: 200,
-      latencyMs: Date.now() - startMs,
-    });
-
     const toolUse = response.content.find((b) => b.type === "tool_use");
     if (!toolUse || toolUse.type !== "tool_use") {
       throw new Error("Claude did not call save_content_strategy");
@@ -245,13 +236,16 @@ export async function extractContentStrategy(
 
     return ContentStrategyInputSchema.parse(toolUse.input);
   } catch (err) {
+    errorMessage = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
     trackApiCall({
       service: "anthropic",
       endpoint: "extractContentStrategy",
+      statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
-      error: (err as Error).message,
+      error: errorMessage,
     });
-    throw err;
   }
 }
 
@@ -366,6 +360,7 @@ export async function analyzePerformance(
     return mockAnalyzePerformance();
   }
   const startMs = Date.now();
+  let errorMessage: string | undefined;
   try {
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -373,13 +368,6 @@ export async function analyzePerformance(
       tools: [strategyUpdateTool],
       tool_choice: { type: "tool", name: "update_strategy" },
       messages: [{ role: "user", content: buildPerformancePrompt(input) }],
-    });
-
-    trackApiCall({
-      service: "anthropic",
-      endpoint: "analyzePerformance",
-      statusCode: 200,
-      latencyMs: Date.now() - startMs,
     });
 
     const toolUse = response.content.find((b) => b.type === "tool_use");
@@ -396,13 +384,16 @@ export async function analyzePerformance(
       digest: string;
     };
   } catch (err) {
+    errorMessage = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
     trackApiCall({
       service: "anthropic",
       endpoint: "analyzePerformance",
+      statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
-      error: (err as Error).message,
+      error: errorMessage,
     });
-    throw err;
   }
 }
 

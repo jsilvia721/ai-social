@@ -79,6 +79,7 @@ export async function synthesizeResearch(
     return mockSynthesizeResearch();
   }
   const startMs = Date.now();
+  let errorMessage: string | undefined;
   try {
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -102,13 +103,6 @@ export async function synthesizeResearch(
       ],
     });
 
-    trackApiCall({
-      service: "anthropic",
-      endpoint: "synthesizeResearch",
-      statusCode: 200,
-      latencyMs: Date.now() - startMs,
-    });
-
     const toolUse = response.content.find((b) => b.type === "tool_use");
     if (!toolUse || toolUse.type !== "tool_use") {
       throw new Error("Claude did not call synthesize_themes");
@@ -116,12 +110,15 @@ export async function synthesizeResearch(
 
     return ResearchSynthesisSchema.parse(toolUse.input);
   } catch (err) {
+    errorMessage = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
     trackApiCall({
       service: "anthropic",
       endpoint: "synthesizeResearch",
+      statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
-      error: (err as Error).message,
+      error: errorMessage,
     });
-    throw err;
   }
 }

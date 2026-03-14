@@ -531,7 +531,7 @@ describe("GitHub client", () => {
       expect(mockTrackApiCall).not.toHaveBeenCalled();
     });
 
-    it("still tracks on error paths", async () => {
+    it("tracks error info on HTTP failures", async () => {
       const error = new Error("Not found");
       Object.assign(error, { status: 404 });
       mockIssuesGet.mockRejectedValue(error);
@@ -541,6 +541,8 @@ describe("GitHub client", () => {
         expect.objectContaining({
           service: "github",
           endpoint: "getIssue",
+          statusCode: 404,
+          error: "Not found",
         })
       );
     });

@@ -110,6 +110,7 @@ export async function generateBriefs(
     .reduce((sum, [, count]) => sum + count, 0);
 
   const startMs = Date.now();
+  let errorMessage: string | undefined;
   try {
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -149,13 +150,6 @@ export async function generateBriefs(
       ],
     });
 
-    trackApiCall({
-      service: "anthropic",
-      endpoint: "generateBriefs",
-      statusCode: 200,
-      latencyMs: Date.now() - startMs,
-    });
-
     const toolUse = response.content.find((b) => b.type === "tool_use");
     if (!toolUse || toolUse.type !== "tool_use") {
       throw new Error("Claude did not call generate_content_briefs");
@@ -163,12 +157,15 @@ export async function generateBriefs(
 
     return BriefGenerationSchema.parse(toolUse.input);
   } catch (err) {
+    errorMessage = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
     trackApiCall({
       service: "anthropic",
       endpoint: "generateBriefs",
+      statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
-      error: (err as Error).message,
+      error: errorMessage,
     });
-    throw err;
   }
 }
