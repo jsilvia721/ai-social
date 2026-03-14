@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # issue-daemon-rate-limit.test.sh — Tests for rate limit detection, reset time
-# parsing, circuit breaker, and set_rate_limit_pause_until.
+# parsing, and circuit breaker.
 #
 # Run: bash scripts/__tests__/issue-daemon-rate-limit.test.sh
 
@@ -39,17 +39,6 @@ assert_eq() {
   fi
 }
 
-assert_gt() {
-  local description="$1"
-  local expected_gt="$2"
-  local actual="$3"
-  if [ "$actual" -gt "$expected_gt" ] 2>/dev/null; then
-    pass "$description"
-  else
-    fail "$description" "> $expected_gt" "$actual"
-  fi
-}
-
 # --- Setup temp dirs ----------------------------------------------------------
 TEST_STATE_DIR=$(mktemp -d)
 TEST_LOG_DIR=$(mktemp -d)
@@ -60,10 +49,6 @@ export LOG_DIR="$TEST_LOG_DIR"
 # shellcheck source=scripts/lib/daemon-state.sh
 source "$REPO_ROOT/scripts/lib/daemon-state.sh"
 ensure_state_dir
-
-# We need to source functions from issue-daemon.sh without running the main loop.
-# Extract the functions we need by sourcing a subset.
-# Instead, let's define the functions inline by extracting them.
 
 # Set up required variables and source the helper library
 RATE_LIMIT_PAUSE_SECONDS=900
@@ -135,13 +120,13 @@ else
   fail "detects 'hit your limit' (Anthropic usage limit)" "rate limited" "not rate limited"
 fi
 
-# Test: "you've hit your limit" variant (case insensitive)
+# Test: "you've reached your limit" variant
 log_file="$TEST_LOG_DIR/test-you-limit.log"
 echo "you've reached your limit for today" > "$log_file"
 if detect_rate_limit 1 "$log_file"; then
-  pass "detects 'you limit' variant"
+  pass "detects 'you've limit' variant"
 else
-  fail "detects 'you limit' variant" "rate limited" "not rate limited"
+  fail "detects 'you've limit' variant" "rate limited" "not rate limited"
 fi
 
 # Test: non-rate-limit failure
@@ -153,127 +138,119 @@ else
   pass "non-rate-limit error is not detected"
 fi
 
+# Test: false positive guard — "hit the speed limit" should not match
+log_file="$TEST_LOG_DIR/test-false-positive.log"
+echo "hit the speed limit on the highway" > "$log_file"
+if detect_rate_limit 1 "$log_file"; then
+  fail "false positive: 'hit the speed limit' should not match" "not rate limited" "rate limited"
+else
+  pass "false positive: 'hit the speed limit' does not match"
+fi
+
 # --- parse_reset_time tests ---------------------------------------------------
 echo ""
-echo "parse_reset_time:"
+echo "parse_reset_time (outputs seconds + display):"
+
+# Helper to get seconds and display from parse_reset_time
+get_seconds() { echo "$1" | head -1; }
+get_display() { echo "$1" | tail -1; }
 
 # Test: standard format "8pm (America/New_York)"
 log_file="$TEST_LOG_DIR/test-parse-8pm.log"
 echo "You've hit your limit · resets 8pm (America/New_York)" > "$log_file"
 result=$(parse_reset_time "$log_file")
-if [ "$result" -gt 0 ] 2>/dev/null; then
-  pass "parses '8pm (America/New_York)' — returns positive seconds ($result)"
+seconds=$(get_seconds "$result")
+display=$(get_display "$result")
+if [ "$seconds" -gt 0 ] 2>/dev/null; then
+  pass "parses '8pm (America/New_York)' — returns positive seconds ($seconds)"
 else
-  fail "parses '8pm (America/New_York)'" "positive seconds" "$result"
+  fail "parses '8pm (America/New_York)'" "positive seconds" "$seconds"
 fi
+assert_eq "display for 8pm ET" "8:00 PM ET" "$display"
 
 # Test: format with minutes "8:30pm (America/New_York)"
 log_file="$TEST_LOG_DIR/test-parse-830pm.log"
 echo "You've hit your limit · resets 8:30pm (America/New_York)" > "$log_file"
 result=$(parse_reset_time "$log_file")
-if [ "$result" -gt 0 ] 2>/dev/null; then
-  pass "parses '8:30pm (America/New_York)' — returns positive seconds ($result)"
+seconds=$(get_seconds "$result")
+display=$(get_display "$result")
+if [ "$seconds" -gt 0 ] 2>/dev/null; then
+  pass "parses '8:30pm (America/New_York)' — returns positive seconds ($seconds)"
 else
-  fail "parses '8:30pm (America/New_York)'" "positive seconds" "$result"
+  fail "parses '8:30pm (America/New_York)'" "positive seconds" "$seconds"
 fi
+assert_eq "display for 8:30pm ET" "8:30 PM ET" "$display"
 
 # Test: AM format "6am (America/Chicago)"
 log_file="$TEST_LOG_DIR/test-parse-6am.log"
 echo "You've hit your limit · resets 6am (America/Chicago)" > "$log_file"
 result=$(parse_reset_time "$log_file")
-if [ "$result" -gt 0 ] 2>/dev/null; then
-  pass "parses '6am (America/Chicago)' — returns positive seconds ($result)"
+seconds=$(get_seconds "$result")
+display=$(get_display "$result")
+if [ "$seconds" -gt 0 ] 2>/dev/null; then
+  pass "parses '6am (America/Chicago)' — returns positive seconds ($seconds)"
 else
-  fail "parses '6am (America/Chicago)'" "positive seconds" "$result"
+  fail "parses '6am (America/Chicago)'" "positive seconds" "$seconds"
 fi
+assert_eq "display for 6am CT" "6:00 AM CT" "$display"
 
-# Test: no reset time in log — returns 0
+# Test: Pacific timezone
+log_file="$TEST_LOG_DIR/test-parse-pt.log"
+echo "You've hit your limit · resets 5pm (America/Los_Angeles)" > "$log_file"
+result=$(parse_reset_time "$log_file")
+display=$(get_display "$result")
+assert_eq "display for 5pm PT" "5:00 PM PT" "$display"
+
+# Test: no reset time in log — returns 0 + empty
 log_file="$TEST_LOG_DIR/test-parse-none.log"
 echo "Some random error message" > "$log_file"
 result=$(parse_reset_time "$log_file")
-assert_eq "returns 0 when no reset time found" "0" "$result"
+seconds=$(get_seconds "$result")
+assert_eq "returns 0 when no reset time found" "0" "$seconds"
 
 # Test: malformed reset time — returns 0
 log_file="$TEST_LOG_DIR/test-parse-malformed.log"
 echo "resets sometime later" > "$log_file"
 result=$(parse_reset_time "$log_file")
-assert_eq "returns 0 for malformed reset time" "0" "$result"
+seconds=$(get_seconds "$result")
+assert_eq "returns 0 for malformed reset time" "0" "$seconds"
 
 # Test: sanity — result should be less than 24 hours
 log_file="$TEST_LOG_DIR/test-parse-sanity.log"
 echo "You've hit your limit · resets 8pm (America/New_York)" > "$log_file"
 result=$(parse_reset_time "$log_file")
-if [ "$result" -gt 0 ] && [ "$result" -le 86400 ]; then
-  pass "result is between 0 and 86400 seconds ($result)"
+seconds=$(get_seconds "$result")
+if [ "$seconds" -gt 0 ] && [ "$seconds" -le 86400 ]; then
+  pass "result is between 0 and 86400 seconds ($seconds)"
 else
-  # 0 is acceptable if we can't parse (e.g., no python3)
-  if [ "$result" = "0" ]; then
+  if [ "$seconds" = "0" ]; then
     pass "returns 0 (graceful fallback when parsing unavailable)"
   else
-    fail "result is reasonable" "0-86400" "$result"
+    fail "result is reasonable" "0-86400" "$seconds"
   fi
 fi
 
-# --- format_reset_display tests -----------------------------------------------
+# --- Pause with parsed duration -----------------------------------------------
 echo ""
-echo "format_reset_display:"
+echo "set_rate_limit_pause with parsed duration:"
 
-# Test: standard format
-log_file="$TEST_LOG_DIR/test-format-8pm.log"
-echo "You've hit your limit · resets 8pm (America/New_York)" > "$log_file"
-result=$(format_reset_display "$log_file")
-assert_eq "formats '8pm ET'" "8:00 PM ET" "$result"
-
-# Test: with minutes
-log_file="$TEST_LOG_DIR/test-format-830pm.log"
-echo "You've hit your limit · resets 8:30pm (America/New_York)" > "$log_file"
-result=$(format_reset_display "$log_file")
-assert_eq "formats '8:30pm ET'" "8:30 PM ET" "$result"
-
-# Test: Chicago timezone
-log_file="$TEST_LOG_DIR/test-format-ct.log"
-echo "You've hit your limit · resets 6am (America/Chicago)" > "$log_file"
-result=$(format_reset_display "$log_file")
-assert_eq "formats '6am CT'" "6:00 AM CT" "$result"
-
-# Test: Pacific timezone
-log_file="$TEST_LOG_DIR/test-format-pt.log"
-echo "You've hit your limit · resets 5pm (America/Los_Angeles)" > "$log_file"
-result=$(format_reset_display "$log_file")
-assert_eq "formats '5pm PT'" "5:00 PM PT" "$result"
-
-# Test: no reset time
-log_file="$TEST_LOG_DIR/test-format-none.log"
-echo "Some random error" > "$log_file"
-result=$(format_reset_display "$log_file")
-assert_eq "returns empty when no reset time" "" "$result"
-
-# --- set_rate_limit_pause_until tests -----------------------------------------
-echo ""
-echo "set_rate_limit_pause_until:"
-
-# Test: accepts absolute epoch
-future_epoch=$(( $(date +%s) + 3600 ))
-set_rate_limit_pause_until "$future_epoch"
-stored_epoch=$(cat "$TEST_STATE_DIR/pause-until")
-assert_eq "stores absolute epoch directly" "$future_epoch" "$stored_epoch"
-
-# Test: is_rate_limit_paused returns true for future epoch
+# Test: using set_rate_limit_pause with parsed seconds works correctly
+clear_rate_limit_pause
+set_rate_limit_pause 7200  # 2 hours
 if is_rate_limit_paused; then
-  pass "is_rate_limit_paused returns true for future epoch"
+  pass "paused after set_rate_limit_pause with custom duration"
 else
-  fail "is_rate_limit_paused returns true for future epoch" "paused" "not paused"
+  fail "paused after set_rate_limit_pause with custom duration" "paused" "not paused"
+fi
+stored_epoch=$(cat "$TEST_STATE_DIR/pause-until")
+expected_min=$(( $(date +%s) + 7190 ))
+expected_max=$(( $(date +%s) + 7210 ))
+if [ "$stored_epoch" -ge "$expected_min" ] && [ "$stored_epoch" -le "$expected_max" ]; then
+  pass "pause-until epoch is ~7200 seconds from now"
+else
+  fail "pause-until epoch is ~7200 seconds from now" "between $expected_min and $expected_max" "$stored_epoch"
 fi
 clear_rate_limit_pause
-
-# Test: past epoch is auto-cleared
-past_epoch=$(( $(date +%s) - 60 ))
-set_rate_limit_pause_until "$past_epoch"
-if is_rate_limit_paused; then
-  fail "past epoch is auto-cleared" "not paused" "paused"
-else
-  pass "past epoch is auto-cleared"
-fi
 
 # --- Circuit breaker tests ----------------------------------------------------
 echo ""

@@ -3,7 +3,6 @@
 # These are used by issue-daemon.sh and can be sourced independently for testing.
 #
 # Required variables (must be set before sourcing):
-#   LOG_DIR — directory for log files
 #   RATE_LIMIT_PAUSE_SECONDS — default pause duration in seconds
 #   CIRCUIT_BREAKER_FILE — path to failure timestamps file
 #   CIRCUIT_BREAKER_WINDOW — seconds to look back for failures
@@ -24,7 +23,7 @@ detect_rate_limit() {
   fi
 
   # Check log file for rate limit indicators
-  if grep -qiE 'rate.?limit|HTTP.?429|status.?429|quota|budget.*exceeded|overloaded|hit.*limit|you.*limit' "$log_file" 2>/dev/null; then
+  if grep -qiE 'rate.?limit|HTTP.?429|status.?429|quota|budget.*exceeded|overloaded|hit your.*limit|you.ve.*limit' "$log_file" 2>/dev/null; then
     return 0
   fi
 
@@ -34,149 +33,87 @@ detect_rate_limit() {
 # --- Reset time parser --------------------------------------------------------
 # Parses Anthropic usage limit reset time from log files.
 # Error format: "You've hit your limit · resets 8pm (America/New_York)"
-# Returns: seconds until reset time, or 0 if parsing fails.
+#
+# Outputs two lines:
+#   Line 1: seconds until reset time (0 if parsing fails)
+#   Line 2: display string like "8:00 PM ET" (empty if parsing fails)
+#
 # Arguments: $1=log_file
 parse_reset_time() {
   local log_file="$1"
 
   # Extract reset time line: e.g., "resets 8pm (America/New_York)"
   local reset_line
-  reset_line=$(grep -oiE 'resets\s+[0-9]{1,2}(:[0-9]{2})?\s*(am|pm)\s*\(([^)]+)\)' "$log_file" 2>/dev/null | head -1 || echo "")
+  reset_line=$(grep -oiE 'resets[[:space:]]+[0-9]{1,2}(:[0-9]{2})?[[:space:]]*(am|pm)[[:space:]]*\(([^)]+)\)' "$log_file" 2>/dev/null | head -1 || echo "")
 
   if [ -z "$reset_line" ]; then
     echo "0"
-    return
-  fi
-
-  # Parse components: time (e.g., "8pm" or "8:30pm") and timezone (e.g., "America/New_York")
-  local time_part tz_part
-  time_part=$(echo "$reset_line" | sed -E 's/[Rr][Ee][Ss][Ee][Tt][Ss][[:space:]]+([0-9]{1,2}(:[0-9]{2})?[[:space:]]*[aApP][mM]).*/\1/' | tr -d ' ')
-  tz_part=$(echo "$reset_line" | sed -E 's/.*\(([^)]+)\)/\1/')
-
-  if [ -z "$time_part" ] || [ -z "$tz_part" ]; then
-    echo "0"
-    return
-  fi
-
-  # Normalize time_part: "8pm" -> "8:00 PM", "8:30pm" -> "8:30 PM"
-  local hour minute ampm
-  if echo "$time_part" | grep -qE ':'; then
-    hour=$(echo "$time_part" | sed -E 's/^([0-9]{1,2}):.*/\1/')
-    minute=$(echo "$time_part" | sed -E 's/^[0-9]{1,2}:([0-9]{2}).*/\1/')
-    ampm=$(echo "$time_part" | sed -E 's/.*([aApP][mM])/\1/' | tr '[:lower:]' '[:upper:]')
-  else
-    hour=$(echo "$time_part" | sed -E 's/^([0-9]{1,2}).*/\1/')
-    minute="00"
-    ampm=$(echo "$time_part" | sed -E 's/[0-9]+([aApP][mM])/\1/' | tr '[:lower:]' '[:upper:]')
-  fi
-
-  # Convert to 24-hour format
-  local hour24
-  if [ "$ampm" = "AM" ]; then
-    if [ "$hour" -eq 12 ]; then
-      hour24=0
-    else
-      hour24=$hour
-    fi
-  else
-    if [ "$hour" -eq 12 ]; then
-      hour24=12
-    else
-      hour24=$(( hour + 12 ))
-    fi
-  fi
-
-  # Get today's date in the target timezone and construct the target epoch
-  local target_epoch
-  # Try GNU date first (Linux), then macOS/python3 fallback
-  target_epoch=$(TZ="$tz_part" date -d "today ${hour24}:${minute}:00" +%s 2>/dev/null) || \
-    target_epoch=$(python3 -c "
-import datetime, zoneinfo, sys
-try:
-    tz = zoneinfo.ZoneInfo('$tz_part')
-    now = datetime.datetime.now(tz)
-    target = now.replace(hour=$hour24, minute=int('$minute'), second=0, microsecond=0)
-    if target <= now:
-        target += datetime.timedelta(days=1)
-    print(int(target.timestamp()))
-except Exception:
-    print(0)
-" 2>/dev/null) || {
-    echo "0"
-    return
-  }
-
-  if [ -z "$target_epoch" ] || [ "$target_epoch" = "0" ]; then
-    echo "0"
-    return
-  fi
-
-  local now_epoch
-  now_epoch=$(date +%s)
-
-  # If target is in the past, it means tomorrow
-  if [ "$target_epoch" -le "$now_epoch" ]; then
-    target_epoch=$(( target_epoch + 86400 ))
-  fi
-
-  local seconds_until=$(( target_epoch - now_epoch ))
-
-  # Sanity check: if more than 24 hours away, something is wrong
-  if [ "$seconds_until" -gt 86400 ]; then
-    echo "0"
-    return
-  fi
-
-  echo "$seconds_until"
-}
-
-# Format a reset time for display in issue comments.
-# Arguments: $1=log_file
-# Outputs: formatted time string like "8:00 PM ET" or empty if unparseable
-format_reset_display() {
-  local log_file="$1"
-
-  local reset_line
-  reset_line=$(grep -oiE 'resets\s+[0-9]{1,2}(:[0-9]{2})?\s*(am|pm)\s*\(([^)]+)\)' "$log_file" 2>/dev/null | head -1 || echo "")
-
-  if [ -z "$reset_line" ]; then
     echo ""
     return
   fi
 
-  # Extract the time and timezone for display
-  local time_part tz_part
-  time_part=$(echo "$reset_line" | sed -E 's/[Rr][Ee][Ss][Ee][Tt][Ss][[:space:]]+([0-9]{1,2}(:[0-9]{2})?[[:space:]]*[aApP][mM]).*/\1/' | tr -d ' ')
-  tz_part=$(echo "$reset_line" | sed -E 's/.*\(([^)]+)\)/\1/')
+  # Parse time and timezone, compute seconds-until-reset, and format display
+  # all in one python3 call to avoid duplicated bash parsing
+  python3 -c "
+import datetime, zoneinfo, re, sys
+try:
+    line = '''$reset_line'''
+    m = re.search(r'resets\s+(\d{1,2}(?::\d{2})?)\s*(am|pm)\s*\(([^)]+)\)', line, re.IGNORECASE)
+    if not m:
+        print('0')
+        print('')
+        sys.exit(0)
 
-  # Format nicely: "8pm" -> "8:00 PM", "8:30pm" -> "8:30 PM"
-  local hour minute ampm
-  if echo "$time_part" | grep -qE ':'; then
-    hour=$(echo "$time_part" | sed -E 's/^([0-9]{1,2}):.*/\1/')
-    minute=$(echo "$time_part" | sed -E 's/^[0-9]{1,2}:([0-9]{2}).*/\1/')
-    ampm=$(echo "$time_part" | sed -E 's/.*([aApP][mM])/\1/' | tr '[:lower:]' '[:upper:]')
-  else
-    hour=$(echo "$time_part" | sed -E 's/^([0-9]{1,2}).*/\1/')
-    minute="00"
-    ampm=$(echo "$time_part" | sed -E 's/[0-9]+([aApP][mM])/\1/' | tr '[:lower:]' '[:upper:]')
-  fi
+    time_str, ampm, tz_name = m.group(1), m.group(2).upper(), m.group(3)
 
-  # Map timezone to abbreviation for display
-  local tz_abbrev
-  case "$tz_part" in
-    America/New_York)  tz_abbrev="ET" ;;
-    America/Chicago)   tz_abbrev="CT" ;;
-    America/Denver)    tz_abbrev="MT" ;;
-    America/Los_Angeles) tz_abbrev="PT" ;;
-    *)                 tz_abbrev="$tz_part" ;;
-  esac
+    # Parse hour and minute
+    if ':' in time_str:
+        hour, minute = int(time_str.split(':')[0]), int(time_str.split(':')[1])
+    else:
+        hour, minute = int(time_str), 0
 
-  echo "${hour}:${minute} ${ampm} ${tz_abbrev}"
+    # Convert to 24-hour
+    if ampm == 'AM' and hour == 12:
+        hour24 = 0
+    elif ampm == 'PM' and hour != 12:
+        hour24 = hour + 12
+    else:
+        hour24 = hour
+
+    tz = zoneinfo.ZoneInfo(tz_name)
+    now = datetime.datetime.now(tz)
+    target = now.replace(hour=hour24, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += datetime.timedelta(days=1)
+
+    seconds = int(target.timestamp()) - int(now.timestamp())
+    if seconds > 86400 or seconds <= 0:
+        print('0')
+        print('')
+        sys.exit(0)
+
+    # Format display string
+    display_hour = hour
+    display_minute = f'{minute:02d}'
+    tz_abbrevs = {
+        'America/New_York': 'ET', 'America/Chicago': 'CT',
+        'America/Denver': 'MT', 'America/Los_Angeles': 'PT',
+    }
+    tz_abbrev = tz_abbrevs.get(tz_name, tz_name)
+    print(seconds)
+    print(f'{display_hour}:{display_minute} {ampm} {tz_abbrev}')
+except Exception:
+    print('0')
+    print('')
+" 2>/dev/null || {
+    echo "0"
+    echo ""
+  }
 }
 
 # --- Circuit breaker ----------------------------------------------------------
 # Tracks rapid consecutive failures. If 3+ non-rate-limit failures occur within
-# 60 seconds, triggers a rate limit pause as a safety net.
+# the configured window, triggers a rate limit pause as a safety net.
 
 # Record a failure timestamp for circuit breaker tracking.
 record_failure() {

@@ -128,14 +128,15 @@ handle_rate_limit_exit() {
   local seconds_until_reset=0
   local reset_display=""
   if [ -n "$log_file" ] && [ -f "$log_file" ]; then
-    seconds_until_reset=$(parse_reset_time "$log_file")
-    reset_display=$(format_reset_display "$log_file")
+    local parse_output
+    parse_output=$(parse_reset_time "$log_file")
+    seconds_until_reset=$(echo "$parse_output" | head -1)
+    reset_display=$(echo "$parse_output" | tail -1)
   fi
 
   local comment_suffix
   if [ "$seconds_until_reset" -gt 0 ]; then
-    local pause_until_epoch=$(( $(date +%s) + seconds_until_reset ))
-    set_rate_limit_pause_until "$pause_until_epoch"
+    set_rate_limit_pause "$seconds_until_reset"
     comment_suffix="Will auto-retry after ${reset_display}."
     log "Parsed reset time: ${reset_display} (${seconds_until_reset}s from now)"
   else
