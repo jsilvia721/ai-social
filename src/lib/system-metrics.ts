@@ -38,6 +38,8 @@ export async function trackApiCall(data: {
   }
 }
 
+// Always write CronRun regardless of mock mode — cron logic still
+// runs in staging/dev and we want visibility into those executions.
 export async function trackCronRun(data: {
   cronName: string;
   status: string;
