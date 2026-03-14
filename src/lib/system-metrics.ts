@@ -42,7 +42,7 @@ export async function trackApiCall(data: {
 // runs in staging/dev and we want visibility into those executions.
 export async function trackCronRun(data: {
   cronName: string;
-  status: string;
+  status: "RUNNING" | "SUCCESS" | "FAILED";
   itemsProcessed?: number;
   durationMs?: number;
   error?: string;
