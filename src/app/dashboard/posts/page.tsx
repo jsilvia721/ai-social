@@ -45,6 +45,7 @@ export default function PostsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [refreshKey, setRefreshKey] = useState(0);
   const POSTS_PER_PAGE = 20;
 
   const now = new Date();
@@ -79,7 +80,7 @@ export default function PostsPage() {
       if (!cancelled) setIsLoading(false);
     });
     return () => { cancelled = true; };
-  }, [view, activeTab, activeBusinessId, page]);
+  }, [view, activeTab, activeBusinessId, page, refreshKey]);
 
   useEffect(() => {
     if (view !== "calendar" || calMode !== "month") return;
@@ -122,16 +123,10 @@ export default function PostsPage() {
   async function handleDelete(id: string) {
     const res = await fetch(`/api/posts?id=${id}`, { method: "DELETE" });
     if (res.ok) {
-      const remaining = posts.filter((p) => p.id !== id);
-      if (remaining.length === 0 && page > 1) {
-        // Last post on page deleted — go to previous page (triggers re-fetch)
-        setPage((p) => p - 1);
+      if (posts.length === 1 && page > 1) {
+        setPage((p) => p - 1); // triggers re-fetch via useEffect
       } else {
-        setPosts(remaining);
-        setTotalPages((prev) => {
-          const newTotal = Math.max(1, Math.ceil(((prev * POSTS_PER_PAGE) - 1) / POSTS_PER_PAGE));
-          return newTotal;
-        });
+        setRefreshKey((k) => k + 1); // re-fetch current page
       }
     }
   }
