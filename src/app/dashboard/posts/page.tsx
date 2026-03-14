@@ -18,6 +18,8 @@ const TABS: { label: string; value: PostStatus | "ALL" }[] = [
   { label: "Failed", value: "FAILED" },
 ];
 
+const POSTS_PER_PAGE = 20;
+
 interface Post {
   id: string;
   content: string;
@@ -46,7 +48,10 @@ export default function PostsPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [refreshKey, setRefreshKey] = useState(0);
-  const POSTS_PER_PAGE = 20;
+
+  // Reset to page 1 when business context changes
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setPage(1); }, [activeBusinessId]);
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -71,7 +76,7 @@ export default function PostsPage() {
     params.set("limit", String(POSTS_PER_PAGE));
     fetch(`/api/posts?${params.toString()}`).then(async (res) => {
       if (res.ok && !cancelled) {
-        const data = await res.json();
+        const data = (await res.json()) as { posts: Post[]; total: number };
         setPosts(data.posts);
         setTotalPages(Math.max(1, Math.ceil(data.total / POSTS_PER_PAGE)));
       }
