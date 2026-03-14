@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TrendingUp } from "lucide-react";
 import { WeekPicker } from "@/components/insights/WeekPicker";
+import { TopPerformerMeta } from "@/components/insights/TopPerformerMeta";
 import { DigestPatternsSchema, DigestChangesSchema } from "@/lib/optimizer/schemas";
 import type { Platform } from "@/types";
 
@@ -183,14 +184,11 @@ export default async function InsightsPage({ searchParams }: Props) {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-zinc-200 truncate">{post.content}</p>
-                      <p className={`text-xs mt-1 ${PLATFORM_COLOR[post.socialAccount.platform as Platform]}`}>
-                        @{post.socialAccount.username}
-                        {tp.topicPillar && (
-                          <span className="text-zinc-500 ml-2">
-                            {tp.topicPillar}
-                          </span>
-                        )}
-                      </p>
+                      <TopPerformerMeta
+                        username={post.socialAccount.username}
+                        platformColorClass={PLATFORM_COLOR[post.socialAccount.platform as Platform]}
+                        topicPillar={tp.topicPillar}
+                      />
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-400">
