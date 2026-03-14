@@ -7,6 +7,7 @@ import { Building2, Plus, Sparkles, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { pluralize } from "@/lib/pluralize";
 
 export default async function BusinessesPage() {
   const session = await getServerSession(authOptions);
@@ -102,8 +103,8 @@ export default async function BusinessesPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex gap-4 text-sm text-zinc-400">
-                  <span>{business._count.socialAccounts} accounts</span>
-                  <span>{business._count.posts} posts</span>
+                  <span>{pluralize(business._count.socialAccounts, "account")}</span>
+                  <span>{pluralize(business._count.posts, "post")}</span>
                 </div>
                 {!business.contentStrategy && (
                   <Button
