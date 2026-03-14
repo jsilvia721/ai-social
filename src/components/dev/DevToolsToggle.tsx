@@ -37,7 +37,7 @@ export function DevToolsToggle() {
   if (mocking === null) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50">
+    <div className="fixed bottom-16 right-4 z-50 md:bottom-4">
       {open ? (
         <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 shadow-xl space-y-2 w-56">
           <div className="flex items-center justify-between">
