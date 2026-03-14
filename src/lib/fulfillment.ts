@@ -10,6 +10,7 @@ import { generateImage } from "@/lib/media";
 import { uploadBuffer } from "@/lib/storage";
 import { sendFailureAlert } from "@/lib/alerts";
 import { buildImagePrompt } from "@/lib/ai/prompts";
+import { requiresMedia } from "@/lib/platform-rules";
 import type { BriefFormat, ContentBrief, ContentStrategy, SocialAccount } from "@prisma/client";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -191,6 +192,18 @@ async function fulfillOneBrief(
       const key = `media/${brief.businessId}/${brief.id}.${media.mimeType.split("/")[1] || "png"}`;
       const url = await uploadBuffer(media.buffer, key, media.mimeType);
       mediaUrls = [url];
+    }
+
+    // Validate media for platforms that require it.
+    // No retry — format mismatch is deterministic, not transient.
+    if (!media && requiresMedia(brief.platform)) {
+      const errorMessage = `${brief.platform} requires media but format ${brief.recommendedFormat} produced none`;
+      console.error(`[fulfillment] BRIEF_FAILED briefId=${brief.id} businessId=${brief.businessId} error=${errorMessage}`);
+      await prisma.contentBrief.update({
+        where: { id: brief.id },
+        data: { status: "FAILED", errorMessage },
+      });
+      return "failed";
     }
 
     // Compute review decision
