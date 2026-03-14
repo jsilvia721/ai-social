@@ -42,6 +42,27 @@ gh issue comment <number> --body "<!-- progress:step_1_assess -->**Complexity as
 **Approach:** <Brief plan>"
 ```
 
+## Step 1b: Check if Already Complete
+
+After assessing complexity, check whether the issue's acceptance criteria are **already satisfied** in the current codebase. This prevents wasted work and avoids timing out on no-op issues.
+
+1. **Parse acceptance criteria** from the issue body (look for `### Acceptance Criteria` or checkbox items).
+2. **Verify each criterion** against the codebase — search for relevant files, read implementations, run tests if needed.
+3. **If ALL criteria are already met:**
+   - Comment on the issue with evidence (file paths, line numbers, test output) showing each criterion is satisfied:
+     ```bash
+     gh issue comment <number> --body "<!-- progress:step_1b_already_complete -->**Already complete.** All acceptance criteria are satisfied in the current codebase.
+
+     **Evidence:**
+     <for each criterion, cite the file path + line number or test output proving it>"
+     ```
+   - Transition labels and close:
+     ```bash
+     gh issue edit <number> --remove-label claude-wip --add-label claude-done && gh issue close <number>
+     ```
+   - **Skip directly to Step 7** (Self-Assessment) — do not plan, implement, review, or create a PR.
+4. **If ANY criterion is not met**, proceed normally to Step 2.
+
 ## Step 2: Plan (Moderate + Complex only)
 
 Skip for Trivial issues.
