@@ -89,6 +89,16 @@ describe("deduplicateByRepurposeGroup", () => {
     expect(result[0].id).toBe("1");
   });
 
+  it("keeps the first post when metricsLikes are tied", () => {
+    const posts = [
+      makePost({ id: "1", metricsLikes: 10, repurposeGroupId: "group-a" }),
+      makePost({ id: "2", metricsLikes: 10, repurposeGroupId: "group-a" }),
+    ];
+    const result = deduplicateByRepurposeGroup(posts);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("1");
+  });
+
   it("handles multiple separate repurpose groups", () => {
     const posts = [
       makePost({ id: "1", metricsLikes: 10, repurposeGroupId: "group-a" }),
