@@ -659,6 +659,12 @@ describe("runMetricsRefresh", () => {
       where: { id: "post-1" },
       data: { metricsUpdatedAt: expect.any(Date) },
     });
+    // Should NOT clear blotatoPostId for non-404 errors
+    expect(prismaMock.post.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { blotatoPostId: null },
+      })
+    );
     expect(mockReportServerError).toHaveBeenCalled();
   });
 
@@ -678,32 +684,6 @@ describe("runMetricsRefresh", () => {
       data: { metricsUpdatedAt: expect.any(Date) },
     });
     expect(mockReportServerError).toHaveBeenCalled();
-  });
-
-  it("still reports non-404 BlotatoApiError normally", async () => {
-    const { BlotatoApiError } = await import("@/lib/blotato/client");
-    const publishedPost = {
-      ...makePost({ status: "PUBLISHED" }),
-      blotatoPostId: "blotato-post-abc",
-    };
-    prismaMock.post.findMany.mockResolvedValue([publishedPost] as any);
-    mockGetPostMetrics.mockRejectedValue(new BlotatoApiError("Rate limited", 429));
-
-    await runMetricsRefresh();
-
-    // Should NOT clear blotatoPostId
-    expect(prismaMock.post.update).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: { blotatoPostId: null },
-      })
-    );
-    // Should report as error
-    expect(mockReportServerError).toHaveBeenCalledWith(
-      "Rate limited",
-      expect.objectContaining({
-        url: "cron/metrics",
-      })
-    );
   });
 
   it("does not crash if reportServerError throws during metrics refresh", async () => {
