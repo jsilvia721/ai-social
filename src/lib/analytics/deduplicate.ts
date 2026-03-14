@@ -9,18 +9,12 @@ export function deduplicateByRepurposeGroup<
 >(posts: T[]): T[] {
   // Map groupId -> best post in that group
   const groupWinners = new Map<string, T>();
-  // Track which positions are group-first appearances
-  const groupFirstIndex = new Map<string, number>();
 
   for (let i = 0; i < posts.length; i++) {
     const post = posts[i];
     const groupId = post.repurposeGroupId;
 
     if (!groupId) continue;
-
-    if (!groupFirstIndex.has(groupId)) {
-      groupFirstIndex.set(groupId, i);
-    }
 
     const current = groupWinners.get(groupId);
     if (
