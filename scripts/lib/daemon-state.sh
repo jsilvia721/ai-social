@@ -32,6 +32,15 @@ set_rate_limit_pause() {
   echo "$until_epoch" > "$DAEMON_STATE_DIR/pause-until"
 }
 
+# Set rate limit pause until an absolute epoch.
+# Unlike set_rate_limit_pause (which takes a duration), this takes an epoch directly.
+# $1 — absolute epoch to pause until
+set_rate_limit_pause_until() {
+  local until_epoch="$1"
+  ensure_state_dir
+  echo "$until_epoch" > "$DAEMON_STATE_DIR/pause-until"
+}
+
 # Check if rate limit pause is active.
 # Returns 0 if paused, 1 if not. Auto-clears expired pauses.
 is_rate_limit_paused() {
