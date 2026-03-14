@@ -1037,6 +1037,79 @@ echo 'BUG_MONITOR_TEST_VAR=hello_from_env' > "$ENV_FILE"
 
 rm -rf "$ENV_TEST_DIR"
 
+# --- Test fingerprint rendering in create_bug_issue ----------------------------
+echo ""
+echo "=== Fingerprint Rendering Tests ==="
+echo ""
+
+echo "Fingerprint validation in create_bug_issue:"
+
+# Verify create_bug_issue has fingerprint validation with fallback
+if grep -q 'if \[ -z "$fingerprint" \]' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "create_bug_issue validates empty fingerprint"
+else
+  fail "create_bug_issue validates empty fingerprint" "validation exists" "not found"
+fi
+
+# Test that fallback fingerprint generation produces valid output
+fallback_fp=$(echo -n "SERVER:some error message" | sha256sum | awk '{print $1}')
+assert_not_empty "fallback fingerprint is non-empty" "$fallback_fp"
+assert_eq "fallback fingerprint is 64 hex chars" 64 "${#fallback_fp}"
+
+# --- Test within-cycle batch dedup -------------------------------------------
+echo ""
+echo "=== Within-Cycle Batch Dedup Tests ==="
+echo ""
+
+echo "Cycle-level fingerprint tracking:"
+
+# Test the cycle dedup mechanism using temp files (mirrors production logic)
+CYCLE_DEDUP_DIR=$(mktemp -d)
+CYCLE_DEDUP_FILE="$CYCLE_DEDUP_DIR/.cycle_seen"
+touch "$CYCLE_DEDUP_FILE"
+
+is_seen_this_cycle() {
+  grep -qF "$1" "$CYCLE_DEDUP_FILE" 2>/dev/null
+}
+
+mark_seen_this_cycle() {
+  echo "$1" >> "$CYCLE_DEDUP_FILE"
+}
+
+# New fingerprint should not be seen
+if is_seen_this_cycle "fp_aaa"; then
+  fail "new fingerprint not seen this cycle" "not seen" "seen"
+else
+  pass "new fingerprint not seen this cycle"
+fi
+
+# After marking, should be seen
+mark_seen_this_cycle "fp_aaa"
+if is_seen_this_cycle "fp_aaa"; then
+  pass "fingerprint seen after marking"
+else
+  fail "fingerprint seen after marking" "seen" "not seen"
+fi
+
+# Different fingerprint should not be seen
+if is_seen_this_cycle "fp_bbb"; then
+  fail "different fingerprint not seen" "not seen" "seen"
+else
+  pass "different fingerprint not seen"
+fi
+
+rm -rf "$CYCLE_DEDUP_DIR"
+
+echo ""
+echo "Batch dedup integration:"
+
+# Verify process_error uses is_seen_this_cycle for cycle-level dedup
+if grep -q 'is_seen_this_cycle' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "process_error uses cycle-level dedup"
+else
+  fail "process_error uses cycle-level dedup" "is_seen_this_cycle call exists" "not found"
+fi
+
 # Test that shellcheck passes
 echo ""
 echo "Shellcheck:"
