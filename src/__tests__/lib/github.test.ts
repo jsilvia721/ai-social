@@ -251,13 +251,14 @@ describe("GitHub client", () => {
   });
 
   describe("API error handling", () => {
-    it("createIssue returns safe default on HTTP 403", async () => {
+    it("createIssue throws on HTTP 403", async () => {
       const error = new Error("Resource not accessible by personal access token");
       Object.assign(error, { status: 403 });
       mockIssuesCreate.mockRejectedValue(error);
 
-      const result = await createIssue("Test", "Body", ["label"]);
-      expect(result).toEqual({ number: 0, title: "Test", html_url: "" });
+      await expect(createIssue("Test", "Body", ["label"])).rejects.toThrow(
+        "Resource not accessible by personal access token"
+      );
     });
 
     it("updateIssueBody resolves on HTTP 403", async () => {
@@ -276,13 +277,14 @@ describe("GitHub client", () => {
       await expect(closeIssue(42)).resolves.toBeUndefined();
     });
 
-    it("createComment returns safe default on HTTP 403", async () => {
+    it("createComment throws on HTTP 403", async () => {
       const error = new Error("Resource not accessible");
       Object.assign(error, { status: 403 });
       mockIssuesCreateComment.mockRejectedValue(error);
 
-      const result = await createComment(42, "test");
-      expect(result).toEqual({ id: 0, body: "test" });
+      await expect(createComment(42, "test")).rejects.toThrow(
+        "Resource not accessible"
+      );
     });
 
     it("getIssue returns safe default on HTTP error", async () => {

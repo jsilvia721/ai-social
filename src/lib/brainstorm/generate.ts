@@ -124,6 +124,11 @@ export async function generateBrainstorm(): Promise<{
     ["brainstorm"],
   );
 
+  // Guard: reject invalid issue numbers before persisting (defense-in-depth)
+  if (!issue.number || issue.number <= 0) {
+    throw new Error("GitHub issue creation returned invalid issue number");
+  }
+
   // 6. Create DB record
   await prisma.brainstormSession.create({
     data: {

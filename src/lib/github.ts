@@ -92,7 +92,11 @@ export async function createIssue(
   if (shouldMockExternalApis()) return mockCreateIssue(title, body, labels);
 
   const octokit = getOctokit();
-  if (!octokit) return { number: 0, title, html_url: "" };
+  if (!octokit) {
+    throw new Error(
+      "GitHub client not configured — GITHUB_TOKEN or repo params missing"
+    );
+  }
 
   try {
     const { data } = await octokit.issues.create({
@@ -105,7 +109,6 @@ export async function createIssue(
   } catch (error) {
     if (isHttpError(error)) {
       console.warn(`[github] createIssue failed: ${(error as Error).message}`);
-      return { number: 0, title, html_url: "" };
     }
     throw error;
   }
@@ -267,7 +270,11 @@ export async function createComment(
   if (shouldMockExternalApis()) return mockCreateComment(issueNumber, body);
 
   const octokit = getOctokit();
-  if (!octokit) return { id: 0, body };
+  if (!octokit) {
+    throw new Error(
+      "GitHub client not configured — GITHUB_TOKEN or repo params missing"
+    );
+  }
 
   try {
     const { data } = await octokit.issues.createComment({
@@ -279,7 +286,6 @@ export async function createComment(
   } catch (error) {
     if (isHttpError(error)) {
       console.warn(`[github] createComment failed: ${(error as Error).message}`);
-      return { id: 0, body };
     }
     throw error;
   }
