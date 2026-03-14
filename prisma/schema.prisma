@@ -21,6 +21,7 @@ model User {
   accounts         Account[]
   sessions         Session[]
   businesses       BusinessMember[]
+  feedback         Feedback[]
 }
 
 model Account {
@@ -309,4 +310,25 @@ model ErrorReport {
 
   @@index([status, lastSeenAt])
   @@index([source, status])
+}
+
+// ── User Feedback ───────────────────────────────────────────────────────────
+
+model Feedback {
+  id                String   @id @default(cuid())
+  userId            String
+  message           String   @db.Text
+  pageUrl           String?
+  screenshotUrl     String?
+  status            String   @default("PENDING") // PENDING, ISSUE_CREATED, FAILED
+  githubIssueNumber Int?
+  githubIssueUrl    String?
+  metadata          Json?    // userAgent, viewport, etc.
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status, createdAt])
 }
