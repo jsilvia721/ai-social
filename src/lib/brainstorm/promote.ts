@@ -125,7 +125,7 @@ export async function promoteBrainstormItems(
       // Create plan issue — throws on failure, catch to allow other items to proceed
       let planIssue: { number: number; html_url: string };
       try {
-        planIssue = await github.createIssue(planTitle, planBody, ["plan"]);
+        planIssue = await github.createIssue(planTitle, planBody, ["plan", "claude-plan-review"]);
       } catch (error) {
         console.warn(
           `[promote] Failed to create plan issue for "${item.title}" — skipping, will retry next run`,
