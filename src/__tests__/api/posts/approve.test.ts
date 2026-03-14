@@ -60,6 +60,34 @@ describe("POST /api/posts/[id]/approve", () => {
     );
   });
 
+  it("returns 400 when approving media-less INSTAGRAM post", async () => {
+    mockAuthenticated();
+    prismaMock.post.findFirst.mockResolvedValue({
+      id: "p1", status: "PENDING_REVIEW", mediaUrls: [],
+      socialAccount: { platform: "INSTAGRAM" },
+    } as never);
+
+    const res = await POST(makeRequest("p1"), makeParams("p1"));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("INSTAGRAM requires at least one image or video");
+    expect(prismaMock.post.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("allows approving INSTAGRAM post with media", async () => {
+    mockAuthenticated();
+    prismaMock.post.findFirst.mockResolvedValue({
+      id: "p1", status: "PENDING_REVIEW",
+      mediaUrls: ["https://storage.example.com/img.jpg"],
+      socialAccount: { platform: "INSTAGRAM" },
+    } as never);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.findUnique.mockResolvedValue({ id: "p1", status: "SCHEDULED" } as never);
+
+    const res = await POST(makeRequest("p1"), makeParams("p1"));
+    expect(res.status).toBe(200);
+  });
+
   it("is idempotent — returns 200 if already SCHEDULED", async () => {
     mockAuthenticated();
     prismaMock.post.findFirst.mockResolvedValue({ id: "p1", status: "SCHEDULED" } as never);

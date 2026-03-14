@@ -201,6 +201,35 @@ describe("POST /api/posts/repurpose", () => {
     }
   });
 
+  it("skips media-required platforms when status is SCHEDULED", async () => {
+    mockAuthenticated();
+    prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
+    prismaMock.socialAccount.findMany.mockResolvedValue(mockAccounts as any);
+    prismaMock.contentStrategy.findUnique.mockResolvedValue(mockStrategy as any);
+    mockRepurpose.mockResolvedValue(mockRepurposeResult);
+    prismaMock.$transaction.mockImplementation(async (fn: any) => {
+      if (typeof fn === "function") return fn(prismaMock);
+      return [];
+    });
+    prismaMock.post.create.mockResolvedValue({ id: "post-1" } as any);
+
+    const res = await POST(makeRequest({
+      ...validBody,
+      status: "SCHEDULED",
+      scheduledAt: "2027-06-01T12:00:00Z",
+    }));
+
+    expect(res.status).toBe(201);
+    // Only Twitter post should be created (Instagram skipped due to media requirement)
+    const createCalls = prismaMock.post.create.mock.calls;
+    const platforms = createCalls.map(call => {
+      const account = mockAccounts.find(a => a.id === call[0].data.socialAccountId);
+      return account?.platform;
+    });
+    expect(platforms).not.toContain("INSTAGRAM");
+    expect(platforms).toContain("TWITTER");
+  });
+
   it("returns 500 when repurposeContent throws", async () => {
     mockAuthenticated();
     prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);

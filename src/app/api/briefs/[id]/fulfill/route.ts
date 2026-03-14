@@ -1,6 +1,7 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { assertSafeMediaUrl } from "@/lib/blotato/ssrf-guard";
+import { requiresMedia } from "@/lib/platform-rules";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -85,6 +86,14 @@ export async function POST(
   if (account.platform !== brief.platform) {
     return NextResponse.json(
       { error: `Social account platform (${account.platform}) does not match brief platform (${brief.platform})` },
+      { status: 400 }
+    );
+  }
+
+  // Validate media requirement for the platform
+  if (requiresMedia(account.platform) && mediaUrls.length === 0) {
+    return NextResponse.json(
+      { error: `${account.platform} requires at least one image or video` },
       { status: 400 }
     );
   }

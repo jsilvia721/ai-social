@@ -1,6 +1,7 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { assertSafeMediaUrl } from "@/lib/blotato/ssrf-guard";
+import { requiresMedia } from "@/lib/platform-rules";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -97,6 +98,14 @@ export async function POST(req: NextRequest) {
 
   if (!account) {
     return NextResponse.json({ error: "Social account not found" }, { status: 404 });
+  }
+
+  // Validate media requirement for platforms like Instagram/TikTok (only when scheduling)
+  if (scheduledAt && requiresMedia(account.platform) && (mediaUrls ?? []).length === 0) {
+    return NextResponse.json(
+      { error: `${account.platform} requires at least one image or video` },
+      { status: 400 }
+    );
   }
 
   if (mediaUrls?.length) {

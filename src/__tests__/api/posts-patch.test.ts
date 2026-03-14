@@ -131,6 +131,57 @@ describe("PATCH /api/posts/[id]", () => {
     expect(prismaMock.post.update).not.toHaveBeenCalled();
   });
 
+  it("returns 400 when scheduling INSTAGRAM post without media", async () => {
+    mockAuthenticated();
+    prismaMock.post.findFirst.mockResolvedValue({
+      id: "post-1", status: "DRAFT", mediaUrls: [],
+      socialAccount: { platform: "INSTAGRAM" },
+    } as any);
+
+    const res = await PATCH(makeRequest({ scheduledAt: "2027-01-01T12:00:00Z" }), { params });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("INSTAGRAM requires at least one image or video");
+    expect(prismaMock.post.update).not.toHaveBeenCalled();
+  });
+
+  it("allows scheduling INSTAGRAM post with media provided in update", async () => {
+    mockAuthenticated();
+    prismaMock.post.findFirst.mockResolvedValue({
+      id: "post-1", status: "DRAFT", mediaUrls: [],
+      socialAccount: { platform: "INSTAGRAM" },
+    } as any);
+    prismaMock.post.update.mockResolvedValue({ id: "post-1", status: "SCHEDULED" } as any);
+
+    const res = await PATCH(
+      makeRequest({
+        scheduledAt: "2027-01-01T12:00:00Z",
+        mediaUrls: ["https://storage.example.com/image.jpg"],
+      }),
+      { params }
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it("allows scheduling INSTAGRAM post when existing media present", async () => {
+    mockAuthenticated();
+    prismaMock.post.findFirst.mockResolvedValue({
+      id: "post-1", status: "DRAFT",
+      mediaUrls: ["https://storage.example.com/existing.jpg"],
+      socialAccount: { platform: "INSTAGRAM" },
+    } as any);
+    prismaMock.post.update.mockResolvedValue({ id: "post-1", status: "SCHEDULED" } as any);
+
+    const res = await PATCH(
+      makeRequest({ scheduledAt: "2027-01-01T12:00:00Z" }),
+      { params }
+    );
+
+    expect(res.status).toBe(200);
+  });
+
   it("sets status DRAFT when scheduledAt is null", async () => {
     mockAuthenticated();
     prismaMock.post.findFirst.mockResolvedValue({ id: "post-1", status: "SCHEDULED" } as any);

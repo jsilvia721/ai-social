@@ -1,6 +1,7 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { assertSafeMediaUrl } from "@/lib/blotato/ssrf-guard";
+import { requiresMedia } from "@/lib/platform-rules";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -29,6 +30,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       id,
       ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
     },
+    include: { socialAccount: true },
   });
 
   if (!post) {
@@ -65,6 +67,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
     if (scheduledDate < twoMinutesAgo) {
       return NextResponse.json({ error: "Cannot schedule a post in the past" }, { status: 400 });
+    }
+  }
+
+  // Validate media requirement when scheduling on media-required platforms
+  if (scheduledAt !== undefined && scheduledAt !== null && post.socialAccount) {
+    const effectiveMedia = mediaUrls ?? (post.mediaUrls as string[]) ?? [];
+    if (requiresMedia(post.socialAccount.platform) && effectiveMedia.length === 0) {
+      return NextResponse.json(
+        { error: `${post.socialAccount.platform} requires at least one image or video` },
+        { status: 400 }
+      );
     }
   }
 

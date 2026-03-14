@@ -303,6 +303,87 @@ describe("POST /api/posts", () => {
     expect(prismaMock.post.create).not.toHaveBeenCalled();
   });
 
+  it("returns 400 when scheduling INSTAGRAM post without media", async () => {
+    mockAuthenticated();
+    prismaMock.socialAccount.findFirst.mockResolvedValue({
+      id: "acc-1", businessId: "biz-1", platform: "INSTAGRAM",
+    } as any);
+
+    const res = await POST(
+      makePostRequest({
+        content: "No media post",
+        socialAccountId: "acc-1",
+        businessId: "biz-1",
+        scheduledAt: "2027-06-01T12:00:00Z",
+      })
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("INSTAGRAM requires at least one image or video");
+    expect(prismaMock.post.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when scheduling TIKTOK post without media", async () => {
+    mockAuthenticated();
+    prismaMock.socialAccount.findFirst.mockResolvedValue({
+      id: "acc-1", businessId: "biz-1", platform: "TIKTOK",
+    } as any);
+
+    const res = await POST(
+      makePostRequest({
+        content: "No media post",
+        socialAccountId: "acc-1",
+        businessId: "biz-1",
+        scheduledAt: "2027-06-01T12:00:00Z",
+      })
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("TIKTOK requires at least one image or video");
+    expect(prismaMock.post.create).not.toHaveBeenCalled();
+  });
+
+  it("allows DRAFT INSTAGRAM post without media", async () => {
+    mockAuthenticated();
+    prismaMock.socialAccount.findFirst.mockResolvedValue({
+      id: "acc-1", businessId: "biz-1", platform: "INSTAGRAM",
+    } as any);
+    prismaMock.post.create.mockResolvedValue({ id: "post-draft", status: "DRAFT" } as any);
+
+    const res = await POST(
+      makePostRequest({
+        content: "Draft IG post",
+        socialAccountId: "acc-1",
+        businessId: "biz-1",
+        // no scheduledAt → DRAFT
+      })
+    );
+
+    expect(res.status).toBe(201);
+  });
+
+  it("allows scheduling INSTAGRAM post with media", async () => {
+    mockAuthenticated();
+    prismaMock.socialAccount.findFirst.mockResolvedValue({
+      id: "acc-1", businessId: "biz-1", platform: "INSTAGRAM",
+    } as any);
+    prismaMock.post.create.mockResolvedValue({ id: "post-1", status: "SCHEDULED" } as any);
+
+    const res = await POST(
+      makePostRequest({
+        content: "IG post with media",
+        socialAccountId: "acc-1",
+        businessId: "biz-1",
+        scheduledAt: "2027-06-01T12:00:00Z",
+        mediaUrls: ["https://storage.example.com/image.jpg"],
+      })
+    );
+
+    expect(res.status).toBe(201);
+  });
+
   it("uses businessId from the request body (never trusts implicit context)", async () => {
     mockAuthenticated();
     prismaMock.socialAccount.findFirst.mockResolvedValue({ id: "acc-1", businessId: "biz-1" } as any);
