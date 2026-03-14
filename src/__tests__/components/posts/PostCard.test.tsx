@@ -151,6 +151,20 @@ describe("PostCard", () => {
     expect(screen.getByText("50.0K")).toBeInTheDocument();
   });
 
+  it("navigates to repurpose page when repurpose button is clicked", async () => {
+    render(<PostCard post={makePost()} onDelete={mockDelete} />);
+    fireEvent.click(screen.getByLabelText("Repurpose to all platforms"));
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/posts/repurpose", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ sourceContent: "Hello world post content for testing the card display" }),
+      }));
+    });
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/dashboard/posts/repurpose/rg-1");
+    });
+  });
+
   // Mobile-specific layout tests
   describe("mobile layout", () => {
     it("uses larger padding on mobile (p-5) and normal on sm (sm:p-4)", () => {

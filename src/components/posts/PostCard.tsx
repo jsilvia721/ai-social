@@ -165,7 +165,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
 
   return (
     <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-5 sm:p-4">
-      <div className="flex items-start gap-4 sm:gap-4">
+      <div className="flex items-start gap-4">
         {/* Platform icon */}
         <div className={`mt-0.5 shrink-0 ${platformColor}`}>
           <PlatformIcon className="h-6 w-6 sm:h-5 sm:w-5" />
