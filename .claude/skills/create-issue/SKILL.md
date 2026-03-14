@@ -55,7 +55,16 @@ Count files, identify layers (schema, API, UI, tests), estimate lines changed.
 | **Moderate** | 2-5 files, clear approach, follows existing patterns |
 | **Complex** | 6+ files, new patterns, schema changes, cross-cutting |
 
-### 5. Write the Plan Issue
+### 5. Detect Bug References
+
+Check if the user's task description references a bug issue. Look for patterns like:
+- "fix bug #N", "from bug #N", "bug report #N", "> From bug #N", "bug issue #N", "fixes #N (bug)"
+
+If a bug issue number is found, include a `<!-- BUG_ISSUE: #N -->` HTML comment in the plan issue body (placed after the plan title, before the research summary). This marker enables `close-completed-plans.yml` to auto-close the referenced bug when all work issues are complete.
+
+If the task does **not** reference a bug, omit the marker entirely.
+
+### 6. Write the Plan Issue
 
 ```bash
 gh issue create \
@@ -63,6 +72,7 @@ gh issue create \
   --label "<parsed-label>" \
   --body "$(cat <<'ISSUE_EOF'
 ### Plan: <title>
+<!-- BUG_ISSUE: #N -->  ← include ONLY if task references a bug issue; omit otherwise
 
 <High-level description of the task and what will be accomplished.>
 

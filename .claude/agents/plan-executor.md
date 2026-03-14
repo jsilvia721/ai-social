@@ -20,6 +20,8 @@ gh issue view <number> --json title,body,labels
 
 Extract work items from between `<!-- PLAN_ITEMS_START -->` and `<!-- PLAN_ITEMS_END -->` markers in the issue body.
 
+Also check for a `<!-- BUG_ISSUE: #N -->` marker in the plan body. If present, note the bug issue number — you will reference it in created work issues (see Step 3).
+
 Each work item has this structure:
 ```
 #### <position>. <title>
