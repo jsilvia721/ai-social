@@ -33,7 +33,7 @@ jest.mock("next/link", () => ({
   ),
 }));
 
-import PostsPage from "@/app/dashboard/posts/page";
+import PostsPage from "@/app/(authenticated)/dashboard/posts/page";
 
 function mockFetchResponse(posts: { id: string; content: string }[], total: number, page = 1) {
   return {
