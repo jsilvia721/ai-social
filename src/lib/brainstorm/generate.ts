@@ -124,9 +124,9 @@ export async function generateBrainstorm(): Promise<{
     ["brainstorm"],
   );
 
-  if (issue.number === 0) {
+  if (issue.number <= 0) {
     throw new Error(
-      "Failed to create brainstorm issue on GitHub (API returned failure)",
+      `GitHub issue creation returned invalid issue number: ${issue.number}`,
     );
   }
 
