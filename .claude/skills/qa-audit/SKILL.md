@@ -53,7 +53,7 @@ curl -s -o /dev/null -w "%{http_code}" --max-time 5 {baseUrl}/api/test/session?e
    done
    ```
 
-4. Re-verify auth. If still failing, check `tail -50 /tmp/qa-audit-dev-server.log`, create a self-improvement issue, and abort.
+4. Re-verify auth. If HTTP 200, update `baseUrl` to `http://localhost:3000` and proceed to step 3. If still failing, check `tail -50 /tmp/qa-audit-dev-server.log`, create a self-improvement issue, and abort.
 
 ### 3. Authenticate via Browser
 
@@ -72,7 +72,7 @@ Dynamically discover routes by scanning `src/app/dashboard/**/page.tsx` files. M
 - `src/app/dashboard/businesses/[id]/onboard/page.tsx` → `/dashboard/businesses/[id]/onboard` (substitute `[id]` → `businessId`)
 - `src/app/dashboard/posts/repurpose/[groupId]/page.tsx` → `/dashboard/posts/repurpose/[groupId]` (substitute `[groupId]` → `repurposeGroupId`)
 
-**Dynamic param mapping:** `[id]` in a `businesses` path → `businessId`; `[id]` in a `posts` path → `postId`; `[groupId]` → `repurposeGroupId`. Skip any route whose required param is null.
+**Dynamic param mapping:** `[id]` in a `businesses` path → `businessId`; `[id]` in a `posts` path → `postId`; `[groupId]` → `repurposeGroupId`. For unrecognized dynamic params, skip the route and log a warning. Skip any route whose required param is null.
 
 If `--page <path>` was provided, filter to only that route.
 

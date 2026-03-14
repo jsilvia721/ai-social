@@ -21,6 +21,7 @@ Whenever you hit friction, record:
 JOURNAL ENTRY:
 - Signal type: [re-attempt | workaround | missing-docs | discovered-pattern | failure]
 - What happened: <brief description>
+- What I did instead: <the workaround or fix>
 - What would have helped: <what documentation/rule/config would have prevented this>
 ```
 
@@ -150,6 +151,7 @@ Closes #<issue-number>
 - [ ] <blocked item> — blocked, see #<issue-number>
 
 ## Review results
+<!-- NEVER write "pending" — all agents must have completed before creating the PR. -->
 | Agent | Result |
 |-------|--------|
 | `<agent-name>` | <findings summary OR "no issues found" OR "failed after retry"> |
