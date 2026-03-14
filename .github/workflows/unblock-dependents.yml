@@ -3,14 +3,16 @@ name: Unblock Dependent Issues
 on:
   pull_request:
     types: [closed]
+  issues:
+    types: [closed]
 
 permissions:
   issues: write
   pull-requests: read
 
 jobs:
-  unblock:
-    if: github.event.pull_request.merged == true
+  unblock-on-pr-merge:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v7
@@ -39,18 +41,15 @@ jobs:
             console.log(`PR #${pr.number} closes issues: ${[...closedIssueNumbers].map(n => '#' + n).join(', ')}`);
 
             // --- Step 2: Find open issues that depend on any of the closed issues ---
-            // Search for issues mentioning the closed issue numbers in their body
             const dependentIssues = new Set();
 
             for (const closedNum of closedIssueNumbers) {
-              // Search for issues that reference this issue number in a dependency context
               const searchResults = await github.rest.search.issuesAndPullRequests({
                 q: `repo:${owner}/${repo} is:issue is:open "#${closedNum}" in:body`,
                 per_page: 50
               });
 
               for (const issue of searchResults.data.items) {
-                // Verify this issue actually has a Dependencies section referencing the closed issue
                 if (issue.body && issue.body.includes('### Dependencies') && issue.body.includes(`#${closedNum}`)) {
                   dependentIssues.add(issue.number);
                 }
@@ -73,14 +72,12 @@ jobs:
                 issue_number: depIssueNum
               });
 
-              // Skip if already has claude-ready or claude-wip
               const labels = issue.data.labels.map(l => l.name);
               if (labels.includes('claude-ready') || labels.includes('claude-wip') || labels.includes('claude-done')) {
                 console.log(`#${depIssueNum}: already has active label, skipping.`);
                 continue;
               }
 
-              // Extract the Dependencies section
               const body = issue.data.body || '';
               const depsMatch = body.match(/### Dependencies\s*\n([\s\S]*?)(?:\n###|\n$|$)/);
               if (!depsMatch) {
@@ -100,7 +97,6 @@ jobs:
                 continue;
               }
 
-              // Check if ALL dependency issues are closed
               let allResolved = true;
               for (const depNum of depNumbers) {
                 const depIssue = await github.rest.issues.get({
@@ -117,7 +113,6 @@ jobs:
               if (allResolved) {
                 console.log(`#${depIssueNum}: all dependencies resolved! Removing blocked label and adding needs-triage.`);
 
-                // Remove 'blocked' label if present (may have been manually removed already)
                 try {
                   await github.rest.issues.removeLabel({
                     owner, repo,
@@ -138,6 +133,115 @@ jobs:
                   owner, repo,
                   issue_number: depIssueNum,
                   body: `All dependencies resolved (merged via PR #${pr.number}). Marking as \`needs-triage\` for human review. Comment \`/go\` or 👍 to approve.`
+                });
+              }
+            }
+
+  unblock-on-issue-close:
+    if: github.event_name == 'issues' && github.event.issue.pull_request == null
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const closedIssue = context.payload.issue;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const closedNum = closedIssue.number;
+
+            console.log(`Issue #${closedNum} closed. Searching for dependents.`);
+
+            // --- Step 1: Find open issues that depend on the closed issue ---
+            const dependentIssues = new Set();
+
+            const searchResults = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${owner}/${repo} is:issue is:open "#${closedNum}" in:body`,
+              per_page: 50
+            });
+
+            for (const issue of searchResults.data.items) {
+              if (issue.body && issue.body.includes('### Dependencies') && issue.body.includes(`#${closedNum}`)) {
+                dependentIssues.add(issue.number);
+              }
+            }
+
+            if (dependentIssues.size === 0) {
+              console.log('No dependent issues found.');
+              return;
+            }
+
+            console.log(`Found potential dependent issues: ${[...dependentIssues].map(n => '#' + n).join(', ')}`);
+
+            // --- Step 2: For each dependent issue, check if ALL dependencies are resolved ---
+            const issueRefPattern = /#(\d+)/g;
+
+            for (const depIssueNum of dependentIssues) {
+              const issue = await github.rest.issues.get({
+                owner, repo,
+                issue_number: depIssueNum
+              });
+
+              const labels = issue.data.labels.map(l => l.name);
+              if (labels.includes('claude-ready') || labels.includes('claude-wip') || labels.includes('claude-done')) {
+                console.log(`#${depIssueNum}: already has active label, skipping.`);
+                continue;
+              }
+
+              const body = issue.data.body || '';
+              const depsMatch = body.match(/### Dependencies\s*\n([\s\S]*?)(?:\n###|\n$|$)/);
+              if (!depsMatch) {
+                console.log(`#${depIssueNum}: no Dependencies section found, skipping.`);
+                continue;
+              }
+
+              const depsSection = depsMatch[1];
+              const depNumbers = [];
+              let refMatch;
+              while ((refMatch = issueRefPattern.exec(depsSection)) !== null) {
+                depNumbers.push(parseInt(refMatch[1], 10));
+              }
+
+              if (depNumbers.length === 0) {
+                console.log(`#${depIssueNum}: no issue references in Dependencies section, skipping.`);
+                continue;
+              }
+
+              let allResolved = true;
+              for (const depNum of depNumbers) {
+                const depIssue = await github.rest.issues.get({
+                  owner, repo,
+                  issue_number: depNum
+                });
+                if (depIssue.data.state !== 'closed') {
+                  console.log(`#${depIssueNum}: dependency #${depNum} is still open.`);
+                  allResolved = false;
+                  break;
+                }
+              }
+
+              if (allResolved) {
+                console.log(`#${depIssueNum}: all dependencies resolved! Removing blocked label and adding needs-triage.`);
+
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner, repo,
+                    issue_number: depIssueNum,
+                    name: 'blocked'
+                  });
+                } catch (e) {
+                  console.log(`#${depIssueNum}: 'blocked' label not present, skipping removal.`);
+                }
+
+                await github.rest.issues.addLabels({
+                  owner, repo,
+                  issue_number: depIssueNum,
+                  labels: ['needs-triage']
+                });
+
+                await github.rest.issues.createComment({
+                  owner, repo,
+                  issue_number: depIssueNum,
+                  body: `All dependencies resolved (issue #${closedNum} closed). Marking as \`needs-triage\` for human review. Comment \`/go\` or 👍 to approve.`
                 });
               }
             }
