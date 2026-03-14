@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Heart, MessageCircle, Repeat2, Eye, TrendingUp, Bookmark } from "lucide-react";
-import { deduplicateByRepurposeGroup } from "@/lib/analytics/dedup";
+import { deduplicateByRepurposeGroup } from "@/lib/analytics/deduplicate";
 import type { Platform } from "@/types";
 import { PLATFORM_STYLES } from "@/components/accounts/platform-utils";
 
@@ -75,7 +75,7 @@ export default async function AnalyticsPage() {
     return acc;
   }, {});
 
-  // Top 10 posts by likes (deduplicate repurposed posts, keeping best performer)
+  // Top 10 posts by likes (deduplicate repurposed variants, keep best performer)
   const topPosts = deduplicateByRepurposeGroup([...posts])
     .sort((a, b) => (b.metricsLikes ?? 0) - (a.metricsLikes ?? 0))
     .slice(0, 10);
