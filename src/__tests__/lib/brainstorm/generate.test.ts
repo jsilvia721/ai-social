@@ -228,6 +228,19 @@ describe("generateBrainstorm", () => {
       );
     });
 
+    it("throws when createIssue returns number 0 (API failure)", async () => {
+      mockCreateIssue.mockResolvedValue({
+        number: 0,
+        title: "Brainstorm: Week of Jan 1, 2024",
+        html_url: "",
+      });
+      await expect(generateBrainstorm()).rejects.toThrow(
+        "Failed to create brainstorm issue on GitHub"
+      );
+      // Should NOT create a DB record with githubIssueNumber: 0
+      expect(mockBrainstormCreate).not.toHaveBeenCalled();
+    });
+
     it("throws when Claude returns invalid output", async () => {
       mockMessagesCreate.mockResolvedValue({
         content: [
