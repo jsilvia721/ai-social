@@ -194,9 +194,11 @@ async function fulfillOneBrief(
       mediaUrls = [url];
     }
 
-    // Validate media for platforms that require it
+    // Validate media for platforms that require it.
+    // No retry — format mismatch is deterministic, not transient.
     if (!media && requiresMedia(brief.platform)) {
       const errorMessage = `${brief.platform} requires media but format ${brief.recommendedFormat} produced none`;
+      console.error(`[fulfillment] BRIEF_FAILED briefId=${brief.id} businessId=${brief.businessId} error=${errorMessage}`);
       await prisma.contentBrief.update({
         where: { id: brief.id },
         data: { status: "FAILED", errorMessage },
