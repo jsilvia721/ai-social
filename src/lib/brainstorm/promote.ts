@@ -8,6 +8,7 @@ import * as github from "@/lib/github";
 import { prisma } from "@/lib/db";
 import { parseBrainstormIssue, updateItemWithPlanLink } from "./markdown";
 import type { BrainstormSession } from "@prisma/client";
+import { reportServerError } from "@/lib/server-error-reporter";
 
 /** 24 hours in milliseconds — comments must be older than this for auto-close. */
 const AUTO_CLOSE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -77,6 +78,14 @@ function extractItemDetails(
 export async function promoteBrainstormItems(
   session: BrainstormSession,
 ): Promise<void> {
+  if (session.githubIssueNumber <= 0) {
+    await reportServerError(
+      `Invalid githubIssueNumber (${session.githubIssueNumber}) in promoteBrainstormItems — skipping`,
+      { metadata: { sessionId: session.id, githubIssueNumber: session.githubIssueNumber } },
+    );
+    return;
+  }
+
   // Single API call — getIssue returns both body and state
   const issue = await github.getIssue(session.githubIssueNumber);
   const body = issue.body;

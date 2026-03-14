@@ -47,6 +47,12 @@ jest.mock("@/lib/mocks/config", () => ({
   shouldMockExternalApis: jest.fn().mockReturnValue(false),
 }));
 
+// Mock error reporter
+const mockReportServerError = jest.fn();
+jest.mock("@/lib/server-error-reporter", () => ({
+  reportServerError: (...args: unknown[]) => mockReportServerError(...args),
+}));
+
 import { iterateBrainstorm } from "@/lib/brainstorm/iterate";
 
 const SAMPLE_BODY = `# 🧠 Brainstorm
@@ -152,6 +158,30 @@ describe("iterateBrainstorm", () => {
         },
       ],
     });
+  });
+
+  it("returns early with error report when githubIssueNumber <= 0", async () => {
+    const session = makeSession({ githubIssueNumber: 0 });
+
+    await iterateBrainstorm(session);
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid githubIssueNumber"),
+      expect.objectContaining({ metadata: expect.objectContaining({ sessionId: "session-1", githubIssueNumber: 0 }) }),
+    );
+    expect(mockListComments).not.toHaveBeenCalled();
+  });
+
+  it("returns early with error report when githubIssueNumber is negative", async () => {
+    const session = makeSession({ githubIssueNumber: -1 });
+
+    await iterateBrainstorm(session);
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid githubIssueNumber"),
+      expect.objectContaining({ metadata: expect.objectContaining({ sessionId: "session-1", githubIssueNumber: -1 }) }),
+    );
+    expect(mockListComments).not.toHaveBeenCalled();
   });
 
   it("throws when GITHUB_BOT_USERNAME is not set", async () => {
