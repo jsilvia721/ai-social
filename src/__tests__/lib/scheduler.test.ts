@@ -622,24 +622,23 @@ describe("runMetricsRefresh", () => {
     );
     prismaMock.post.update.mockResolvedValue(publishedPost as any);
 
+    const consoleSpy = jest.spyOn(console, "info").mockImplementation();
+
     await runMetricsRefresh();
 
+    // Should clear the stale blotatoPostId
     expect(prismaMock.post.update).toHaveBeenCalledWith({
       where: { id: "post-1" },
       data: { blotatoPostId: null },
     });
-    // Should still report the error
-    expect(mockReportServerError).toHaveBeenCalledWith(
-      "Not found",
-      expect.objectContaining({
-        url: "cron/metrics",
-        metadata: expect.objectContaining({
-          postId: "post-1",
-          blotatoPostId: "blotato-post-abc",
-          source: "blotato-metrics",
-        }),
-      })
+    // 404 errors should NOT be reported
+    expect(mockReportServerError).not.toHaveBeenCalled();
+    // Should log at info level instead
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Clearing stale blotatoPostId for post post-1")
     );
+
+    consoleSpy.mockRestore();
   });
 
   it("updates metricsUpdatedAt for non-404 errors to rotate post to back of queue", async () => {
@@ -660,6 +659,12 @@ describe("runMetricsRefresh", () => {
       where: { id: "post-1" },
       data: { metricsUpdatedAt: expect.any(Date) },
     });
+    // Should NOT clear blotatoPostId for non-404 errors
+    expect(prismaMock.post.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { blotatoPostId: null },
+      })
+    );
     expect(mockReportServerError).toHaveBeenCalled();
   });
 
