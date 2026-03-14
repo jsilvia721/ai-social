@@ -136,6 +136,7 @@ async function fetchApiCalls(
     const rows = await prisma.apiCall.findMany({
       where: { createdAt: { gte: since } },
       orderBy: { createdAt: "asc" },
+      take: 10_000,
       select: {
         service: true,
         latencyMs: true,
@@ -193,6 +194,7 @@ async function fetchCronRuns(
     const runs = await prisma.cronRun.findMany({
       where: { startedAt: { gte: since } },
       orderBy: { startedAt: "desc" },
+      take: 5_000,
       select: {
         id: true,
         cronName: true,
@@ -254,6 +256,7 @@ async function fetchErrors(
     const errors = await prisma.errorReport.findMany({
       where: { lastSeenAt: { gte: since } },
       orderBy: { lastSeenAt: "desc" },
+      take: 5_000,
       select: {
         message: true,
         source: true,
