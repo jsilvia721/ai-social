@@ -3,8 +3,8 @@
 # Claude Code instances in isolated worktrees to implement them.
 #
 # Usage:
-#   ./scripts/issue-daemon.sh                  # defaults: 1 worker, 60s poll, $10 budget
-#   ./scripts/issue-daemon.sh -w 3 -i 30 -b 15 # 3 parallel workers, 30s poll, $15 budget
+#   ./scripts/issue-daemon.sh                  # defaults: 1 worker, 60s poll, $50 budget
+#   ./scripts/issue-daemon.sh -w 3 -i 30 -b 100 # 3 parallel workers, 30s poll, $100 budget
 #
 # Signals:
 #   SIGUSR1 — toggle drain mode (finish active workers, then exit)
@@ -19,14 +19,14 @@ set -euo pipefail
 # --- Configuration -----------------------------------------------------------
 MAX_WORKERS=1          # max parallel Claude instances
 POLL_INTERVAL=60       # seconds between polls
-MAX_BUDGET=10          # max USD per issue
-MAX_TURNS=200          # max agentic turns per issue (TDD + review agents need many turns)
+MAX_BUDGET=50          # max USD per issue (set high for Max plan users)
 LABEL_READY="claude-ready"
 LABEL_WIP="claude-wip"
 LABEL_DONE="claude-done"
 LABEL_ACTIVE="claude-active"
 LABEL_BLOCKED="claude-blocked"
 LABEL_INTERRUPTED="claude-interrupted"
+LABEL_RESUME="claude-resume"
 LABEL_PLAN_REVIEW="claude-plan-review"
 LABEL_APPROVED="claude-approved"
 LABEL_BUG_INVESTIGATE="bug-investigate"
@@ -38,14 +38,13 @@ HEARTBEAT_INTERVAL=30      # seconds between heartbeat writes
 STALE_THRESHOLD=300        # seconds before a heartbeat is considered stale (5 min)
 
 # --- Parse flags --------------------------------------------------------------
-while getopts "w:i:b:t:T:" opt; do
+while getopts "w:i:b:T:" opt; do
   case $opt in
     w) MAX_WORKERS=$OPTARG ;;
     i) POLL_INTERVAL=$OPTARG ;;
     b) MAX_BUDGET=$OPTARG ;;
-    t) MAX_TURNS=$OPTARG ;;
     T) WALL_TIMEOUT=$OPTARG ;;
-    *) echo "Usage: $0 [-w workers] [-i interval] [-b budget] [-t turns] [-T timeout_min]" && exit 1 ;;
+    *) echo "Usage: $0 [-w workers] [-i interval] [-b budget] [-T timeout_min]" && exit 1 ;;
   esac
 done
 
@@ -153,32 +152,43 @@ CIRCUIT_BREAKER_FILE="$LOG_DIR/.failure_times"
 CIRCUIT_BREAKER_WINDOW=60   # seconds
 CIRCUIT_BREAKER_THRESHOLD=3 # failures within window
 
+# --- Worktree lookup ----------------------------------------------------------
+# Find the worktree directory for a given issue number.
+# Scans for branches matching issue-{N}-*.
+# $1 — issue_number. Outputs worktree path or empty string.
+find_issue_worktree() {
+  local issue_number="$1"
+  for wt in .claude/worktrees/*/; do
+    [ -d "$wt" ] || continue
+    local branch
+    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [[ "$branch" == issue-${issue_number}-* ]]; then
+      echo "$wt"
+      return
+    fi
+  done
+}
+
 # --- WIP commit ---------------------------------------------------------------
 # Commit and push any uncommitted work in a worktree for the given issue.
 # Arguments: $1=issue_number
 commit_wip_if_needed() {
   local issue_number="$1"
+  local wt
+  wt=$(find_issue_worktree "$issue_number")
+  [ -n "$wt" ] || return
 
-  # Scan worktrees for a branch matching issue-{N}-*
-  for wt in .claude/worktrees/*/; do
-    [ -d "$wt" ] || continue
+  # Check for uncommitted changes (only tracked files to avoid committing secrets)
+  if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+    log "Committing WIP changes in worktree for issue #${issue_number}"
+    git -C "$wt" add -u 2>/dev/null || true
+    git -C "$wt" commit -m "WIP: interrupted by rate limit (issue #${issue_number})" 2>/dev/null || true
+  fi
 
-    local branch
-    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-
-    if [[ "$branch" == issue-${issue_number}-* ]]; then
-      # Check for uncommitted changes (only tracked files to avoid committing secrets)
-      if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
-        log "Committing WIP changes in worktree for issue #${issue_number}"
-        git -C "$wt" add -u 2>/dev/null || true
-        git -C "$wt" commit -m "WIP: interrupted by rate limit (issue #${issue_number})" 2>/dev/null || true
-      fi
-
-      # Push any unpushed commits
-      git -C "$wt" push -u origin "$branch" 2>/dev/null || true
-      return
-    fi
-  done
+  # Push any unpushed commits
+  local branch
+  branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  git -C "$wt" push -u origin "$branch" 2>/dev/null || true
 }
 
 # --- Worktree cleanup ---------------------------------------------------------
@@ -186,26 +196,18 @@ commit_wip_if_needed() {
 # Arguments: $1=issue_number
 clean_worktree() {
   local issue_number="$1"
+  local wt
+  wt=$(find_issue_worktree "$issue_number")
+  [ -n "$wt" ] || return
 
-  # Scan worktrees for a branch matching issue-{N}-*
-  for wt in .claude/worktrees/*/; do
-    [ -d "$wt" ] || continue
-
-    local branch
-    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-
-    if [[ "$branch" == issue-${issue_number}-* ]]; then
-      local cleaned
-      cleaned=$(git -C "$wt" clean -fd 2>&1 || true)
-      if [ -n "$cleaned" ]; then
-        log "Cleaned untracked files in worktree for issue #${issue_number}:"
-        echo "$cleaned" | while IFS= read -r line; do
-          log "  $line"
-        done
-      fi
-      return
-    fi
-  done
+  local cleaned
+  cleaned=$(git -C "$wt" clean -fd 2>&1 || true)
+  if [ -n "$cleaned" ]; then
+    log "Cleaned untracked files in worktree for issue #${issue_number}:"
+    echo "$cleaned" | while IFS= read -r line; do
+      log "  $line"
+    done
+  fi
 }
 
 # --- Heartbeat helper ---------------------------------------------------------
@@ -236,16 +238,44 @@ stop_heartbeat() {
   rm -f "$LOG_DIR/heartbeat-${issue_number}"
 }
 
+# --- Session ID management ----------------------------------------------------
+# Save session ID for an issue so we can resume later.
+# $1 — issue_number, $2 — session_id
+save_session_id() {
+  echo "$2" > "$LOG_DIR/.session-${1}"
+}
+
+# Load saved session ID for an issue (if any).
+# $1 — issue_number. Outputs session ID or empty string.
+load_session_id() {
+  local file="$LOG_DIR/.session-${1}"
+  if [ -f "$file" ]; then
+    cat "$file"
+  fi
+}
+
+# Clear saved session ID for an issue.
+# $1 — issue_number
+clear_session_id() {
+  rm -f "$LOG_DIR/.session-${1}"
+}
+
 # --- Worker function ----------------------------------------------------------
 run_worker() {
   local issue_number="$1"
   local issue_title="$2"
   local is_retry="${3:-false}"
+  local is_resume="${4:-false}"
   local log_file="$LOG_DIR/issue-${issue_number}.log"
 
-  log "Starting worker for issue #${issue_number}: ${issue_title}"
+  log "Starting worker for issue #${issue_number}: ${issue_title} (retry=$is_retry, resume=$is_resume)"
 
-  if [ "$is_retry" = "true" ]; then
+  if [ "$is_resume" = "true" ]; then
+    # Remove resume label
+    gh issue edit "$issue_number" --remove-label "$LABEL_RESUME" --add-label "$LABEL_WIP" 2>/dev/null || true
+    # Also remove blocked in case it was blocked before resume
+    gh issue edit "$issue_number" --remove-label "$LABEL_BLOCKED" 2>/dev/null || true
+  elif [ "$is_retry" = "true" ]; then
     # Remove interrupted label for retry
     gh issue edit "$issue_number" --remove-label "$LABEL_INTERRUPTED" --add-label "$LABEL_WIP" 2>/dev/null || true
   else
@@ -253,20 +283,58 @@ run_worker() {
     gh issue edit "$issue_number" --remove-label "$LABEL_READY" --add-label "$LABEL_WIP" 2>/dev/null || true
   fi
 
-  # Build the prompt (with retry context if applicable)
-  local retry_prefix=""
-  if [ "$is_retry" = "true" ]; then
-    retry_prefix="RETRY: Retrying interrupted issue #${issue_number}.
+  # Check if we can resume a previous session
+  local session_id=""
+  local worktree_path=""
+  local can_resume=false
 
-This issue was previously interrupted by an API rate limit. Check for an existing WIP branch:
-  git branch -r --list \"origin/issue-${issue_number}-*\"
-If a WIP branch exists, check it out and continue from where the previous attempt left off.
-
-"
+  if [ "$is_retry" = "true" ] || [ "$is_resume" = "true" ]; then
+    session_id=$(load_session_id "$issue_number")
+    worktree_path=$(find_issue_worktree "$issue_number")
+    if [ -n "$session_id" ] && [ -n "$worktree_path" ] && [ -d "$worktree_path" ]; then
+      can_resume=true
+      log "Resuming session $session_id in worktree $worktree_path"
+    else
+      log "No resumable session found (session_id=${session_id:-none}, worktree=${worktree_path:-none}), starting fresh"
+    fi
   fi
 
-  local prompt
-  prompt="$(cat <<EOF
+  # Record start time
+  local start_time
+  start_time=$(date +%s)
+
+  if [ "$can_resume" = "true" ]; then
+    # Resume the previous Claude session in the existing worktree
+    local resume_prompt
+    resume_prompt="Continue working on issue #${issue_number}. You were previously interrupted. Pick up where you left off and complete the implementation. If you already created a PR, verify it's ready. If not, continue with the TDD workflow."
+
+    (cd "$worktree_path" && claude -p "$resume_prompt" \
+      --agent "issue-worker" \
+      --resume "$session_id" \
+      --max-budget-usd "$MAX_BUDGET" \
+      --allowedTools "Agent,Bash,Edit,Glob,Grep,Read,Write,Skill" \
+      >> "$log_file" 2>&1) &
+    local claude_pid=$!
+  else
+    # Fresh start — generate a new session ID
+    session_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
+    save_session_id "$issue_number" "$session_id"
+
+    # Build the prompt (with retry context if applicable)
+    local retry_prefix=""
+    if [ "$is_retry" = "true" ] || [ "$is_resume" = "true" ]; then
+      retry_prefix="RETRY: Retrying issue #${issue_number}.
+
+This issue was previously attempted. Check for an existing WIP branch:
+  git branch -r --list \"origin/issue-${issue_number}-*\"
+If a WIP branch exists, check it out and continue from where the previous attempt left off.
+Also read the issue comments for context on what was already done.
+
+"
+    fi
+
+    local prompt
+    prompt="$(cat <<EOF
 You are the issue-worker agent. ${retry_prefix}Implement GitHub issue #${issue_number}.
 
 Read the full issue with: gh issue view ${issue_number} --json title,body,labels,assignees
@@ -278,19 +346,15 @@ If you get stuck, comment on the issue and add the label "claude-blocked".
 EOF
 )"
 
-  # Record start time
-  local start_time
-  start_time=$(date +%s)
-
-  # Run Claude in background so heartbeat can run concurrently
-  claude -p "$prompt" \
-    --agent "issue-worker" \
-    --worktree \
-    --max-turns "$MAX_TURNS" \
-    --max-budget-usd "$MAX_BUDGET" \
-    --allowedTools "Agent,Bash,Edit,Glob,Grep,Read,Write,Skill" \
-    > "$log_file" 2>&1 &
-  local claude_pid=$!
+    claude -p "$prompt" \
+      --agent "issue-worker" \
+      --worktree \
+      --session-id "$session_id" \
+      --max-budget-usd "$MAX_BUDGET" \
+      --allowedTools "Agent,Bash,Edit,Glob,Grep,Read,Write,Skill" \
+      > "$log_file" 2>&1 &
+    local claude_pid=$!
+  fi
 
   # Start heartbeat writer
   local hb_pid
@@ -331,10 +395,11 @@ EOF
   if [ $exit_code -eq 0 ] && [ -n "$pr_url" ]; then
     log "Worker for issue #${issue_number} completed successfully (PR: ${pr_url})"
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_DONE" 2>/dev/null || true
+    clear_session_id "$issue_number"
   else
     record_failure
     if [ $exit_code -eq 0 ] && [ -z "$pr_url" ]; then
-      log "Worker for issue #${issue_number} exited cleanly but no PR was created (likely hit max turns)"
+      log "Worker for issue #${issue_number} exited cleanly but no PR was created (likely hit budget limit)"
     else
       log "Worker for issue #${issue_number} failed (exit code: $exit_code)"
     fi
@@ -345,7 +410,7 @@ EOF
       gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
       local fail_reason="exit code $exit_code"
       if [ $exit_code -eq 0 ] && [ -z "$pr_url" ]; then
-        fail_reason="no PR created (possible max turns or budget limit)"
+        fail_reason="no PR created (possible budget limit). Add label '$LABEL_RESUME' to resume this session."
       fi
       gh issue comment "$issue_number" --body "Claude Code worker finished but did not complete: ${fail_reason}. Check logs at \`$log_file\` for details." 2>/dev/null || true
     fi
@@ -383,7 +448,6 @@ If parsing fails, comment on the issue and add the label "claude-blocked".
 EOF
 )" \
     --agent "plan-executor" \
-    --max-turns "$MAX_TURNS" \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Bash,Glob,Grep,Read" \
     > "$log_file" 2>&1 &
@@ -464,7 +528,6 @@ If you get stuck, comment on the issue and add the label "claude-blocked".
 EOF
 )" \
     --agent "bug-investigator" \
-    --max-turns "$MAX_TURNS" \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Bash,Glob,Grep,Read" \
     > "$log_file" 2>&1 &
@@ -531,8 +594,8 @@ active_worker_count() {
 }
 
 # --- Main loop ----------------------------------------------------------------
-log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, turns=$MAX_TURNS, timeout=${WALL_TIMEOUT}m)"
-log "Watching for issues labeled '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', '${LABEL_BUG_INVESTIGATE}', and '${LABEL_READY}'..."
+log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, timeout=${WALL_TIMEOUT}m)"
+log "Watching for issues labeled '${LABEL_RESUME}', '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', '${LABEL_BUG_INVESTIGATE}', and '${LABEL_READY}'..."
 log "PID file: ${DAEMON_PID_FILE} (send SIGUSR1 to toggle drain mode)"
 
 while true; do
@@ -628,7 +691,37 @@ while true; do
   available_slots=$(( MAX_WORKERS - active ))
 
   if [ "$available_slots" -gt 0 ]; then
-    # --- Priority 0: Retry interrupted issues ---
+    # --- Priority 0: Resume manually-triggered issues (claude-resume label) ---
+    resume_issues=$(gh issue list \
+      --state open \
+      --label "$LABEL_RESUME" \
+      --limit "$available_slots" \
+      --json number,title \
+      -q '.[] | @json' 2>/dev/null || echo "")
+
+    if [ -n "$resume_issues" ]; then
+      while IFS= read -r issue_json; do
+        number=$(echo "$issue_json" | jq -r '.number')
+        title=$(echo "$issue_json" | jq -r '.title')
+
+        wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
+        if [ "$wip_check" -gt 0 ]; then
+          log "Skipping resume issue #${number} (already WIP)"
+          continue
+        fi
+
+        run_worker "$number" "$title" "false" "true" &
+        record_worker "$!" "$number" "worker"
+        log "Spawned resume worker PID $! for issue #${number}"
+      done <<< "$resume_issues"
+
+      # Recalculate available slots
+      active=$(active_worker_count)
+      available_slots=$(( MAX_WORKERS - active ))
+    fi
+
+    # --- Priority 0.5: Retry interrupted issues (auto rate-limit retries) ---
+    if [ "$available_slots" -gt 0 ]; then
     interrupted_issues=$(gh issue list \
       --state open \
       --label "$LABEL_INTERRUPTED" \
@@ -647,7 +740,7 @@ while true; do
           continue
         fi
 
-        run_worker "$number" "$title" "true" &
+        run_worker "$number" "$title" "true" "false" &
         record_worker "$!" "$number" "worker"
         log "Spawned retry worker PID $! for interrupted issue #${number}"
       done <<< "$interrupted_issues"
@@ -655,6 +748,7 @@ while true; do
       # Recalculate available slots
       active=$(active_worker_count)
       available_slots=$(( MAX_WORKERS - active ))
+    fi
     fi
 
     # --- Priority 1: Approved plans (create work issues quickly) ---
