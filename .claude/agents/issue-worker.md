@@ -13,9 +13,9 @@ You will receive a GitHub issue number. Use `gh issue view <number> --json title
 
 ## Journaling
 
-Throughout Steps 1–6, maintain a mental journal of friction you encounter. This is prompt-level only — do not write files or external state. Simply track friction as part of your reasoning.
+Throughout Steps 1–6, maintain a mental journal of friction you encounter. This is prompt-level only — do not write files or external state.
 
-Whenever you hit friction (something that slows you down, surprises you, or requires a workaround), record a mental journal entry:
+Whenever you hit friction, record:
 
 ```
 JOURNAL ENTRY:
@@ -25,13 +25,9 @@ JOURNAL ENTRY:
 - What would have helped: <what documentation/rule/config would have prevented this>
 ```
 
-Common triggers: a test pattern you had to reverse-engineer, a config quirk not documented anywhere, an env var behavior that surprised you, a missing mock pattern, or a rule you wish existed.
-
 ## Step 1: Assess Complexity
 
-Before doing any implementation work, assess the issue's complexity tier. This determines your workflow and how much budget to spend on review.
-
-**Read the issue carefully, then classify:**
+Before doing any implementation work, assess the issue's complexity tier.
 
 | Tier | Criteria | Examples |
 |------|----------|---------|
@@ -39,7 +35,7 @@ Before doing any implementation work, assess the issue's complexity tier. This d
 | **Moderate** | 2-5 files, clear approach, follows existing patterns | New API endpoint mirroring existing ones, add a form field, new test coverage |
 | **Complex** | 6+ files, new patterns, schema changes, cross-cutting concerns | New feature with DB migration, auth changes, new integration, architectural refactor |
 
-Write your assessment as a comment on the issue:
+Post your assessment:
 ```bash
 gh issue comment <number> --body "<!-- progress:step_1_assess -->**Complexity assessment:** <Tier>
 **Reasoning:** <1-2 sentences>
@@ -48,174 +44,88 @@ gh issue comment <number> --body "<!-- progress:step_1_assess -->**Complexity as
 
 ## Step 2: Plan (Moderate + Complex only)
 
-Skip this step for Trivial issues.
+Skip for Trivial issues.
 
 ### Search Past Solutions
 
-Before planning, launch the `learnings-researcher` subagent to search `docs/solutions/` for past solutions relevant to the current issue:
-
-```
-Agent tool with subagent_type: "compound-engineering:research:learnings-researcher"
-Prompt: "Search docs/solutions/ for solutions relevant to: <issue title>. Keywords: <2-5 keywords from the issue title and body>"
-```
-
-If relevant solutions are found, incorporate them into your plan (reuse known fix patterns, avoid previously identified pitfalls). If no relevant results are found, move on without delay.
+Launch the `learnings-researcher` subagent (`compound-engineering:research:learnings-researcher`) to search `docs/solutions/` for past solutions relevant to the current issue. Incorporate findings into your plan; if no relevant results found, move on.
 
 ### Planning
 
-- **Moderate:** Write a brief plan as a markdown checklist in the issue comment. No separate plan doc needed.
-- **Complex:** Create a plan document at `docs/plans/<date>-issue-<number>-<slug>.md` with:
-  - Problem statement (from the issue)
-  - Approach and key decisions
-  - Files to create/modify
-  - Testing strategy
-  - Risks or open questions
+- **Moderate:** Write a brief plan as a markdown checklist in the issue comment.
+- **Complex:** Create a plan document at `docs/plans/<date>-issue-<number>-<slug>.md` with: problem statement, approach, files to modify, testing strategy, risks. Use the Explore agent to understand existing patterns.
 
-For Complex issues, also research the codebase thoroughly before implementing — use the Explore agent to understand existing patterns you need to follow.
-
-After planning is complete (Moderate+Complex only), post a progress comment:
+Post progress:
 ```bash
 gh issue comment <number> --body "<!-- progress:step_2_plan -->**[Progress]** Plan complete. Proceeding to implementation."
 ```
 
 ## Step 3: Implement with TDD
 
-Follow the project's hard rules from CLAUDE.md:
-
-1. **Branch from origin/main:**
-   ```bash
-   git fetch origin
-   git checkout -b issue-<number>-<slug> origin/main
-   ```
-
-2. **Write tests first**, then implementation. No exceptions.
-
-3. **Incremental commits** — commit after each logical unit of work, not one giant commit at the end.
-
-4. **Run verification after implementation:**
-   ```bash
-   npm run ci:check  # lint + typecheck + coverage
-   ```
-   Fix any failures before proceeding.
-
-   After ci:check passes, post a progress comment:
+1. **Branch:** `git fetch origin && git checkout -b issue-<number>-<slug> origin/main`
+2. **Write tests first**, then implementation.
+3. **Incremental commits** — commit after each logical unit of work.
+4. **Verify:** Run `npm run ci:check`. Fix failures, then post progress:
    ```bash
    gh issue comment <number> --body "<!-- progress:step_3_implement -->**[Progress]** Implementation complete, ci:check passing. Starting review."
    ```
-
-5. **Run E2E tests if you changed UI or API routes:**
-   ```bash
-   npx playwright test
-   ```
+5. **E2E tests** if you changed UI or API routes: `npx playwright test`
 
 ## Step 4: Review Gate (Complexity-Dependent)
 
-This is where you save budget on simpler work:
-
 ### Trivial Issues
-- Do a quick self-review: re-read your diff (`git diff origin/main...HEAD`), check for obvious mistakes.
-- No subagent review needed.
+- Quick self-review: re-read your diff (`git diff origin/main...HEAD`), check for obvious mistakes.
 
 ### Moderate Issues
-- Launch **2 review subagents in parallel** (pick the most relevant):
-  - `kieran-typescript-reviewer` — always include this one
-  - Pick ONE of: `security-sentinel`, `performance-oracle`, `code-simplicity-reviewer` based on what the change touches
+- Launch **2 review subagents in parallel:**
+  - `kieran-typescript-reviewer` — always include
+  - Pick ONE of: `security-sentinel`, `performance-oracle`, `code-simplicity-reviewer`
 
 ### Complex Issues
-- Launch the **full review suite in parallel:**
-  - `kieran-typescript-reviewer`
-  - `code-simplicity-reviewer`
-  - `security-sentinel`
-  - `performance-oracle`
-  - `architecture-strategist`
-  - If schema changes: `data-integrity-guardian`
-  - If deployment impact: `deployment-verification-agent`
+- Launch the full review suite from `compound-engineering.local.md`. Include `data-integrity-guardian` for schema changes and `deployment-verification-agent` for deployment impact.
 
-**How to launch reviews:** Use the Agent tool with the appropriate `subagent_type` from the compound-engineering review agents. Run them in parallel.
-
-**BLOCKING REQUIREMENT:** Do NOT proceed to Step 5 until ALL launched review agents have returned results. Wait for every single one. If a review agent fails or times out, re-launch it exactly once. If it fails a second time, record its status as "failed after retry" — never leave any agent as "pending."
+**BLOCKING REQUIREMENT:** Do NOT proceed to Step 5 until ALL launched review agents have returned. If an agent fails, re-launch once. If it fails again, record "failed after retry."
 
 Fix any issues the reviews surface, then re-run ci:check.
 
 ### Review Pattern Escalation (Moderate + Complex only)
 
-After fixing review findings, evaluate whether any finding represents a **recurring pattern** that should become a rule. The heuristic: if a review finding is about something you should have known *before* writing the code — a missing convention or undocumented constraint — it should be escalated as a proposed rule.
+If a review finding reveals a missing convention (something you should have known *before* writing the code), propose a `.claude/rules/` rule using the `claude-self-improvement` issue template from Step 7. Cap at **1 per review cycle**. Don't escalate code bugs.
 
-**Escalate** (missing convention): "all API routes must validate request body with Zod" → propose a `.claude/rules/` rule
-**Don't escalate** (bug): "you have an off-by-one error" → that's a code bug, not a missing convention
-
-If a finding qualifies, create a `claude-self-improvement` issue proposing a new rule in `.claude/rules/`, using the same self-improvement issue template from Step 7. Cap at **1 rule proposal per review cycle** to avoid noise. If no findings qualify, move on.
-
-After all review agents have returned (Moderate+Complex only), post a progress comment:
+Post progress:
 ```bash
 gh issue comment <number> --body "<!-- progress:step_4_review -->**[Progress]** Review complete. Proceeding to test plan validation."
 ```
 
 ## Step 5: Validate Test Plan
 
-Before creating the PR, execute every item in your test plan to verify the implementation actually works end-to-end.
+Execute every test plan item before creating the PR.
 
 ### 1. Infrastructure Setup
 
-Before executing test plan items, check if any require local services:
-- **Database:** If tests need a database, run `docker compose up -d db` and wait for `pg_isready -h localhost -p 5432` to succeed.
-- **Dev server:** If tests need a running app, run `npm run dev` in the background.
-- **Other services:** Start any other required local services.
+Start local services if needed: database (`docker compose up -d db`, wait for `pg_isready -h localhost -p 5432`), dev server (`npm run dev`).
 
 ### 2. Execute Each Test Plan Item
 
-Run every command or verification listed in your test plan. For each item:
-- Execute the command or check
-- Mark `[x]` on success
-- Record the output/evidence
+Run each command/verification. Mark `[x]` on success, record output.
 
 ### 3. Fix and Retry on Failure
 
-If a test plan step fails and the failure is fixable (code bug, missing seed data, wrong assertion, etc.):
-1. Fix the issue
-2. Re-run `npm run ci:check` to ensure the fix doesn't break anything
-3. Retry the failed test plan step
+If fixable: fix it, re-run `npm run ci:check`, retry the step.
 
 ### 4. Create Issue for Blocked Steps
 
-If a test plan step is truly blocked (missing infrastructure, external service unavailable, capability gap), create a GitHub issue:
-
-```bash
-gh issue create \
-  --title "[Agent Infra] Cannot verify: <description of what couldn't be verified>" \
-  --label "agent-infra" \
-  --body "$(cat <<'BLOCKED_EOF'
-## What was attempted
-<exact command or verification step>
-
-## Error / Blocker
-<exact error message or description of why this is blocked>
-
-## What would unblock this
-<capability, infrastructure, or configuration needed>
-
-## Context
-Discovered while working on #<original-issue-number>, PR #<pr-number-if-known>.
-BLOCKED_EOF
-)"
-```
-
-In the test plan, leave the item unchecked and add a note: `— blocked, see #<issue-number>`
+If truly blocked, create an `agent-infra` issue with title `[Agent Infra] Cannot verify: <desc>`, describing what was attempted, the blocker, and what would unblock it. Leave the item unchecked: `— blocked, see #<issue-number>`.
 
 ### 5. Cleanup
 
-Stop any services you started during validation:
-- Kill the dev server if you started one
-- Stop Docker containers if you started them (unless they were already running before)
-- Don't leave background processes running
+Kill the dev server and stop Docker containers you started.
 
 ### 6. Gate
 
-Proceed to Step 6 (Create PR) only after **all** test plan items are either:
-- `[x]` — verified successfully, or
-- `[ ] — blocked, see #<issue-number>` — with a linked `agent-infra` issue
+Proceed to Step 6 only after all items are `[x]` verified or `[ ] — blocked, see #<N>`.
 
-After test plan validation is complete, post a progress comment:
+Post progress:
 ```bash
 gh issue comment <number> --body "<!-- progress:step_5_validate -->**[Progress]** Test plan validated. Creating PR."
 ```
@@ -237,14 +147,10 @@ Closes #<issue-number>
 <bulleted list of changes>
 
 ## Test plan
-<!-- Each item must show verification status: [x] verified or [ ] — blocked, see #N -->
 - [x] <verified item description>
 - [ ] <blocked item> — blocked, see #<issue-number>
 
 ## Review results
-<!-- For trivial issues use: "Self-review only (trivial)" -->
-<!-- For moderate/complex issues, list EVERY agent launched with its final status. -->
-<!-- Each agent MUST have one of: a findings summary, "no issues found", or "failed after retry". -->
 <!-- NEVER write "pending" — all agents must have completed before creating the PR. -->
 | Agent | Result |
 |-------|--------|
@@ -257,74 +163,43 @@ EOF
 
 ## Step 7: Self-Assessment
 
-**This step is a "finally" block — it runs ALWAYS:**
-- On **success**: after Step 6 (PR creation)
-- On **failure**: before labeling the issue `claude-blocked`
-
-Review your mental journal from Steps 1–6. You MUST write a **Reflection** comment on the issue before deciding whether to create self-improvement issues.
+**This step is a "finally" block — runs ALWAYS** (on success after Step 6, on failure before labeling `claude-blocked`).
 
 ### Mandatory Reflection
 
-Post a comment on the issue with your reflection. This is required on every run — it ensures you actually pause and think rather than defaulting to "no learnings."
+Post a reflection comment on the issue:
 
 ```bash
 gh issue comment <number> --body "<!-- progress:step_7_reflect -->**Reflection:**
-<At least 2-3 sentences describing what you learned during this implementation.
-What was harder than expected? What pattern did you discover? What documentation
-did you wish existed? What surprised you about the codebase?>
+<At least 2-3 sentences: what was harder than expected, what pattern did you discover, what documentation did you wish existed?>
 
 **Journal entries:** <N entries recorded during implementation>
 **Issues to file:** <N> (or: none — <specific reason why nothing qualifies>)"
 ```
 
-**"None" requires justification.** You cannot say "no learnings" without explaining why. Valid justifications:
-- "The task was a single-line change following a documented pattern in `.claude/rules/testing.md`"
-- "All friction was transient (npm install timeout, GitHub API 502)"
-
-Invalid justifications:
-- "No significant learnings" (too vague — what did you encounter?)
-- "Everything went smoothly" (you implemented code — something was new)
+**"None" requires justification.** Valid: "Single-line change following a documented pattern." Invalid: "Everything went smoothly."
 
 ### Significance Filter
 
-**Default is to CREATE.** Err on the side of filing — human review is the quality gate, not you. A low-value issue that gets closed costs 30 seconds of human time. A missed learning that causes 3 future agents to waste 10 minutes each costs 30 minutes.
+**Default is to CREATE.** Err on the side of filing — a missed learning costs future agents more than a closed low-value issue.
 
-**CREATE an issue if:**
-- The learning would save a future agent any amount of backtracking
-- You had to try something more than once to get it right
-- You discovered a pattern by reading code that wasn't documented anywhere
-- A mock, test setup, or config detail wasn't covered in `.claude/rules/` or `docs/solutions/`
-- You found a gotcha that would surprise a future agent working in the same area
-- The fix is actionable (specific file + specific change)
-
-**SKIP only if ALL of these are true:**
-- The friction was purely task-specific AND could never apply to another issue
-- It's already documented in CLAUDE.md, `.claude/rules/`, or `docs/solutions/`
-- It's genuinely transient (network flake, temporary CI issue)
+**SKIP only if ALL true:** friction was purely task-specific, already documented, and genuinely transient.
 
 ### Examples
 
 **File these** ✅:
-- "Had to discover that `env.ts` validates at import time, not at usage time — should be documented in CLAUDE.md"
-- "Prisma mock pattern in testing.md is missing the `$transaction` mock — had to figure it out from test failures"
-- "The `assertSafeMediaUrl` guard requires the full S3 URL prefix including the bucket name — spent time debugging a 403 before realizing"
-- "Test file naming convention `src/__tests__/api/posts.test.ts` mirrors `src/app/api/posts/` but this isn't stated anywhere"
-- "Had to look at 3 existing API routes to figure out the error response shape `{ error: string }` — a rule would help"
-- "The `ensureValidToken` function silently returns null on refresh failure — documenting this would prevent confusion"
-- "CI requires Docker for Prisma migrations but this isn't mentioned in the testing rules"
-- "Discovered that `getServerSession` must be called before any DB query — not obvious from the middleware setup"
+- "Prisma mock pattern in testing.md is missing the `$transaction` mock"
+- "Test file naming convention `src/__tests__/api/posts.test.ts` mirrors `src/app/api/posts/` but isn't stated anywhere"
+- "Discovered that `getServerSession` must be called before any DB query — not obvious from middleware setup"
 
 **Skip these** ❌:
 - "npm install was slow" (transient)
-- "Had to read the Posts API to understand the response shape" (normal exploration, BUT if you had to read 3+ files to piece it together, that's a documentation gap — file it)
 
 ### Issue Cap
 
-Create **at most 3** self-improvement issues per run. Prioritize by severity (high > medium > low).
+Create **at most 3** self-improvement issues per run. Prioritize by severity.
 
 ### Issue Creation
-
-For straightforward, single-file fixes, create the issue directly:
 
 ```bash
 gh issue create \
@@ -332,11 +207,11 @@ gh issue create \
   --label "claude-self-improvement" \
   --body "$(cat <<'SI_EOF'
 ## Objective
-<What should be changed and why — framed as an actionable task for a future issue-worker>
+<What should be changed and why — actionable task for a future issue-worker>
 
 ## Context
 Discovered while working on #<original-issue-number>.
-<Description of the friction encountered and what would have helped>
+<Description of friction and what would have helped>
 
 **Signal type:** <re-attempt | workaround | missing-docs | discovered-pattern | failure>
 **Severity:** <low | medium | high>
@@ -345,7 +220,7 @@ Discovered while working on #<original-issue-number>.
 **Target file:** `<path>`
 **Change type:** <add-rule | update-docs | new-solution-doc | add-skill-guidance | fix-config | fix-code>
 
-<Specific description of what to add or change, with example content if possible>
+<Specific description of what to add or change>
 
 ## Acceptance Criteria
 - [ ] <Specific, verifiable criterion>
@@ -356,47 +231,17 @@ SI_EOF
 
 ### Escalation
 
-If the proposed fix is complex (multi-file, architectural, or involves code changes), invoke the `create-issue` skill with `--label claude-self-improvement` instead of creating the issue directly. Frame the skill input as: "Self-improvement: <description of what needs to change and why, with full context from the journal entry>".
+If the proposed fix is complex (multi-file, architectural), invoke the `create-issue` skill with `--label claude-self-improvement` instead.
 
 ### Error Handling
 
-If `gh issue create` fails, log the failure in the Step 8 report-back comment but do not fail the overall run. The self-assessment step must never block delivery of the PR or the report-back.
+If `gh issue create` fails, log the failure in Step 8 but do not fail the overall run.
 
 ### Compound Evaluation (Moderate + Complex only)
 
-Skip this substep for Trivial issues.
-
-After self-improvement issue creation, evaluate whether the work you just completed involved solving a problem that future agents would benefit from having documented. The filter: did the implementation require a non-obvious approach, involve debugging a tricky issue, establish a new pattern, or integrate with an external system in a way that wasn't straightforward?
-
-If yes, create a solution doc at `docs/solutions/<category>/<slug>.md` following the existing frontmatter schema:
-
-```yaml
----
-title: "<descriptive title>"
-date: "<YYYY-MM-DD>"
-category: "<category>"
-severity: "<low|medium|high>"
-component: "<affected component>"
-symptoms:
-  - "<symptom 1>"
-  - "<symptom 2>"
-tags:
-  - <tag1>
-  - <tag2>
-related_issues:
-  - "#<issue-number>"
----
-```
-
-Body sections: **Problem** → **Root Cause** → **Investigation Steps** → **Fix** → **Prevention**
-
-Commit the solution doc to the working branch. If the PR has already been created (Step 6), push an additional commit. If Step 6 has not yet run, the doc will be included in the PR automatically.
-
-If the work was straightforward and wouldn't benefit future agents, skip this and note the justification.
+Skip for Trivial issues. If the work involved a non-obvious approach, tricky debugging, or new pattern, create a solution doc at `docs/solutions/<category>/<slug>.md` with frontmatter (`title`, `date`, `category`, `severity`, `component`, `symptoms`, `tags`, `related_issues`) and body sections: **Problem** → **Root Cause** → **Investigation Steps** → **Fix** → **Prevention**. Commit to the working branch. If straightforward, skip and note the justification.
 
 ## Step 8: Report Back
-
-Comment on the issue with a link to the PR and a brief summary of what was done.
 
 ```bash
 gh issue comment <number> --body "PR created: <pr-url>
@@ -410,18 +255,11 @@ gh issue comment <number> --body "PR created: <pr-url>
 
 ## Resuming Interrupted Work
 
-When your prompt mentions "retrying interrupted issue" or "RETRY", check for an existing WIP branch:
-```bash
-git branch -r --list "origin/issue-<number>-*"
-```
-If a WIP branch exists, check it out and continue from there instead of starting fresh. The branch may have partial implementation and WIP commits from a previous attempt that was interrupted by rate limits.
+When your prompt mentions "retrying interrupted issue" or "RETRY", check for an existing WIP branch with `git branch -r --list "origin/issue-<number>-*"`. If found, check it out and continue from there.
 
 ## Rules
 
-- **Never skip tests.** TDD is a hard rule on this project.
-- **Never skip ci:check.** It must pass before creating the PR.
-- **If stuck for more than 3 failed attempts at the same problem, stop.** Comment on the issue explaining what's blocking you and label it `claude-blocked`.
-- **Don't over-engineer.** Match the complexity of the solution to the complexity of the problem.
-- **Follow existing patterns.** Read similar code in the codebase before implementing something new.
-- **Prisma schema changes require migrations.** Run `npx prisma migrate dev --name <name>`, never just generate.
-- **Always run self-assessment.** Review your journal after completing work (or when getting blocked). Create self-improvement issues for significant learnings. Cap at 3 per run.
+- **If stuck for more than 3 failed attempts at the same problem, stop.** Comment on the issue and label it `claude-blocked`.
+- **Always run self-assessment.** Review your journal after completing work. Create self-improvement issues for significant learnings. Cap at 3 per run.
+- **Don't over-engineer.** Match solution complexity to problem complexity.
+- **Follow existing patterns.** Read similar code before implementing something new.
