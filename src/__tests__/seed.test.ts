@@ -153,6 +153,9 @@ describe("seed-logic", () => {
     expect(createData.metricsComments).toEqual(expect.any(Number));
     expect(createData.metricsShares).toEqual(expect.any(Number));
     expect(createData.metricsUpdatedAt).toEqual(expect.any(Date));
+
+    // blotatoPostId should NOT be set on seed posts (avoid polluting metrics refresh)
+    expect(createData.blotatoPostId).toBeUndefined();
   });
 
   it("uses deterministic e2e- prefixed IDs for all new records", async () => {

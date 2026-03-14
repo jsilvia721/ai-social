@@ -35,6 +35,18 @@ export async function runBrainstormAgent(deadlineMs?: number): Promise<void> {
 
   const deadline = deadlineMs ?? Date.now() + DEFAULT_BUDGET_MS;
 
+  // Cleanup: close any sessions with invalid githubIssueNumber (guard against bad data)
+  await prisma.brainstormSession.updateMany({
+    where: {
+      status: "OPEN",
+      githubIssueNumber: { lte: 0 },
+    },
+    data: {
+      status: "CLOSED",
+      closedAt: new Date(),
+    },
+  });
+
   // Find open session (at most one expected)
   const session = await prisma.brainstormSession.findFirst({
     where: { status: "OPEN" },

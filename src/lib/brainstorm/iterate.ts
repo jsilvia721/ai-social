@@ -16,6 +16,7 @@ import {
   buildIterationPrompt,
 } from "./prompts";
 import type { BrainstormSession } from "@prisma/client";
+import { reportServerError } from "@/lib/server-error-reporter";
 
 const client = new Anthropic();
 
@@ -80,6 +81,14 @@ const refineTool: Anthropic.Tool = {
  * Each comment is processed sequentially in chronological order.
  */
 export async function iterateBrainstorm(session: BrainstormSession): Promise<void> {
+  if (session.githubIssueNumber <= 0) {
+    await reportServerError(
+      `Invalid githubIssueNumber (${session.githubIssueNumber}) in iterateBrainstorm — skipping`,
+      { metadata: { sessionId: session.id, githubIssueNumber: session.githubIssueNumber } },
+    );
+    return;
+  }
+
   const comments = await github.listComments(
     session.githubIssueNumber,
     session.lastProcessedCommentId ?? undefined,
@@ -98,6 +107,9 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
 
   if (humanComments.length === 0) return;
 
+  // Fetch vision doc once before the loop (same pattern as generate.ts)
+  const visionDoc = await github.getRepoFile("docs/brainstorm-context.md");
+
   // Fetch body once, then carry forward locally after each update
   let currentBody = await github.getIssueBody(session.githubIssueNumber);
 
@@ -106,8 +118,8 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
     // Parse current checked state to preserve it
     const currentItems = parseBrainstormIssue(currentBody);
 
-    // 2. Call Claude with iteration prompt
-    const prompt = buildIterationPrompt(currentBody, comment.body);
+    // Call Claude with iteration prompt
+    const prompt = buildIterationPrompt(currentBody, comment.body, visionDoc);
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -125,17 +137,17 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
 
     const output = BrainstormOutputSchema.parse(toolUse.input);
 
-    // 3. Re-render issue body, preserving checked state from current body
+    // Re-render issue body, preserving checked state from current body
     const checkedTitles = new Set(
       currentItems.filter((i) => i.checked).map((i) => i.title),
     );
     const updatedBody = renderBrainstormIssue(output, checkedTitles);
 
-    // 4. Update issue body and carry forward for next iteration
+    // Update issue body and carry forward for next iteration
     await github.updateIssueBody(session.githubIssueNumber, updatedBody);
     currentBody = updatedBody;
 
-    // 5. Post reply comment — catch errors so lastProcessedCommentId still advances
+    // Post reply comment — catch errors so lastProcessedCommentId still advances
     try {
       await github.createComment(
         session.githubIssueNumber,
@@ -148,7 +160,7 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
       );
     }
 
-    // 6. Update lastProcessedCommentId in DB
+    // Update lastProcessedCommentId in DB
     await prisma.brainstormSession.update({
       where: { id: session.id },
       data: { lastProcessedCommentId: comment.id },

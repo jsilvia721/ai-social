@@ -126,7 +126,9 @@ export async function generateBrainstorm(): Promise<{
 
   // Guard: reject invalid issue numbers before persisting (defense-in-depth)
   if (!issue.number || issue.number <= 0) {
-    throw new Error("GitHub issue creation returned invalid issue number");
+    throw new Error(
+      `GitHub issue creation returned invalid issue number: ${issue.number}`,
+    );
   }
 
   // 6. Create DB record

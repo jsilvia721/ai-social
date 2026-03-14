@@ -85,6 +85,13 @@ function isHttpError(error: unknown): boolean {
 
 // ── Public helpers ──────────────────────────────────────────────────────────
 
+/**
+ * Creates a GitHub issue. Unlike read-only helpers, this throws on failure
+ * because the returned issue number is stored in the DB — a silent fallback
+ * would corrupt downstream state.
+ *
+ * @throws {Error} When GitHub token/repo is not configured or the API call fails.
+ */
 export async function createIssue(
   title: string,
   body: string,

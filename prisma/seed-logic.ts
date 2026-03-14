@@ -101,7 +101,6 @@ export async function seedDatabase(prisma: PrismaClient): Promise<void> {
       status: "PUBLISHED",
       scheduledAt: yesterday,
       publishedAt: yesterday,
-      blotatoPostId: "blotato-post-abc123",
       mediaUrls: [],
       metricsImpressions: 1250,
       metricsLikes: 87,

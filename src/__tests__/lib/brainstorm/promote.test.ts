@@ -43,6 +43,12 @@ jest.mock("@/lib/mocks/config", () => ({
   shouldMockExternalApis: jest.fn().mockReturnValue(false),
 }));
 
+// Mock error reporter
+const mockReportServerError = jest.fn();
+jest.mock("@/lib/server-error-reporter", () => ({
+  reportServerError: (...args: unknown[]) => mockReportServerError(...args),
+}));
+
 import { promoteBrainstormItems } from "@/lib/brainstorm/promote";
 
 const makeSession = (overrides = {}) => ({
@@ -141,6 +147,30 @@ describe("promoteBrainstormItems", () => {
     mockListComments.mockResolvedValue([]);
   });
 
+  it("returns early with error report when githubIssueNumber <= 0", async () => {
+    const session = makeSession({ githubIssueNumber: 0 });
+
+    await promoteBrainstormItems(session);
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid githubIssueNumber"),
+      expect.objectContaining({ metadata: expect.objectContaining({ sessionId: "session-1", githubIssueNumber: 0 }) }),
+    );
+    expect(mockGetIssue).not.toHaveBeenCalled();
+  });
+
+  it("returns early with error report when githubIssueNumber is negative", async () => {
+    const session = makeSession({ githubIssueNumber: -1 });
+
+    await promoteBrainstormItems(session);
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid githubIssueNumber"),
+      expect.objectContaining({ metadata: expect.objectContaining({ sessionId: "session-1", githubIssueNumber: -1 }) }),
+    );
+    expect(mockGetIssue).not.toHaveBeenCalled();
+  });
+
   it("does nothing when no items are checked", async () => {
     const session = makeSession();
     await promoteBrainstormItems(session);
@@ -211,6 +241,48 @@ describe("promoteBrainstormItems", () => {
     await promoteBrainstormItems(session);
 
     expect(mockCreateIssue).not.toHaveBeenCalled();
+  });
+
+  it("continues promoting remaining items when one createIssue fails", async () => {
+    const bodyBothChecked = `## 💡 Ideas
+
+- [x] **1. Feature One**
+  **Rationale:** Important for growth.
+  **Scope:** Small
+  **Category:** Intelligence
+  **Vision Alignment:** Core to vision.
+
+- [x] **2. Feature Two**
+  **Rationale:** Improves UX.
+  **Scope:** Medium
+  **Category:** UX
+  **Vision Alignment:** User experience.`;
+    setIssue(bodyBothChecked);
+
+    // First call fails, second succeeds
+    mockCreateIssue
+      .mockRejectedValueOnce(new Error("API rate limit exceeded"))
+      .mockResolvedValueOnce({
+        number: 100,
+        title: "Plan: Feature Two",
+        html_url: "https://github.com/test/issues/100",
+      });
+
+    const session = makeSession();
+    await promoteBrainstormItems(session);
+
+    // Both items attempted
+    expect(mockCreateIssue).toHaveBeenCalledTimes(2);
+    // Only the successful one is counted
+    expect(mockSessionUpdate).toHaveBeenCalledWith({
+      where: { id: "session-1" },
+      data: { approvedCount: { increment: 1 } },
+    });
+    // Body updated with the successful plan link only
+    expect(mockUpdateIssueBody).toHaveBeenCalled();
+    const updatedBody = mockUpdateIssueBody.mock.calls[0][1] as string;
+    expect(updatedBody).toContain("→ [Plan #100]");
+    expect(updatedBody).not.toContain("→ [Plan #99]");
   });
 
   describe("auto-close", () => {
