@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trash2, Loader2, Calendar, CheckCircle2, XCircle, FileText, Pencil, RefreshCw, Heart, MessageCircle, Repeat2, Eye, Bookmark, TrendingUp, Copy } from "lucide-react";
 import type { PostStatus, Platform } from "@/types";
+import { formatPostError } from "./formatPostError";
 
 const STATUS_CONFIG: Record<PostStatus, { label: string; icon: React.ElementType; className: string }> = {
   DRAFT: { label: "Draft", icon: FileText, className: "bg-zinc-700 text-zinc-300 border-zinc-600" },
@@ -164,22 +165,22 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
   const canRetry = post.status === "FAILED" && !!onRetry;
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4">
-      <div className="flex items-start gap-3 sm:gap-4">
+    <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-5 sm:p-4">
+      <div className="flex items-start gap-4">
         {/* Platform icon */}
         <div className={`mt-0.5 shrink-0 ${platformColor}`}>
-          <PlatformIcon className="h-5 w-5" />
+          <PlatformIcon className="h-6 w-6 sm:h-5 sm:w-5" />
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-w-0 space-y-2">
-          <p className="text-sm text-zinc-200 line-clamp-2">{post.content}</p>
+        <div className="flex-1 min-w-0 space-y-2.5 sm:space-y-2">
+          <p className="text-base sm:text-sm text-zinc-200 line-clamp-2 leading-relaxed sm:leading-normal">{post.content}</p>
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`text-xs font-medium ${platformColor}`}>
+            <span className={`text-sm sm:text-xs font-medium ${platformColor}`}>
               @{post.socialAccount.username}
             </span>
             {post.scheduledAt && (
-              <span className="text-xs text-zinc-500">
+              <span className="text-sm sm:text-xs text-zinc-500">
                 · {new Date(post.scheduledAt).toLocaleDateString(undefined, {
                   month: "short",
                   day: "numeric",
@@ -191,7 +192,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
           </div>
           {post.status === "FAILED" && post.errorMessage && (
             <p className="text-xs text-red-400 truncate" title={post.errorMessage}>
-              {post.errorMessage}
+              {formatPostError(post.errorMessage)}
             </p>
           )}
           {post.status === "PUBLISHED" && (
@@ -223,12 +224,12 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
           <StatusIcon className="h-3 w-3" />
           {statusConfig.label}
         </Badge>
-        <div className="flex items-center gap-1 ml-auto">
+        <div className="flex items-center gap-2 sm:gap-1 ml-auto">
           {canEdit && (
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-zinc-600 hover:text-violet-400 hover:bg-violet-950/50"
+              className="h-10 w-10 sm:h-8 sm:w-8 text-zinc-600 hover:text-violet-400 hover:bg-violet-950/50"
               aria-label="Edit post"
               asChild
             >
@@ -241,7 +242,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-zinc-600 hover:text-violet-400 hover:bg-violet-950/50"
+            className="h-10 w-10 sm:h-8 sm:w-8 text-zinc-600 hover:text-violet-400 hover:bg-violet-950/50"
             onClick={handleRepurpose}
             disabled={isBusy}
             aria-label="Repurpose to all platforms"
@@ -258,7 +259,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-zinc-600 hover:text-amber-400 hover:bg-amber-950/50"
+              className="h-10 w-10 sm:h-8 sm:w-8 text-zinc-600 hover:text-amber-400 hover:bg-amber-950/50"
               onClick={handleRetry}
               disabled={isBusy}
               aria-label="Retry post"
@@ -274,7 +275,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-zinc-600 hover:text-red-400 hover:bg-red-950/50"
+            className="h-10 w-10 sm:h-8 sm:w-8 text-zinc-600 hover:text-red-400 hover:bg-red-950/50"
             onClick={handleDelete}
             disabled={isBusy}
             aria-label="Delete post"
