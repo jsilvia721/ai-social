@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback } from "react";
 import { ReviewCard } from "@/components/review/ReviewCard";
 import type { ReviewPost } from "@/components/review/ReviewCard";
 import { FileCheck } from "lucide-react";
@@ -11,17 +10,27 @@ interface Props {
 }
 
 export function ReviewQueueClient({ initialPosts }: Props) {
-  const router = useRouter();
+  const [posts, setPosts] = useState<ReviewPost[]>(initialPosts);
+
+  const pollPosts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/review/posts");
+      if (res.ok) {
+        const data = await res.json();
+        setPosts(data.posts);
+      }
+    } catch {
+      // Silently ignore polling failures
+    }
+  }, []);
 
   // Poll for changes every 30s (catches auto-approvals)
   useEffect(() => {
-    const id = setInterval(() => {
-      router.refresh();
-    }, 30_000);
+    const id = setInterval(pollPosts, 30_000);
     return () => clearInterval(id);
-  }, [router]);
+  }, [pollPosts]);
 
-  if (initialPosts.length === 0) {
+  if (posts.length === 0) {
     return (
       <div className="text-center py-16">
         <FileCheck className="mx-auto h-12 w-12 text-zinc-600 mb-4" />
@@ -39,12 +48,12 @@ export function ReviewQueueClient({ initialPosts }: Props) {
         <div>
           <h1 className="text-2xl font-bold text-zinc-50">Review Queue</h1>
           <p className="text-sm text-zinc-400 mt-1">
-            {initialPosts.length} post{initialPosts.length !== 1 ? "s" : ""} awaiting review
+            {posts.length} post{posts.length !== 1 ? "s" : ""} awaiting review
           </p>
         </div>
       </div>
       <div className="space-y-4">
-        {initialPosts.map((post) => (
+        {posts.map((post) => (
           <ReviewCard key={post.id} post={post} />
         ))}
       </div>
