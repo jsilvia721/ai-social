@@ -55,5 +55,7 @@ Auth bypassed via `PLAYWRIGHT_E2E=true` env var -> `/api/test/session` endpoint.
 ## Env Validation
 `src/env.ts` runs synchronous Zod parse at import time. Required vars: DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, GOOGLE_CLIENT_ID/SECRET, ANTHROPIC_API_KEY, BLOTATO_API_KEY, ALLOWED_EMAILS. Optional: AWS_S3_BUCKET, AWS_S3_PUBLIC_URL (injected by SST), SES_FROM_EMAIL, ADMIN_EMAILS.
 
+`npm run build` fails if any required env var from `src/env.ts` is missing (eager validation). `npm run dev` uses lazy loading — missing vars only fail when the importing route is hit.
+
 ## Documented Failures
 See `docs/solutions/deployment-failures/staging-deploy-failures.md` for analysis of past staging deploy failures and prevention measures.
