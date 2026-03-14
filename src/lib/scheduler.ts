@@ -288,7 +288,8 @@ export async function runMetricsRefresh(): Promise<{ processed: number }> {
           // Swallow — DB update must not crash the batch
         }
 
-        // Collect error for batched reporting
+        // Collect error for batched reporting.
+        // Safe: all awaits have completed before this synchronous Map mutation.
         const key = normalizeMessage(errorMessage);
         const bucket = errorBuckets.get(key);
         if (bucket) {
