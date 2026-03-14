@@ -83,8 +83,8 @@ function fmt(n: number | null | undefined): string {
 
 function MetricPill({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
   return (
-    <span className="flex items-center gap-1 text-xs text-zinc-400" title={label}>
-      <Icon className="h-3.5 w-3.5" />
+    <span className="flex items-center gap-1.5 sm:gap-1 text-sm sm:text-xs text-zinc-400" title={label}>
+      <Icon className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
       {value}
     </span>
   );
@@ -173,7 +173,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
 
         {/* Content */}
         <div className="flex-1 min-w-0 space-y-2.5 sm:space-y-2">
-          <p className="text-base sm:text-sm text-zinc-200 line-clamp-2 leading-relaxed sm:leading-normal">{post.content}</p>
+          <p className="text-base sm:text-sm text-zinc-200 line-clamp-3 sm:line-clamp-2 leading-relaxed sm:leading-normal">{post.content}</p>
           <div className="flex flex-wrap items-center gap-2">
             <span className={`text-sm sm:text-xs font-medium ${platformColor}`}>
               @{post.socialAccount.username}
@@ -195,7 +195,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
             </p>
           )}
           {post.status === "PUBLISHED" && (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-zinc-700/50">
+            <div className="flex flex-wrap gap-x-4 gap-y-2 sm:gap-y-1 pt-2 sm:pt-1 border-t border-zinc-700/50">
               <MetricPill icon={Heart}          label="Likes"       value={fmt(post.metricsLikes)} />
               <MetricPill icon={MessageCircle}  label="Comments"    value={fmt(post.metricsComments)} />
               <MetricPill icon={Repeat2}        label="Shares"      value={fmt(post.metricsShares)} />
@@ -218,9 +218,9 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
       </div>
 
       {/* Actions - below content on mobile, inline on desktop */}
-      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-zinc-700/50 sm:mt-0 sm:pt-0 sm:border-t-0 sm:justify-end">
-        <Badge variant="outline" className={`gap-1 sm:hidden ${statusConfig.className}`}>
-          <StatusIcon className="h-3 w-3" />
+      <div className="flex items-center gap-2 mt-4 pt-3 border-t border-zinc-700/50 sm:mt-0 sm:pt-0 sm:border-t-0 sm:justify-end">
+        <Badge variant="outline" className={`gap-1 text-xs sm:hidden ${statusConfig.className}`}>
+          <StatusIcon className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
           {statusConfig.label}
         </Badge>
         <div className="flex items-center gap-2 sm:gap-1 ml-auto">
@@ -233,7 +233,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
               asChild
             >
               <Link href={`/dashboard/posts/${post.id}/edit`}>
-                <Pencil className="h-4 w-4" />
+                <Pencil className="h-5 w-5 sm:h-4 sm:w-4" />
               </Link>
             </Button>
           )}
@@ -248,9 +248,9 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
             title="Repurpose to all platforms"
           >
             {activeOp === "repurposing" ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-5 w-5 sm:h-4 sm:w-4 animate-spin" />
             ) : (
-              <Copy className="h-4 w-4" />
+              <Copy className="h-5 w-5 sm:h-4 sm:w-4" />
             )}
           </Button>
 
@@ -264,9 +264,9 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
               aria-label="Retry post"
             >
               {activeOp === "retrying" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-5 w-5 sm:h-4 sm:w-4 animate-spin" />
               ) : (
-                <RefreshCw className="h-4 w-4" />
+                <RefreshCw className="h-5 w-5 sm:h-4 sm:w-4" />
               )}
             </Button>
           )}
@@ -280,9 +280,9 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
             aria-label="Delete post"
           >
             {activeOp === "deleting" ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-5 w-5 sm:h-4 sm:w-4 animate-spin" />
             ) : (
-              <Trash2 className="h-4 w-4" />
+              <Trash2 className="h-5 w-5 sm:h-4 sm:w-4" />
             )}
           </Button>
         </div>
