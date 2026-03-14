@@ -6,6 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, RefreshCw, ExternalLink, AlertCircle } from "lucide-react";
 import type { Platform } from "@/types";
+import { friendlyErrorMessage } from "@/lib/error-messages";
 import { PLATFORM_STYLES } from "./platform-utils";
 import { PLATFORM_ICONS } from "./platform-icons";
 
@@ -41,7 +42,7 @@ export function BlotatoSyncSection({ onImportComplete }: BlotatoSyncSectionProps
       setAvailable(data.accounts);
       setSelected(new Set());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not fetch available accounts from Blotato");
+      setError(friendlyErrorMessage(err instanceof Error ? err.message : "Could not fetch available accounts from Blotato"));
     } finally {
       setLoading(false);
     }
@@ -87,7 +88,7 @@ export function BlotatoSyncSection({ onImportComplete }: BlotatoSyncSectionProps
       onImportComplete();
       await fetchAvailable();
     } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Failed to import accounts");
+      setImportError(friendlyErrorMessage(err instanceof Error ? err.message : "Failed to import accounts"));
     } finally {
       setImporting(false);
     }
