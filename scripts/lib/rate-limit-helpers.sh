@@ -53,11 +53,12 @@ parse_reset_time() {
   fi
 
   # Parse time and timezone, compute seconds-until-reset, and format display
-  # all in one python3 call to avoid duplicated bash parsing
-  python3 -c "
-import datetime, zoneinfo, re, sys
+  # all in one python3 call to avoid duplicated bash parsing.
+  # Pass reset_line via env var (not string interpolation) to prevent injection.
+  RESET_LINE="$reset_line" python3 -c "
+import datetime, zoneinfo, re, sys, os
 try:
-    line = '''$reset_line'''
+    line = os.environ['RESET_LINE']
     m = re.search(r'resets\s+(\d{1,2}(?::\d{2})?)\s*(am|pm)\s*\(([^)]+)\)', line, re.IGNORECASE)
     if not m:
         print('0')
