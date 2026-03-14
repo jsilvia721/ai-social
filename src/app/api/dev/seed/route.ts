@@ -301,10 +301,6 @@ async function seedPostsData(businessId: string) {
         scheduledAt,
         publishedAt,
         errorMessage: template.errorMessage,
-        blotatoPostId:
-          template.status === "PUBLISHED"
-            ? `seed-blotato-post-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-            : undefined,
         metricsLikes: template.metrics?.likes,
         metricsComments: template.metrics?.comments,
         metricsShares: template.metrics?.shares,
