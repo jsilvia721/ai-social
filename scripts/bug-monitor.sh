@@ -96,6 +96,7 @@ touch "$COOLDOWN_FILE"
 
 cleanup() {
   log "Shutting down..."
+  cleanup_cycle_dedup 2>/dev/null || true
   rm -f "$PID_FILE"
   exit 0
 }
@@ -535,6 +536,13 @@ process_error() {
   local source_type="${10:-CLOUDWATCH}"
   local existing_issue_number="${11:-}"
   local environment="${12:-}"
+
+  # Validate fingerprint early — empty fp would cause grep -qF "" to match
+  # everything, silently deduping all subsequent errors in the cycle.
+  if [ -z "$fp" ]; then
+    log "Warning: empty fingerprint in process_error, generating fallback"
+    fp=$(generate_fingerprint "$source" "$msg")
+  fi
 
   # Environment-scoped cooldown key
   local cooldown_key="$fp"
