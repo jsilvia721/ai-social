@@ -21,6 +21,12 @@ jest.mock("@aws-sdk/client-ses", () => ({
   SendEmailCommand: jest.fn(),
 }));
 
+// Mock error reporter
+const mockReportServerError = jest.fn().mockResolvedValue(undefined);
+jest.mock("@/lib/server-error-reporter", () => ({
+  reportServerError: (...args: unknown[]) => mockReportServerError(...args),
+}));
+
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 
@@ -29,6 +35,7 @@ import { runBriefGeneration } from "@/lib/briefs";
 beforeEach(() => {
   resetPrismaMock();
   anthropicCreate.mockReset();
+  mockReportServerError.mockReset().mockResolvedValue(undefined);
   jest.clearAllMocks();
 });
 
@@ -188,6 +195,30 @@ describe("runBriefGeneration", () => {
     const result = await runBriefGeneration(Date.now() + 120_000);
 
     expect(result).toEqual({ processed: 1, briefsCreated: 1 });
+  });
+
+  it("calls reportServerError when brief generation fails for a workspace", async () => {
+    prismaMock.business.findMany.mockResolvedValue([mockWorkspace] as any);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.researchSummary.findFirst.mockResolvedValue(null);
+    prismaMock.post.findMany.mockResolvedValue([]);
+
+    anthropicCreate.mockRejectedValue(new Error("Claude overloaded"));
+
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+    await runBriefGeneration(Date.now() + 60_000);
+    consoleSpy.mockRestore();
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      expect.stringContaining("biz-1"),
+      expect.objectContaining({
+        url: "cron/briefs",
+        metadata: expect.objectContaining({
+          workspaceId: "biz-1",
+          source: "brief-generation",
+        }),
+      })
+    );
   });
 
   it("uses default cadence when postingCadence is null", async () => {

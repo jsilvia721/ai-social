@@ -10,6 +10,7 @@ import Parser from "rss-parser";
 import { prisma } from "@/lib/db";
 import { env } from "@/env";
 import { synthesizeResearch } from "@/lib/ai/research";
+import { reportServerError } from "@/lib/server-error-reporter";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
 import {
   mockFetchRssFeeds,
@@ -311,6 +312,13 @@ export async function runResearchPipeline(
       processed++;
     } catch (err) {
       console.error(`Research pipeline failed for workspace ${workspace.id}:`, err);
+      await reportServerError(
+        `Research pipeline failed for workspace ${workspace.id}: ${err instanceof Error ? err.message : String(err)}`,
+        {
+          url: "cron/research",
+          metadata: { workspaceId: workspace.id, source: "research-pipeline" },
+        }
+      ).catch(() => {});
       // Continue with next workspace
     }
   }

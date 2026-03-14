@@ -4,6 +4,12 @@ jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/blotato/publish");
 jest.mock("@aws-sdk/client-ses");
 
+// Mock error reporter
+const mockReportServerError = jest.fn().mockResolvedValue(undefined);
+jest.mock("@/lib/server-error-reporter", () => ({
+  reportServerError: (...args: unknown[]) => mockReportServerError(...args),
+}));
+
 import { runScheduler } from "@/lib/scheduler";
 import { publishPost } from "@/lib/blotato/publish";
 
@@ -11,6 +17,7 @@ const mockPublishPost = publishPost as jest.MockedFunction<typeof publishPost>;
 
 beforeEach(() => {
   resetPrismaMock();
+  mockReportServerError.mockReset().mockResolvedValue(undefined);
   // Default: no stuck posts, no due posts
   prismaMock.post.updateMany.mockResolvedValue({ count: 0 });
   prismaMock.post.findMany.mockResolvedValue([]);
@@ -73,5 +80,26 @@ describe("autoApproveExpiredReviews", () => {
     const consoleSpy = jest.spyOn(console, "error").mockImplementation();
     await expect(runScheduler()).resolves.not.toThrow();
     consoleSpy.mockRestore();
+  });
+
+  it("calls reportServerError when auto-approval throws", async () => {
+    prismaMock.post.updateMany
+      .mockResolvedValueOnce({ count: 0 }) // stuck recovery
+      .mockRejectedValueOnce(new Error("Auto-approve DB error")) // auto-approve throws
+      .mockResolvedValue({ count: 0 }); // any subsequent calls
+
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+    await runScheduler();
+    consoleSpy.mockRestore();
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      expect.stringContaining("Auto-approval failed"),
+      expect.objectContaining({
+        url: "cron/auto-approval",
+        metadata: expect.objectContaining({
+          source: "auto-approval",
+        }),
+      })
+    );
   });
 });

@@ -180,6 +180,13 @@ export async function runScheduler(): Promise<{ processed: number }> {
   } catch (err) {
     // Must NOT prevent publisher from running
     console.error("[scheduler] Auto-approval failed (non-fatal):", err);
+    await reportServerError(
+      `Auto-approval failed: ${err instanceof Error ? err.message : String(err)}`,
+      {
+        url: "cron/auto-approval",
+        metadata: { source: "auto-approval" },
+      }
+    ).catch(() => {});
   }
 
   const now = new Date();

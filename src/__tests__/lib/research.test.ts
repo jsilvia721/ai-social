@@ -25,6 +25,12 @@ jest.mock("rss-parser", () => {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { _mockParseURL: rssMockParseURL } = require("rss-parser");
 
+// Mock error reporter
+const mockReportServerError = jest.fn().mockResolvedValue(undefined);
+jest.mock("@/lib/server-error-reporter", () => ({
+  reportServerError: (...args: unknown[]) => mockReportServerError(...args),
+}));
+
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 
@@ -35,6 +41,7 @@ beforeEach(() => {
   resetPrismaMock();
   anthropicCreate.mockReset();
   rssMockParseURL.mockReset();
+  mockReportServerError.mockReset().mockResolvedValue(undefined);
   jest.restoreAllMocks();
 });
 
@@ -348,6 +355,38 @@ describe("runResearchPipeline", () => {
     const result = await runResearchPipeline(Date.now() + 60_000);
 
     expect(result).toEqual({ processed: 0 });
+  });
+
+  it("calls reportServerError when research pipeline fails for a workspace", async () => {
+    prismaMock.business.findMany.mockResolvedValue([mockWorkspace] as any);
+
+    rssMockParseURL.mockResolvedValue({
+      items: [
+        { title: "Article 1", link: "https://example.com/1", contentSnippet: "Snippet 1" },
+      ],
+    });
+
+    anthropicCreate.mockResolvedValue({
+      content: [{ type: "tool_use", name: "synthesize_themes", input: validSynthesis }],
+    });
+
+    // DB create fails
+    prismaMock.researchSummary.create.mockRejectedValue(new Error("DB write failed"));
+
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+    await runResearchPipeline(Date.now() + 60_000);
+    consoleSpy.mockRestore();
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      expect.stringContaining("biz-1"),
+      expect.objectContaining({
+        url: "cron/research",
+        metadata: expect.objectContaining({
+          workspaceId: "biz-1",
+          source: "research-pipeline",
+        }),
+      })
+    );
   });
 
   it("sanitizes HTML from RSS content", async () => {
