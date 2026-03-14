@@ -50,6 +50,19 @@ gh issue comment <number> --body "<!-- progress:step_1_assess -->**Complexity as
 
 Skip this step for Trivial issues.
 
+### Search Past Solutions
+
+Before planning, launch the `learnings-researcher` subagent to search `docs/solutions/` for past solutions relevant to the current issue:
+
+```
+Agent tool with subagent_type: "compound-engineering:research:learnings-researcher"
+Prompt: "Search docs/solutions/ for solutions relevant to: <issue title>. Keywords: <2-5 keywords from the issue title and body>"
+```
+
+If relevant solutions are found, incorporate them into your plan (reuse known fix patterns, avoid previously identified pitfalls). If no relevant results are found, move on without delay.
+
+### Planning
+
 - **Moderate:** Write a brief plan as a markdown checklist in the issue comment. No separate plan doc needed.
 - **Complex:** Create a plan document at `docs/plans/<date>-issue-<number>-<slug>.md` with:
   - Problem statement (from the issue)
@@ -123,6 +136,15 @@ This is where you save budget on simpler work:
 **BLOCKING REQUIREMENT:** Do NOT proceed to Step 5 until ALL launched review agents have returned results. Wait for every single one. If a review agent fails or times out, re-launch it exactly once. If it fails a second time, record its status as "failed after retry" — never leave any agent as "pending."
 
 Fix any issues the reviews surface, then re-run ci:check.
+
+### Review Pattern Escalation (Moderate + Complex only)
+
+After fixing review findings, evaluate whether any finding represents a **recurring pattern** that should become a rule. The heuristic: if a review finding is about something you should have known *before* writing the code — a missing convention or undocumented constraint — it should be escalated as a proposed rule.
+
+**Escalate** (missing convention): "all API routes must validate request body with Zod" → propose a `.claude/rules/` rule
+**Don't escalate** (bug): "you have an off-by-one error" → that's a code bug, not a missing convention
+
+If a finding qualifies, create a `claude-self-improvement` issue proposing a new rule in `.claude/rules/`, using the same self-improvement issue template from Step 7. Cap at **1 rule proposal per review cycle** to avoid noise. If no findings qualify, move on.
 
 After all review agents have returned (Moderate+Complex only), post a progress comment:
 ```bash
@@ -340,6 +362,38 @@ If the proposed fix is complex (multi-file, architectural, or involves code chan
 
 If `gh issue create` fails, log the failure in the Step 8 report-back comment but do not fail the overall run. The self-assessment step must never block delivery of the PR or the report-back.
 
+### Compound Evaluation (Moderate + Complex only)
+
+Skip this substep for Trivial issues.
+
+After self-improvement issue creation, evaluate whether the work you just completed involved solving a problem that future agents would benefit from having documented. The filter: did the implementation require a non-obvious approach, involve debugging a tricky issue, establish a new pattern, or integrate with an external system in a way that wasn't straightforward?
+
+If yes, create a solution doc at `docs/solutions/<category>/<slug>.md` following the existing frontmatter schema:
+
+```yaml
+---
+title: "<descriptive title>"
+date: "<YYYY-MM-DD>"
+category: "<category>"
+severity: "<low|medium|high>"
+component: "<affected component>"
+symptoms:
+  - "<symptom 1>"
+  - "<symptom 2>"
+tags:
+  - <tag1>
+  - <tag2>
+related_issues:
+  - "#<issue-number>"
+---
+```
+
+Body sections: **Problem** → **Root Cause** → **Investigation Steps** → **Fix** → **Prevention**
+
+Commit the solution doc to the working branch. If the PR has already been created (Step 6), push an additional commit. If Step 6 has not yet run, the doc will be included in the PR automatically.
+
+If the work was straightforward and wouldn't benefit future agents, skip this and note the justification.
+
 ## Step 8: Report Back
 
 Comment on the issue with a link to the PR and a brief summary of what was done.
@@ -350,7 +404,8 @@ gh issue comment <number> --body "PR created: <pr-url>
 **Tests:** <pass/fail summary>
 **Test plan validation:** <N/M items verified, K blocked — see #issue1, #issue2> or <All N items verified>
 **Review:** <final status of each review agent, or 'Self-review only' for trivial — never 'pending'>
-**Self-improvement:** <list of created issue links, or 'None — <specific justification from reflection>'>"
+**Self-improvement:** <list of created issue links, or 'None — <specific justification from reflection>'>
+**Compound:** <list of created solution doc paths, or 'None — <specific justification>'>"
 ```
 
 ## Resuming Interrupted Work
