@@ -1,5 +1,4 @@
 import { runBriefGeneration } from "@/lib/briefs";
+import { withCronTracking } from "@/lib/system-metrics";
 
-export const handler = async () => {
-  await runBriefGeneration();
-};
+export const handler = () => withCronTracking("briefs", runBriefGeneration);

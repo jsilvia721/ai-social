@@ -1,5 +1,4 @@
 import { runScheduler } from "@/lib/scheduler";
+import { withCronTracking } from "@/lib/system-metrics";
 
-export const handler = async () => {
-  await runScheduler();
-};
+export const handler = () => withCronTracking("publish", runScheduler);

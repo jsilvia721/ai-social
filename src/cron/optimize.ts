@@ -1,5 +1,5 @@
 import { runWeeklyOptimization } from "@/lib/optimizer/run";
+import { withCronTracking } from "@/lib/system-metrics";
 
-export const handler = async () => {
-  await runWeeklyOptimization();
-};
+export const handler = () =>
+  withCronTracking("optimize", runWeeklyOptimization);
