@@ -17,6 +17,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DayDetailPanel } from "@/components/posts/DayDetailPanel";
 import type { Platform, PostStatus } from "@/types";
+import { PLATFORM_STYLES } from "@/components/accounts/platform-utils";
 
 interface CalendarPost {
   id: string;
@@ -351,7 +352,7 @@ export function ContentCalendar({ posts, year, month, onNavigate, onReschedule }
           {(Object.entries(PLATFORM_DOT) as [Platform, string][]).map(([platform, dot]) => (
             <span key={platform} className="flex items-center gap-1.5 text-xs text-zinc-500">
               <span className={`w-2 h-2 rounded-full ${dot}`} />
-              {platform.charAt(0) + platform.slice(1).toLowerCase()}
+              {PLATFORM_STYLES[platform].label}
             </span>
           ))}
         </div>

@@ -7,6 +7,7 @@ import { TrendingUp } from "lucide-react";
 import { WeekPicker } from "@/components/insights/WeekPicker";
 import { DigestPatternsSchema, DigestChangesSchema } from "@/lib/optimizer/schemas";
 import type { Platform } from "@/types";
+import { PLATFORM_STYLES } from "@/components/accounts/platform-utils";
 
 const PLATFORM_COLOR: Record<Platform, string> = {
   TWITTER: "text-sky-400",
@@ -28,7 +29,7 @@ function formatMixDelta(key: string, delta: number): string {
 }
 
 function formatCadenceDelta(platform: string, delta: number): string {
-  const label = platform.charAt(0) + platform.slice(1).toLowerCase();
+  const label = PLATFORM_STYLES[platform as Platform]?.label ?? platform.charAt(0) + platform.slice(1).toLowerCase();
   const direction = delta > 0 ? "+" : "";
   return `${direction}${delta} ${label} post${Math.abs(delta) !== 1 ? "s" : ""}/week`;
 }
