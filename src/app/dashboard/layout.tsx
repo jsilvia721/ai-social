@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { DevToolsToggle } from "@/components/dev/DevToolsToggle";
+import { FeedbackButton } from "@/components/feedback/FeedbackButton";
 
 export default async function DashboardLayout({
   children,
@@ -49,6 +50,7 @@ export default async function DashboardLayout({
       <main className="min-h-screen pt-14 md:pt-0 md:ml-60">
         <div className="p-4 md:p-8">{children}</div>
       </main>
+      <FeedbackButton />
       {showDevTools && <DevToolsToggle />}
     </div>
   );
