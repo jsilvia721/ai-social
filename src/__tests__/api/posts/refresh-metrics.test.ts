@@ -1,5 +1,5 @@
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
-import { mockAuthenticated, mockUnauthenticated, mockSession } from "@/__tests__/mocks/auth";
+import { mockAuthenticated, mockAuthenticatedAsAdmin, mockUnauthenticated, mockSession } from "@/__tests__/mocks/auth";
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("next-auth/next");
@@ -49,6 +49,21 @@ describe("POST /api/posts/[id]/refresh-metrics", () => {
         id: "nonexistent",
         business: { members: { some: { userId: mockSession.user.id } } },
       },
+    });
+  });
+
+  it("admin bypasses membership filter", async () => {
+    mockAuthenticatedAsAdmin();
+    prismaMock.post.findFirst.mockResolvedValue({
+      id: "post-1",
+      blotatoPostId: null,
+    } as any);
+    const { req, params } = makeRequest("post-1");
+
+    await POST(req, params);
+
+    expect(prismaMock.post.findFirst).toHaveBeenCalledWith({
+      where: { id: "post-1" },
     });
   });
 
