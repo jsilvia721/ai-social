@@ -11,21 +11,7 @@ import {
 } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-interface ErrorBucket {
-  timestamp: string;
-  source: string;
-  count: number;
-  errorCount: number;
-}
-
-interface TopError {
-  message: string;
-  count: number;
-  lastSeenAt: string;
-  status: string;
-  source: string;
-}
+import type { ErrorBucket, TopError } from "./types";
 
 interface ErrorTrendChartProps {
   buckets: ErrorBucket[];
@@ -50,18 +36,20 @@ function formatTime(timestamp: string): string {
 }
 
 function pivotData(buckets: ErrorBucket[]) {
-  const map = new Map<string, Record<string, number>>();
+  const map = new Map<string, Record<string, string | number>>();
   const sources = new Set<string>();
 
   for (const b of buckets) {
     sources.add(b.source);
     const row = map.get(b.timestamp) ?? { timestamp: b.timestamp };
-    row[b.source] = (row[b.source] ?? 0) + b.count;
+    row[b.source] = ((row[b.source] as number) ?? 0) + b.count;
     map.set(b.timestamp, row);
   }
 
   const rows = Array.from(map.values()).sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    (a, b) =>
+      new Date(a.timestamp as string).getTime() -
+      new Date(b.timestamp as string).getTime()
   );
 
   return { rows, sources: Array.from(sources) };
@@ -104,7 +92,7 @@ export function ErrorTrendChart({ buckets, topErrors }: ErrorTrendChartProps) {
                   border: "1px solid #3f3f46",
                   borderRadius: "8px",
                 }}
-                labelFormatter={formatTime}
+                labelFormatter={(label) => formatTime(String(label))}
                 labelStyle={{ color: "#e4e4e7" }}
               />
               <Legend />

@@ -16,6 +16,7 @@ jest.mock("recharts", () => ({
 }));
 
 import { ErrorTrendChart } from "@/components/system/ErrorTrendChart";
+import type { TopError } from "@/components/system/types";
 
 describe("ErrorTrendChart", () => {
   it("renders empty state when no data", () => {
@@ -32,7 +33,7 @@ describe("ErrorTrendChart", () => {
   });
 
   it("renders top errors list", () => {
-    const topErrors = [
+    const topErrors: TopError[] = [
       { message: "Connection timeout", count: 42, lastSeenAt: "2026-03-14T10:00:00.000Z", status: "NEW", source: "SERVER" },
       { message: "Rate limit exceeded", count: 10, lastSeenAt: "2026-03-14T09:00:00.000Z", status: "ISSUE_CREATED", source: "CLIENT" },
     ];
@@ -45,7 +46,7 @@ describe("ErrorTrendChart", () => {
   });
 
   it("renders status badges for top errors", () => {
-    const topErrors = [
+    const topErrors: TopError[] = [
       { message: "Error 1", count: 5, lastSeenAt: "2026-03-14T10:00:00.000Z", status: "NEW", source: "SERVER" },
       { message: "Error 2", count: 3, lastSeenAt: "2026-03-14T09:00:00.000Z", status: "RESOLVED", source: "CLIENT" },
     ];

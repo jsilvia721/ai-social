@@ -9,14 +9,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-
-interface ApiBucket {
-  timestamp: string;
-  service: string;
-  count: number;
-  avgLatencyMs: number;
-  errorCount: number;
-}
+import type { ApiBucket } from "./types";
 
 interface ApiCallChartProps {
   buckets: ApiBucket[];
@@ -44,18 +37,20 @@ function formatTime(timestamp: string): string {
  * Pivot bucket rows into one row per timestamp with a column per service.
  */
 function pivotData(buckets: ApiBucket[]) {
-  const map = new Map<string, Record<string, number>>();
+  const map = new Map<string, Record<string, string | number>>();
   const services = new Set<string>();
 
   for (const b of buckets) {
     services.add(b.service);
     const row = map.get(b.timestamp) ?? { timestamp: b.timestamp };
-    row[b.service] = (row[b.service] ?? 0) + b.count;
+    row[b.service] = ((row[b.service] as number) ?? 0) + b.count;
     map.set(b.timestamp, row);
   }
 
   const rows = Array.from(map.values()).sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    (a, b) =>
+      new Date(a.timestamp as string).getTime() -
+      new Date(b.timestamp as string).getTime()
   );
 
   return { rows, services: Array.from(services) };
@@ -89,7 +84,7 @@ export function ApiCallChart({ buckets }: ApiCallChartProps) {
               border: "1px solid #3f3f46",
               borderRadius: "8px",
             }}
-            labelFormatter={formatTime}
+            labelFormatter={(label) => formatTime(String(label))}
             labelStyle={{ color: "#e4e4e7" }}
           />
           <Legend />

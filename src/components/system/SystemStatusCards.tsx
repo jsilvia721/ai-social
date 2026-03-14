@@ -2,15 +2,10 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-
-interface CronStatus {
-  cronName: string;
-  lastRunAt: string | null;
-  successRate: number;
-}
+import type { CronStatusInfo } from "./types";
 
 interface SystemStatusCardsProps {
-  crons: CronStatus[];
+  crons: CronStatusInfo[];
 }
 
 type HealthLevel = "healthy" | "degraded" | "down" | "unknown";

@@ -10,6 +10,7 @@ import { SystemStatusCards } from "@/components/system/SystemStatusCards";
 import { ApiCallChart } from "@/components/system/ApiCallChart";
 import { CronRunTimeline } from "@/components/system/CronRunTimeline";
 import { ErrorTrendChart } from "@/components/system/ErrorTrendChart";
+import type { ApiBucket, CronRunRow, CronStatusInfo, ErrorBucket, TopError } from "@/components/system/types";
 
 function isValidRange(value: string): value is Range {
   return (VALID_RANGES as readonly string[]).includes(value);
@@ -28,6 +29,7 @@ export default async function SystemPage({ searchParams }: Props) {
   const params = await searchParams;
   const rangeParam = typeof params.range === "string" ? params.range : "24h";
   const range: Range = isValidRange(rangeParam) ? rangeParam : "24h";
+  // eslint-disable-next-line react-hooks/purity -- server component; fresh timestamp required per request
   const since = new Date(Date.now() - DURATION_MS[range]);
   const bucketSize = BUCKET_MS[range];
 
@@ -55,7 +57,7 @@ export default async function SystemPage({ searchParams }: Props) {
         <h2 className="text-lg font-semibold text-zinc-200 mb-4">
           Cron Health
         </h2>
-        {cronRunsResult.error ? (
+        {!cronRunsResult.ok ? (
           <p className="text-red-400 text-sm">
             Failed to load cron status.
           </p>
@@ -71,7 +73,7 @@ export default async function SystemPage({ searchParams }: Props) {
             <CardTitle className="text-zinc-200">API Call Volume</CardTitle>
           </CardHeader>
           <CardContent>
-            {apiCallsResult.error ? (
+            {!apiCallsResult.ok ? (
               <p className="text-red-400 text-sm">
                 Failed to load API call data.
               </p>
@@ -89,7 +91,7 @@ export default async function SystemPage({ searchParams }: Props) {
             <CardTitle className="text-zinc-200">Recent Cron Runs</CardTitle>
           </CardHeader>
           <CardContent>
-            {cronRunsResult.error ? (
+            {!cronRunsResult.ok ? (
               <p className="text-red-400 text-sm">
                 Failed to load cron run data.
               </p>
@@ -107,7 +109,7 @@ export default async function SystemPage({ searchParams }: Props) {
             <CardTitle className="text-zinc-200">Error Trends</CardTitle>
           </CardHeader>
           <CardContent>
-            {errorsResult.error ? (
+            {!errorsResult.ok ? (
               <p className="text-red-400 text-sm">
                 Failed to load error data.
               </p>
@@ -126,18 +128,10 @@ export default async function SystemPage({ searchParams }: Props) {
 
 // --- Data fetching helpers with independent error handling ---
 
-interface ApiBucket {
-  timestamp: string;
-  service: string;
-  count: number;
-  avgLatencyMs: number;
-  errorCount: number;
-}
-
 async function fetchApiCalls(
   since: Date,
   bucketSize: number
-): Promise<{ buckets: ApiBucket[]; error?: undefined } | { buckets?: undefined; error: string }> {
+): Promise<{ ok: true; buckets: ApiBucket[] } | { ok: false; error: string }> {
   try {
     const rows = await prisma.apiCall.findMany({
       where: { createdAt: { gte: since } },
@@ -183,32 +177,17 @@ async function fetchApiCalls(
       errorCount: data.errorCount,
     }));
 
-    return { buckets };
+    return { ok: true, buckets };
   } catch {
-    return { error: "Failed to fetch API call data" };
+    return { ok: false, error: "Failed to fetch API call data" };
   }
-}
-
-interface CronRunRow {
-  id: string;
-  cronName: string;
-  status: string;
-  itemsProcessed: number | null;
-  durationMs: number | null;
-  startedAt: string;
-}
-
-interface CronStatusRow {
-  cronName: string;
-  lastRunAt: string | null;
-  successRate: number;
 }
 
 async function fetchCronRuns(
   since: Date
 ): Promise<
-  | { runs: CronRunRow[]; cronStatuses: CronStatusRow[]; error?: undefined }
-  | { runs?: undefined; cronStatuses?: undefined; error: string }
+  | { ok: true; runs: CronRunRow[]; cronStatuses: CronStatusInfo[] }
+  | { ok: false; error: string }
 > {
   try {
     const runs = await prisma.cronRun.findMany({
@@ -235,14 +214,14 @@ async function fetchCronRuns(
       return {
         id: run.id,
         cronName: run.cronName,
-        status: run.status,
+        status: run.status as CronRunRow["status"],
         itemsProcessed: run.itemsProcessed,
         durationMs: run.durationMs,
         startedAt: run.startedAt.toISOString(),
       };
     });
 
-    const cronStatuses: CronStatusRow[] = Object.entries(cronMap).map(
+    const cronStatuses: CronStatusInfo[] = Object.entries(cronMap).map(
       ([cronName, data]) => ({
         cronName,
         lastRunAt: data.lastRunAt,
@@ -250,33 +229,18 @@ async function fetchCronRuns(
       })
     );
 
-    return { runs: serializedRuns, cronStatuses };
+    return { ok: true, runs: serializedRuns, cronStatuses };
   } catch {
-    return { error: "Failed to fetch cron run data" };
+    return { ok: false, error: "Failed to fetch cron run data" };
   }
-}
-
-interface ErrorBucket {
-  timestamp: string;
-  source: string;
-  count: number;
-  errorCount: number;
-}
-
-interface TopError {
-  message: string;
-  count: number;
-  lastSeenAt: string;
-  status: string;
-  source: string;
 }
 
 async function fetchErrors(
   since: Date,
   bucketSize: number
 ): Promise<
-  | { buckets: ErrorBucket[]; topErrors: TopError[]; error?: undefined }
-  | { buckets?: undefined; topErrors?: undefined; error: string }
+  | { ok: true; buckets: ErrorBucket[]; topErrors: TopError[] }
+  | { ok: false; error: string }
 > {
   try {
     const errors = await prisma.errorReport.findMany({
@@ -318,12 +282,12 @@ async function fetchErrors(
         message: e.message,
         count: e.count,
         lastSeenAt: e.lastSeenAt.toISOString(),
-        status: e.status,
+        status: e.status as TopError["status"],
         source: e.source,
       }));
 
-    return { buckets, topErrors };
+    return { ok: true, buckets, topErrors };
   } catch {
-    return { error: "Failed to fetch error data" };
+    return { ok: false, error: "Failed to fetch error data" };
   }
 }

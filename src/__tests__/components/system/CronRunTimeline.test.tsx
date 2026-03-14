@@ -4,6 +4,7 @@
 import "@testing-library/jest-dom";
 import { render, screen } from "@testing-library/react";
 import { CronRunTimeline } from "@/components/system/CronRunTimeline";
+import type { CronRunRow } from "@/components/system/types";
 
 describe("CronRunTimeline", () => {
   it("renders empty state when no runs", () => {
@@ -12,7 +13,7 @@ describe("CronRunTimeline", () => {
   });
 
   it("renders table headers", () => {
-    const runs = [
+    const runs: CronRunRow[] = [
       {
         id: "run-1",
         cronName: "publish",
@@ -31,7 +32,7 @@ describe("CronRunTimeline", () => {
   });
 
   it("renders run data with status badge", () => {
-    const runs = [
+    const runs: CronRunRow[] = [
       {
         id: "run-1",
         cronName: "publish",
@@ -58,7 +59,7 @@ describe("CronRunTimeline", () => {
   });
 
   it("shows dash for null duration and items", () => {
-    const runs = [
+    const runs: CronRunRow[] = [
       {
         id: "run-1",
         cronName: "metrics",

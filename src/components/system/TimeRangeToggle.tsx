@@ -2,7 +2,8 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
-import type { Range } from "@/lib/system/shared";
+
+type Range = "24h" | "7d" | "30d";
 
 const RANGES: { value: Range; label: string }[] = [
   { value: "24h", label: "24h" },
@@ -10,10 +11,15 @@ const RANGES: { value: Range; label: string }[] = [
   { value: "30d", label: "30d" },
 ];
 
+function isValidRange(value: string | null): value is Range {
+  return value != null && RANGES.some((r) => r.value === value);
+}
+
 export function TimeRangeToggle() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const current = (searchParams.get("range") as Range) ?? "24h";
+  const rawRange = searchParams.get("range");
+  const current: Range = isValidRange(rawRange) ? rawRange : "24h";
 
   function handleClick(range: Range) {
     const params = new URLSearchParams(searchParams.toString());

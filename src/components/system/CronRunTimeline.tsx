@@ -2,18 +2,10 @@
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-interface CronRun {
-  id: string;
-  cronName: string;
-  status: string;
-  itemsProcessed: number | null;
-  durationMs: number | null;
-  startedAt: string;
-}
+import type { CronRunRow } from "./types";
 
 interface CronRunTimelineProps {
-  runs: CronRun[];
+  runs: CronRunRow[];
 }
 
 function formatDuration(ms: number | null): string {
