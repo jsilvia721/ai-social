@@ -179,6 +179,16 @@ describe("normalizeMessage", () => {
         normalizeMessage("posts/seed-blotato-post-1772985511798-a9a3/metrics")
       ).toBe("posts/<COMPOUND_ID>/metrics");
     });
+
+    it("replaces compound ID with single prefix segment", () => {
+      expect(normalizeMessage("word-123-abc")).toBe("<COMPOUND_ID>");
+    });
+
+    it("does not replace when suffix exceeds 8 chars", () => {
+      expect(normalizeMessage("prefix-123-abcdefghi")).toBe(
+        "prefix-<N>-abcdefghi"
+      );
+    });
   });
 
   describe("integration: issues #337-339 produce identical output", () => {
