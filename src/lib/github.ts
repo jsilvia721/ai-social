@@ -83,6 +83,26 @@ function isHttpError(error: unknown): boolean {
   );
 }
 
+const PERMISSION_GUIDANCE =
+  "GITHUB_TOKEN lacks required permissions — ensure the PAT has 'repo' scope (classic) or 'Issues: Read and write' (fine-grained).";
+
+/**
+ * Detects 403 "Resource not accessible" errors and wraps them with
+ * actionable guidance. The original error is preserved as `cause`.
+ */
+function wrapPermissionError(error: unknown): unknown {
+  if (
+    isHttpError(error) &&
+    (error as unknown as { status: number }).status === 403 &&
+    (error as Error).message.includes("Resource not accessible")
+  ) {
+    return new Error(`${PERMISSION_GUIDANCE} Original: ${(error as Error).message}`, {
+      cause: error,
+    });
+  }
+  return error;
+}
+
 // ── Public helpers ──────────────────────────────────────────────────────────
 
 /**
@@ -118,7 +138,7 @@ export async function createIssue(
     if (isHttpError(error)) {
       console.warn(`[github] createIssue failed: ${(error as Error).message}`);
     }
-    throw error;
+    throw wrapPermissionError(error);
   }
 }
 
@@ -295,7 +315,7 @@ export async function createComment(
     if (isHttpError(error)) {
       console.warn(`[github] createComment failed: ${(error as Error).message}`);
     }
-    throw error;
+    throw wrapPermissionError(error);
   }
 }
 
