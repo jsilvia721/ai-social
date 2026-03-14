@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { getReviewPosts, serializeReviewPosts } from "@/lib/queries/review-posts";
+import { reportServerError } from "@/lib/server-error-reporter";
 
 export async function GET(_req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -9,54 +10,19 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const activeBusinessId = session.user.activeBusinessId;
-  if (!activeBusinessId) {
+  try {
+    const posts = await getReviewPosts(session);
+    if (posts === null) {
+      return NextResponse.json({ posts: [] });
+    }
+
+    return NextResponse.json({ posts: serializeReviewPosts(posts) });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    reportServerError(message, { metadata: { context: "GET /api/review/posts" } });
     return NextResponse.json(
-      { error: "No active workspace selected" },
-      { status: 400 }
+      { error: "Internal server error" },
+      { status: 500 }
     );
   }
-
-  // Verify the user is a member of this business (admin bypasses)
-  const isAdmin = session.user.isAdmin ?? false;
-  if (!isAdmin) {
-    const membership = await prisma.businessMember.findUnique({
-      where: {
-        businessId_userId: {
-          businessId: activeBusinessId,
-          userId: session.user.id,
-        },
-      },
-    });
-    if (!membership) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
-
-  const posts = await prisma.post.findMany({
-    where: {
-      businessId: activeBusinessId,
-      status: "PENDING_REVIEW",
-    },
-    orderBy: [
-      { reviewWindowExpiresAt: "asc" },
-      { scheduledAt: "asc" },
-    ],
-    include: {
-      socialAccount: { select: { platform: true, username: true } },
-      contentBrief: {
-        select: { id: true, topic: true, recommendedFormat: true },
-      },
-    },
-    take: 50,
-  });
-
-  // Serialize Date fields to strings for the client
-  const serialized = posts.map((p) => ({
-    ...p,
-    scheduledAt: p.scheduledAt?.toISOString() ?? null,
-    reviewWindowExpiresAt: p.reviewWindowExpiresAt?.toISOString() ?? null,
-  }));
-
-  return NextResponse.json({ posts: serialized });
 }

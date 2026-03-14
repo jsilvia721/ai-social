@@ -16,7 +16,7 @@ export function ReviewQueueClient({ initialPosts }: Props) {
     try {
       const res = await fetch("/api/review/posts");
       if (res.ok) {
-        const data = await res.json();
+        const data: { posts: ReviewPost[] } = await res.json();
         setPosts(data.posts);
       }
     } catch {

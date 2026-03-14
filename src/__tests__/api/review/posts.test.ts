@@ -9,9 +9,13 @@ import {
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("next-auth/next");
 jest.mock("@/lib/auth", () => ({ authOptions: {} }));
+jest.mock("@/lib/server-error-reporter", () => ({
+  reportServerError: jest.fn(),
+}));
 
 import { GET } from "@/app/api/review/posts/route";
 import { NextRequest } from "next/server";
+import { reportServerError } from "@/lib/server-error-reporter";
 
 beforeEach(() => {
   resetPrismaMock();
@@ -31,7 +35,7 @@ describe("GET /api/review/posts", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 400 when no activeBusinessId", async () => {
+  it("returns empty posts when no activeBusinessId", async () => {
     mockAuthenticated({
       ...mockSession,
       user: { ...mockSession.user, activeBusinessId: null as any },
@@ -39,23 +43,13 @@ describe("GET /api/review/posts", () => {
 
     const res = await GET(makeRequest());
 
-    expect(res.status).toBe(400);
-  });
-
-  it("returns 403 when non-admin user lacks membership", async () => {
-    mockAuthenticated();
-    prismaMock.businessMember.findUnique.mockResolvedValue(null);
-
-    const res = await GET(makeRequest());
-
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.posts).toEqual([]);
   });
 
   it("returns serialized PENDING_REVIEW posts for member", async () => {
     mockAuthenticated();
-    prismaMock.businessMember.findUnique.mockResolvedValue({
-      id: "mem-1",
-    } as any);
 
     const now = new Date("2026-03-14T12:00:00Z");
     const later = new Date("2026-03-15T12:00:00Z");
@@ -85,7 +79,28 @@ describe("GET /api/review/posts", () => {
     expect(body.posts[0].socialAccount.platform).toBe("TWITTER");
   });
 
-  it("returns posts for admin without membership check", async () => {
+  it("scopes query to activeBusinessId with membership filter for non-admin", async () => {
+    mockAuthenticated();
+    prismaMock.post.findMany.mockResolvedValue([]);
+
+    await GET(makeRequest());
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          businessId: "biz-1",
+          status: "PENDING_REVIEW",
+          business: {
+            members: {
+              some: { userId: "user-test-id" },
+            },
+          },
+        }),
+      })
+    );
+  });
+
+  it("skips membership filter for admin users", async () => {
     mockAuthenticatedAsAdmin();
 
     prismaMock.post.findMany.mockResolvedValue([
@@ -108,26 +123,22 @@ describe("GET /api/review/posts", () => {
     const body = await res.json();
     expect(body.posts).toHaveLength(1);
     expect(body.posts[0].scheduledAt).toBeNull();
-    // Membership check should not have been called
-    expect(prismaMock.businessMember.findUnique).not.toHaveBeenCalled();
+
+    // Should NOT include business.members filter for admin
+    const callArgs = prismaMock.post.findMany.mock.calls[0][0] as any;
+    expect(callArgs.where.business).toBeUndefined();
   });
 
-  it("scopes query to activeBusinessId and PENDING_REVIEW status", async () => {
+  it("returns 500 and reports error on database failure", async () => {
     mockAuthenticated();
-    prismaMock.businessMember.findUnique.mockResolvedValue({
-      id: "mem-1",
-    } as any);
-    prismaMock.post.findMany.mockResolvedValue([]);
+    prismaMock.post.findMany.mockRejectedValue(new Error("DB connection failed"));
 
-    await GET(makeRequest());
+    const res = await GET(makeRequest());
 
-    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          businessId: "biz-1",
-          status: "PENDING_REVIEW",
-        },
-      })
+    expect(res.status).toBe(500);
+    expect(reportServerError).toHaveBeenCalledWith(
+      "DB connection failed",
+      expect.objectContaining({ metadata: { context: "GET /api/review/posts" } })
     );
   });
 });
