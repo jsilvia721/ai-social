@@ -45,6 +45,10 @@ jest.mock("@/lib/mocks/config", () => ({
   shouldMockExternalApis: jest.fn().mockReturnValue(false),
 }));
 
+jest.mock("@/lib/system-metrics", () => ({
+  trackApiCall: jest.fn(),
+}));
+
 import {
   createIssue,
   updateIssueBody,
@@ -58,6 +62,9 @@ import {
   listRecentPRs,
 } from "@/lib/github";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
+import { trackApiCall } from "@/lib/system-metrics";
+
+const mockTrackApiCall = trackApiCall as jest.MockedFunction<typeof trackApiCall>;
 
 const mockedShouldMock = shouldMockExternalApis as jest.MockedFunction<
   typeof shouldMockExternalApis
@@ -413,6 +420,129 @@ describe("GitHub client", () => {
       mockIssuesCreate.mockRejectedValue(new Error("Network timeout"));
 
       await expect(createIssue("Test", "Body", ["label"])).rejects.toThrow("Network timeout");
+    });
+  });
+
+  describe("trackApiCall instrumentation", () => {
+    it("tracks createIssue calls", async () => {
+      await createIssue("Test", "Body", ["label"]);
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "createIssue",
+        })
+      );
+      expect(mockTrackApiCall.mock.calls[0][0].latencyMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("tracks getIssue calls", async () => {
+      await getIssue(42);
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "getIssue",
+        })
+      );
+    });
+
+    it("tracks listComments calls", async () => {
+      await listComments(42);
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "listComments",
+        })
+      );
+    });
+
+    it("tracks createComment calls", async () => {
+      await createComment(42, "test");
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "createComment",
+        })
+      );
+    });
+
+    it("tracks getRepoFile calls", async () => {
+      await getRepoFile("docs/test.md");
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "getRepoFile",
+        })
+      );
+    });
+
+    it("tracks listIssues calls", async () => {
+      await listIssues(["brainstorm"], "open");
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "listIssues",
+        })
+      );
+    });
+
+    it("tracks listRecentPRs calls", async () => {
+      await listRecentPRs(7);
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "listRecentPRs",
+        })
+      );
+    });
+
+    it("tracks updateIssueBody calls", async () => {
+      await updateIssueBody(42, "Updated body");
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "updateIssueBody",
+        })
+      );
+    });
+
+    it("tracks closeIssue calls", async () => {
+      await closeIssue(42);
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "closeIssue",
+        })
+      );
+    });
+
+    it("tracks getIssueBody calls", async () => {
+      await getIssueBody(42);
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "getIssueBody",
+        })
+      );
+    });
+
+    it("does not track when mock mode is active", async () => {
+      mockedShouldMock.mockReturnValue(true);
+      await createIssue("Test", "Body", ["label"]);
+      expect(mockTrackApiCall).not.toHaveBeenCalled();
+    });
+
+    it("still tracks on error paths", async () => {
+      const error = new Error("Not found");
+      Object.assign(error, { status: 404 });
+      mockIssuesGet.mockRejectedValue(error);
+
+      await getIssue(42); // returns safe default on HTTP error
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "getIssue",
+        })
+      );
     });
   });
 

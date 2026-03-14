@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { Platform } from "@/types";
+import { trackApiCall } from "@/lib/system-metrics";
 import type { StrategyContext } from "./types";
 
 const client = new Anthropic();
@@ -170,6 +171,7 @@ Call generate_platform_variants with the results.`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
+  const startMs = Date.now();
   try {
     const response = await client.messages.create(
       {
@@ -183,12 +185,27 @@ Call generate_platform_variants with the results.`;
       { signal: controller.signal },
     );
 
+    trackApiCall({
+      service: "anthropic",
+      endpoint: "repurposeContent",
+      statusCode: 200,
+      latencyMs: Date.now() - startMs,
+    });
+
     const toolUse = response.content.find((b) => b.type === "tool_use");
     if (!toolUse || toolUse.type !== "tool_use") {
       throw new Error("Claude did not call generate_platform_variants");
     }
 
     return RepurposeResultSchema.parse(toolUse.input);
+  } catch (err) {
+    trackApiCall({
+      service: "anthropic",
+      endpoint: "repurposeContent",
+      latencyMs: Date.now() - startMs,
+      error: (err as Error).message,
+    });
+    throw err;
   } finally {
     clearTimeout(timeout);
   }

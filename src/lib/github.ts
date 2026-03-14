@@ -11,6 +11,7 @@
 import { Octokit } from "@octokit/rest";
 import { env } from "@/env";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
+import { trackApiCall } from "@/lib/system-metrics";
 import {
   mockCreateIssue,
   mockGetIssue,
@@ -128,6 +129,7 @@ export async function createIssue(
     );
   }
 
+  const startMs = Date.now();
   try {
     const { data } = await octokit.issues.create({
       ...repoParams(),
@@ -141,6 +143,12 @@ export async function createIssue(
       console.warn(`[github] createIssue failed: ${error.message}`);
     }
     throw wrapPermissionError(error);
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "createIssue",
+      latencyMs: Date.now() - startMs,
+    });
   }
 }
 
@@ -153,6 +161,7 @@ export async function updateIssueBody(
   const octokit = getOctokit();
   if (!octokit) return;
 
+  const startMs = Date.now();
   try {
     await octokit.issues.update({
       ...repoParams(),
@@ -165,6 +174,12 @@ export async function updateIssueBody(
       return;
     }
     throw error;
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "updateIssueBody",
+      latencyMs: Date.now() - startMs,
+    });
   }
 }
 
@@ -174,6 +189,7 @@ export async function getIssueBody(issueNumber: number): Promise<string> {
   const octokit = getOctokit();
   if (!octokit) return "";
 
+  const startMs = Date.now();
   try {
     const { data } = await octokit.issues.get({
       ...repoParams(),
@@ -186,6 +202,12 @@ export async function getIssueBody(issueNumber: number): Promise<string> {
       return "";
     }
     throw error;
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "getIssueBody",
+      latencyMs: Date.now() - startMs,
+    });
   }
 }
 
@@ -203,6 +225,7 @@ export async function getIssue(issueNumber: number): Promise<GitHubIssue> {
       html_url: "",
     };
 
+  const startMs = Date.now();
   try {
     const { data } = await octokit.issues.get({
       ...repoParams(),
@@ -231,6 +254,12 @@ export async function getIssue(issueNumber: number): Promise<GitHubIssue> {
       };
     }
     throw error;
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "getIssue",
+      latencyMs: Date.now() - startMs,
+    });
   }
 }
 
@@ -240,6 +269,7 @@ export async function closeIssue(issueNumber: number): Promise<void> {
   const octokit = getOctokit();
   if (!octokit) return;
 
+  const startMs = Date.now();
   try {
     await octokit.issues.update({
       ...repoParams(),
@@ -252,6 +282,12 @@ export async function closeIssue(issueNumber: number): Promise<void> {
       return;
     }
     throw error;
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "closeIssue",
+      latencyMs: Date.now() - startMs,
+    });
   }
 }
 
@@ -268,6 +304,7 @@ export async function listComments(
   const octokit = getOctokit();
   if (!octokit) return [];
 
+  const startMs = Date.now();
   try {
     const { data } = await octokit.issues.listComments({
       ...repoParams(),
@@ -290,6 +327,12 @@ export async function listComments(
       return [];
     }
     throw error;
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "listComments",
+      latencyMs: Date.now() - startMs,
+    });
   }
 }
 
@@ -306,6 +349,7 @@ export async function createComment(
     );
   }
 
+  const startMs = Date.now();
   try {
     const { data } = await octokit.issues.createComment({
       ...repoParams(),
@@ -318,6 +362,12 @@ export async function createComment(
       console.warn(`[github] createComment failed: ${error.message}`);
     }
     throw wrapPermissionError(error);
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "createComment",
+      latencyMs: Date.now() - startMs,
+    });
   }
 }
 
@@ -327,6 +377,7 @@ export async function getRepoFile(path: string): Promise<string> {
   const octokit = getOctokit();
   if (!octokit) return "";
 
+  const startMs = Date.now();
   try {
     const { data } = await octokit.repos.getContent({
       ...repoParams(),
@@ -344,6 +395,12 @@ export async function getRepoFile(path: string): Promise<string> {
       return "";
     }
     throw error;
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "getRepoFile",
+      latencyMs: Date.now() - startMs,
+    });
   }
 }
 
@@ -356,6 +413,7 @@ export async function listIssues(
   const octokit = getOctokit();
   if (!octokit) return [];
 
+  const startMs = Date.now();
   try {
     const { data } = await octokit.issues.listForRepo({
       ...repoParams(),
@@ -380,6 +438,12 @@ export async function listIssues(
       return [];
     }
     throw error;
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "listIssues",
+      latencyMs: Date.now() - startMs,
+    });
   }
 }
 
@@ -390,6 +454,7 @@ export async function listRecentPRs(days: number): Promise<GitHubPR[]> {
   const octokit = getOctokit();
   if (!octokit) return [];
 
+  const startMs = Date.now();
   try {
     const since = new Date();
     since.setDate(since.getDate() - days);
@@ -416,5 +481,11 @@ export async function listRecentPRs(days: number): Promise<GitHubPR[]> {
       return [];
     }
     throw error;
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "listRecentPRs",
+      latencyMs: Date.now() - startMs,
+    });
   }
 }
