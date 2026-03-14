@@ -6,6 +6,12 @@ jest.mock("@aws-sdk/client-ses", () => ({
   SendEmailCommand: jest.fn(),
 }));
 
+// Mock error reporter
+const mockReportServerError = jest.fn().mockResolvedValue(undefined);
+jest.mock("@/lib/server-error-reporter", () => ({
+  reportServerError: (...args: unknown[]) => mockReportServerError(...args),
+}));
+
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 
@@ -14,6 +20,7 @@ import { sendReviewNotifications } from "@/lib/notifications";
 
 beforeEach(() => {
   resetPrismaMock();
+  mockReportServerError.mockReset().mockResolvedValue(undefined);
   jest.clearAllMocks();
 });
 
@@ -167,5 +174,24 @@ describe("sendReviewNotifications", () => {
       expect.any(Error)
     );
     consoleSpy.mockRestore();
+  });
+
+  it("calls reportServerError when review notifications fail", async () => {
+    prismaMock.post.findMany.mockRejectedValue(new Error("DB down"));
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    await sendReviewNotifications();
+
+    consoleSpy.mockRestore();
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      expect.stringContaining("review notifications"),
+      expect.objectContaining({
+        url: "cron/notifications",
+        metadata: expect.objectContaining({
+          source: "review-notifications",
+        }),
+      })
+    );
   });
 });

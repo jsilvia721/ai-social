@@ -10,6 +10,7 @@
  */
 import { prisma } from "@/lib/db";
 import { analyzePerformance } from "@/lib/ai/index";
+import { reportServerError } from "@/lib/server-error-reporter";
 import type { PerformancePost } from "@/lib/ai/index";
 import {
   computeEngagementRate,
@@ -274,6 +275,13 @@ export async function runWeeklyOptimization(): Promise<{
       processed++;
     } catch (err) {
       console.error(`Optimization failed for business ${business.id}:`, err);
+      await reportServerError(
+        `Optimization failed for business ${business.id}: ${err instanceof Error ? err.message : String(err)}`,
+        {
+          url: "cron/optimizer",
+          metadata: { businessId: business.id, source: "optimization" },
+        }
+      ).catch(() => {});
       skipped++;
     }
   }

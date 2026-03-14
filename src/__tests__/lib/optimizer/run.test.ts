@@ -6,6 +6,12 @@ jest.mock("@/lib/ai/index", () => ({
   analyzePerformance: jest.fn(),
 }));
 
+// Mock error reporter
+const mockReportServerError = jest.fn().mockResolvedValue(undefined);
+jest.mock("@/lib/server-error-reporter", () => ({
+  reportServerError: (...args: unknown[]) => mockReportServerError(...args),
+}));
+
 import { runWeeklyOptimization } from "@/lib/optimizer/run";
 import { analyzePerformance } from "@/lib/ai/index";
 
@@ -13,6 +19,7 @@ const mockAnalyzePerformance = analyzePerformance as jest.Mock;
 
 beforeEach(() => {
   mockReset(prismaMock);
+  mockReportServerError.mockReset().mockResolvedValue(undefined);
   jest.clearAllMocks();
 });
 
@@ -264,6 +271,33 @@ describe("runWeeklyOptimization", () => {
     expect(prismaMock.strategyDigest.create).not.toHaveBeenCalled();
 
     consoleSpy.mockRestore();
+  });
+
+  it("calls reportServerError when optimization fails for a business", async () => {
+    const business = makeBusiness("biz-1");
+    prismaMock.business.findMany.mockResolvedValue([business as never]);
+
+    const posts = Array.from({ length: 12 }, (_, i) =>
+      makePublishedPost(`post-${i}`)
+    );
+    prismaMock.post.findMany.mockResolvedValue(posts as never);
+
+    mockAnalyzePerformance.mockRejectedValue(new Error("API timeout"));
+
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+    await runWeeklyOptimization();
+    consoleSpy.mockRestore();
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      expect.stringContaining("biz-1"),
+      expect.objectContaining({
+        url: "cron/optimizer",
+        metadata: expect.objectContaining({
+          businessId: "biz-1",
+          source: "optimization",
+        }),
+      })
+    );
   });
 
   it("skips posts with stale metrics (metricsUpdatedAt before publishedAt)", async () => {

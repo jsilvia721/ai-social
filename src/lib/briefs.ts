@@ -12,6 +12,7 @@ import { prisma } from "@/lib/db";
 import { generateBriefs } from "@/lib/ai/briefs";
 import { flattenFormatMix } from "@/lib/strategy/schemas";
 import { sendBriefDigest } from "@/lib/notifications";
+import { reportServerError } from "@/lib/server-error-reporter";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -184,6 +185,13 @@ export async function runBriefGeneration(
       }
     } catch (err) {
       console.error(`Brief generation failed for workspace ${workspace.id}:`, err);
+      await reportServerError(
+        `Brief generation failed for workspace ${workspace.id}: ${err instanceof Error ? err.message : String(err)}`,
+        {
+          url: "cron/briefs",
+          metadata: { workspaceId: workspace.id, source: "brief-generation" },
+        }
+      ).catch(() => {});
     }
   }
 

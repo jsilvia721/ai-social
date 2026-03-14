@@ -5,6 +5,7 @@
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { prisma } from "@/lib/db";
 import { env } from "@/env";
+import { reportServerError } from "@/lib/server-error-reporter";
 
 interface BriefSummary {
   topic: string;
@@ -143,5 +144,12 @@ export async function sendReviewNotifications(): Promise<void> {
     }
   } catch (err) {
     console.error("[notifications] Failed to send review notifications:", err);
+    await reportServerError(
+      `Failed to send review notifications: ${err instanceof Error ? err.message : String(err)}`,
+      {
+        url: "cron/notifications",
+        metadata: { source: "review-notifications" },
+      }
+    ).catch(() => {});
   }
 }
