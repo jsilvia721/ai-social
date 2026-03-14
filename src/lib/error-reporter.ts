@@ -228,7 +228,8 @@ export function initErrorReporter(
           reportError(args[0]);
         } else if (
           typeof args[0] === "string" &&
-          !args[0].startsWith("Warning:")
+          !args[0].startsWith("Warning:") &&
+          !args[0].startsWith("[next-auth]")
         ) {
           // Capture string errors but filter React dev warnings
           const message = args.map(String).join(" ");
