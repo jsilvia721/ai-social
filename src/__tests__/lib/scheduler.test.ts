@@ -557,8 +557,10 @@ describe("runMetricsRefresh", () => {
       expect.objectContaining({
         url: "cron/metrics",
         metadata: expect.objectContaining({
-          postId: "post-1",
-          blotatoPostId: "blotato-post-abc",
+          count: 1,
+          postIds: ["post-1"],
+          blotatoPostIds: ["blotato-post-abc"],
+          sampleMessage: "Metrics API down",
           source: "blotato-metrics",
         }),
       })
@@ -601,11 +603,18 @@ describe("runMetricsRefresh", () => {
         }),
       })
     );
-    // Error reported for first post
+    // Error reported with aggregated metadata
     expect(mockReportServerError).toHaveBeenCalledWith(
       "Metrics API down",
       expect.objectContaining({
-        metadata: expect.objectContaining({ postId: "post-1" }),
+        url: "cron/metrics",
+        metadata: expect.objectContaining({
+          count: 1,
+          postIds: ["post-1"],
+          blotatoPostIds: ["blotato-1"],
+          sampleMessage: "Metrics API down",
+          source: "blotato-metrics",
+        }),
       })
     );
   });
@@ -684,6 +693,77 @@ describe("runMetricsRefresh", () => {
       data: { metricsUpdatedAt: expect.any(Date) },
     });
     expect(mockReportServerError).toHaveBeenCalled();
+  });
+
+  it("aggregates errors by pattern: 3 posts with same error → 1 reportServerError call", async () => {
+    const posts = [
+      { ...makePost({ id: "post-1", status: "PUBLISHED" }), blotatoPostId: "blotato-1" },
+      { ...makePost({ id: "post-2", status: "PUBLISHED" }), blotatoPostId: "blotato-2" },
+      { ...makePost({ id: "post-3", status: "PUBLISHED" }), blotatoPostId: "blotato-3" },
+    ];
+    prismaMock.post.findMany.mockResolvedValue(posts as any);
+    mockGetPostMetrics
+      .mockRejectedValueOnce(new Error("Blotato API error 500"))
+      .mockRejectedValueOnce(new Error("Blotato API error 500"))
+      .mockRejectedValueOnce(new Error("Blotato API error 500"));
+    prismaMock.post.update.mockResolvedValue(posts[0] as any);
+
+    await runMetricsRefresh();
+
+    // Should be called exactly once for the single unique error pattern
+    expect(mockReportServerError).toHaveBeenCalledTimes(1);
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      "Blotato API error 500",
+      expect.objectContaining({
+        url: "cron/metrics",
+        metadata: expect.objectContaining({
+          count: 3,
+          postIds: ["post-1", "post-2", "post-3"],
+          blotatoPostIds: ["blotato-1", "blotato-2", "blotato-3"],
+          sampleMessage: "Blotato API error 500",
+          source: "blotato-metrics",
+        }),
+      })
+    );
+  });
+
+  it("aggregates errors by pattern: 2 different errors → 2 reportServerError calls", async () => {
+    const posts = [
+      { ...makePost({ id: "post-1", status: "PUBLISHED" }), blotatoPostId: "blotato-1" },
+      { ...makePost({ id: "post-2", status: "PUBLISHED" }), blotatoPostId: "blotato-2" },
+      { ...makePost({ id: "post-3", status: "PUBLISHED" }), blotatoPostId: "blotato-3" },
+    ];
+    prismaMock.post.findMany.mockResolvedValue(posts as any);
+    mockGetPostMetrics
+      .mockRejectedValueOnce(new Error("Blotato API error 500"))
+      .mockRejectedValueOnce(new Error("Network timeout"))
+      .mockRejectedValueOnce(new Error("Blotato API error 500"));
+    prismaMock.post.update.mockResolvedValue(posts[0] as any);
+
+    await runMetricsRefresh();
+
+    // Should be called twice — once per unique error pattern
+    expect(mockReportServerError).toHaveBeenCalledTimes(2);
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      "Blotato API error 500",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          count: 2,
+          postIds: ["post-1", "post-3"],
+          blotatoPostIds: ["blotato-1", "blotato-3"],
+        }),
+      })
+    );
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      "Network timeout",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          count: 1,
+          postIds: ["post-2"],
+          blotatoPostIds: ["blotato-2"],
+        }),
+      })
+    );
   });
 
   it("does not crash if reportServerError throws during metrics refresh", async () => {
