@@ -249,6 +249,26 @@ describe("POST /api/feedback", () => {
 
     const body = await res.json();
     expect(body.id).toBe("fb-4");
+
+    // Should NOT update status to FAILED or call reportServerError
+    expect(prismaMock.feedback.update).not.toHaveBeenCalled();
+    expect(mockReportServerError).not.toHaveBeenCalled();
+  });
+
+  it("returns 201 even when DB update to FAILED itself fails", async () => {
+    const created = mockFeedback({ id: "fb-4b" });
+    prismaMock.feedback.create.mockResolvedValue(created);
+    mockCreateIssue.mockRejectedValue(new Error("GitHub API error"));
+    prismaMock.feedback.update.mockRejectedValue(
+      new Error("DB connection lost")
+    );
+
+    const res = await POST(makeRequest(validPayload));
+    expect(res.status).toBe(201);
+
+    const body = await res.json();
+    expect(body.id).toBe("fb-4b");
+    expect(mockReportServerError).toHaveBeenCalled();
   });
 
   it("accepts optional metadata", async () => {
