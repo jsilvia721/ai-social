@@ -88,7 +88,7 @@ cleanup() {
   for hb_file in "$LOG_DIR"/heartbeat-* "$LOG_DIR"/.stale-notified-*; do
     [ -f "$hb_file" ] && rm -f "$hb_file"
   done
-  rm -f "$PID_FILE" "$DAEMON_PID_FILE"
+  rm -f "$PID_FILE" "$DAEMON_PID_FILE" "$CIRCUIT_BREAKER_FILE"
   exit 0
 }
 trap cleanup SIGINT SIGTERM
@@ -108,25 +108,10 @@ log() {
   echo "[daemon $(date '+%H:%M:%S')] $*"
 }
 
-# --- Rate limit detection -----------------------------------------------------
-# Returns 0 if rate limited, 1 if not.
-# Arguments: $1=exit_code, $2=log_file
-detect_rate_limit() {
-  local exit_code="$1"
-  local log_file="$2"
-
-  # Successful exit is not a rate limit
-  if [ "$exit_code" -eq 0 ]; then
-    return 1
-  fi
-
-  # Check log file for rate limit indicators
-  if grep -qiE 'rate.?limit|HTTP.?429|status.?429|quota|budget.*exceeded|overloaded' "$log_file" 2>/dev/null; then
-    return 0
-  fi
-
-  return 1
-}
+# Source rate limit helpers (detect_rate_limit, parse_reset_time, format_reset_display,
+# record_failure, check_circuit_breaker)
+# shellcheck source=scripts/lib/rate-limit-helpers.sh
+source "scripts/lib/rate-limit-helpers.sh"
 
 # --- Rate limit exit handler --------------------------------------------------
 # Shared handler for when a worker/executor hits a rate limit.
@@ -135,12 +120,38 @@ handle_rate_limit_exit() {
   local issue_number="$1"
   local runtime="$2"
   local worker_type="$3"
+  local log_file="$4"
 
   log "${worker_type} for issue #${issue_number} hit rate limit (runtime: ${runtime}s)"
-  set_rate_limit_pause "$RATE_LIMIT_PAUSE_SECONDS"
+
+  # Try to parse reset time from log file for smarter pause duration
+  local seconds_until_reset=0
+  local reset_display=""
+  if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+    local parse_output
+    parse_output=$(parse_reset_time "$log_file")
+    seconds_until_reset=$(echo "$parse_output" | head -1)
+    reset_display=$(echo "$parse_output" | tail -1)
+  fi
+
+  local comment_suffix
+  if [ "$seconds_until_reset" -gt 0 ]; then
+    set_rate_limit_pause "$seconds_until_reset"
+    comment_suffix="Will auto-retry after ${reset_display}."
+    log "Parsed reset time: ${reset_display} (${seconds_until_reset}s from now)"
+  else
+    set_rate_limit_pause "$RATE_LIMIT_PAUSE_SECONDS"
+    comment_suffix="Will auto-retry after cooldown (~$((RATE_LIMIT_PAUSE_SECONDS / 60)) minutes)."
+  fi
+
   gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
-  gh issue comment "$issue_number" --body "${worker_type} interrupted by API rate limit (runtime: ${runtime}s). Will auto-retry after cooldown (~$((RATE_LIMIT_PAUSE_SECONDS / 60)) minutes)." 2>/dev/null || true
+  gh issue comment "$issue_number" --body "${worker_type} interrupted by API usage limit (runtime: ${runtime}s). ${comment_suffix}" 2>/dev/null || true
 }
+
+# --- Circuit breaker configuration --------------------------------------------
+CIRCUIT_BREAKER_FILE="$LOG_DIR/.failure_times"
+CIRCUIT_BREAKER_WINDOW=60   # seconds
+CIRCUIT_BREAKER_THRESHOLD=3 # failures within window
 
 # --- WIP commit ---------------------------------------------------------------
 # Commit and push any uncommitted work in a worktree for the given issue.
@@ -303,7 +314,7 @@ EOF
   # Check for rate limit first
   if detect_rate_limit "$exit_code" "$log_file"; then
     commit_wip_if_needed "$issue_number"
-    handle_rate_limit_exit "$issue_number" "$runtime" "Worker"
+    handle_rate_limit_exit "$issue_number" "$runtime" "Worker" "$log_file"
     clean_worktree "$issue_number"
     remove_worker "$self_pid"
     return
@@ -321,6 +332,7 @@ EOF
     log "Worker for issue #${issue_number} completed successfully (PR: ${pr_url})"
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_DONE" 2>/dev/null || true
   else
+    record_failure
     if [ $exit_code -eq 0 ] && [ -z "$pr_url" ]; then
       log "Worker for issue #${issue_number} exited cleanly but no PR was created (likely hit max turns)"
     else
@@ -398,7 +410,7 @@ EOF
 
   # Check for rate limit first
   if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor"
+    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor" "$log_file"
     clean_worktree "$issue_number"
     remove_worker "$self_pid"
     return
@@ -410,6 +422,7 @@ EOF
     # but ensure WIP is removed if still present
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
   else
+    record_failure
     log "Plan-executor for issue #${issue_number} failed (exit code: $exit_code)"
     local labels
     labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
@@ -478,7 +491,7 @@ EOF
 
   # Check for rate limit first
   if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator"
+    handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator" "$log_file"
     remove_worker "$self_pid"
     return
   fi
@@ -489,6 +502,7 @@ EOF
     # but ensure WIP is removed if still present
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
   else
+    record_failure
     log "Bug-investigator for issue #${issue_number} failed (exit code: $exit_code)"
     local labels
     labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
@@ -539,6 +553,15 @@ while true; do
   # --- 2. Rate limit pause check ---
   if is_rate_limit_paused; then
     log "Rate-limit paused until $(get_pause_until_display)"
+    sleep "$POLL_INTERVAL"
+    continue
+  fi
+
+  # --- 2b. Circuit breaker check ---
+  if check_circuit_breaker; then
+    log "Circuit breaker tripped: ${CIRCUIT_BREAKER_THRESHOLD}+ failures in ${CIRCUIT_BREAKER_WINDOW}s. Pausing for $((RATE_LIMIT_PAUSE_SECONDS / 60)) minutes."
+    set_rate_limit_pause "$RATE_LIMIT_PAUSE_SECONDS"
+    : > "$CIRCUIT_BREAKER_FILE"  # reset after tripping
     sleep "$POLL_INTERVAL"
     continue
   fi
