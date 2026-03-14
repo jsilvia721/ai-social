@@ -86,11 +86,17 @@ gh issue comment <number> --body "<!-- progress:step_2_plan -->**[Progress]** Pl
 1. **Branch:** `git fetch origin && git checkout -b issue-<number>-<slug> origin/main`
 2. **Write tests first**, then implementation.
 3. **Incremental commits** — commit after each logical unit of work.
-4. **Verify:** Run `npm run ci:check`. Fix failures, then post progress:
+4. **Wall-clock budget (~50 minutes).** The daemon enforces a 60-minute timeout. Note your start time and check elapsed time after each major step. **Partial progress with commits is infinitely more valuable than complete progress with no commits.** If you reach minute 40–45 and work remains:
+   - Stage everything including new files: `git add .`
+   - Commit with a WIP message describing what's done and what's left.
+   - Push the branch: `git push -u origin HEAD`
+   - Comment on the issue with a progress summary (what's done, what's remaining, where to pick up).
+   - Stop gracefully — do not attempt to rush remaining work.
+5. **Verify:** Run `npm run ci:check`. Fix failures, then post progress:
    ```bash
    gh issue comment <number> --body "<!-- progress:step_3_implement -->**[Progress]** Implementation complete, ci:check passing. Starting review."
    ```
-5. **E2E tests** if you changed UI or API routes: `npx playwright test`
+6. **E2E tests** if you changed UI or API routes: `npx playwright test`
 
 ## Step 4: Review Gate (Complexity-Dependent)
 
