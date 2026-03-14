@@ -21,10 +21,12 @@ jest.mock("@/lib/brainstorm/promote", () => ({
 
 // Mock Prisma — findFirst is called twice: first for open session, then for cooldown
 const mockFindFirst = jest.fn();
+const mockUpdateMany = jest.fn().mockResolvedValue({ count: 0 });
 jest.mock("@/lib/db", () => ({
   prisma: {
     brainstormSession: {
       findFirst: (...args: unknown[]) => mockFindFirst(...args),
+      updateMany: (...args: unknown[]) => mockUpdateMany(...args),
     },
   },
 }));
@@ -93,6 +95,30 @@ describe("runBrainstormAgent", () => {
 
     expect(mockGenerateBrainstorm).not.toHaveBeenCalled();
     expect(mockFindFirst).not.toHaveBeenCalled();
+  });
+
+  describe("startup cleanup", () => {
+    it("closes sessions with githubIssueNumber <= 0 before proceeding", async () => {
+      mockUpdateMany.mockResolvedValueOnce({ count: 1 });
+      mockFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+
+      await runBrainstormAgent();
+
+      expect(mockUpdateMany).toHaveBeenCalledWith({
+        where: {
+          status: "OPEN",
+          githubIssueNumber: { lte: 0 },
+        },
+        data: {
+          status: "CLOSED",
+          closedAt: expect.any(Date),
+        },
+      });
+      // cleanup runs before findFirst
+      const updateManyOrder = mockUpdateMany.mock.invocationCallOrder[0];
+      const findFirstOrder = mockFindFirst.mock.invocationCallOrder[0];
+      expect(updateManyOrder).toBeLessThan(findFirstOrder);
+    });
   });
 
   describe("no open session", () => {
