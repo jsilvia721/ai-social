@@ -205,8 +205,7 @@ describe("PostCard", () => {
     });
 
     it("uses larger action icons on mobile (h-5) and standard on sm (sm:h-4)", () => {
-      const { container } = render(<PostCard post={makePost()} onDelete={mockDelete} />);
-      // Find the trash icon inside the delete button
+      render(<PostCard post={makePost()} onDelete={mockDelete} />);
       const deleteBtn = screen.getByLabelText("Delete post");
       const icon = deleteBtn.querySelector("svg") as SVGElement;
       const iconClass = icon.className.baseVal || icon.getAttribute("class") || "";
