@@ -205,6 +205,133 @@ describe("issue-worker agent prompt", () => {
     });
   });
 
+  describe("Step 2: Learnings Research substep", () => {
+    it("includes a learnings-researcher substep before planning", () => {
+      const section = extractSection(
+        content,
+        "## Step 2: Plan (Moderate + Complex only)"
+      );
+      expect(section).toContain("learnings-researcher");
+    });
+
+    it("specifies the correct subagent_type", () => {
+      const section = extractSection(
+        content,
+        "## Step 2: Plan (Moderate + Complex only)"
+      );
+      expect(section).toContain(
+        "compound-engineering:research:learnings-researcher"
+      );
+    });
+
+    it("searches docs/solutions/ for past solutions", () => {
+      const section = extractSection(
+        content,
+        "## Step 2: Plan (Moderate + Complex only)"
+      );
+      expect(section).toContain("docs/solutions/");
+    });
+
+    it("handles no results gracefully", () => {
+      const section = extractSection(
+        content,
+        "## Step 2: Plan (Moderate + Complex only)"
+      );
+      expect(section).toMatch(/no (relevant )?results|no match|move on/i);
+    });
+  });
+
+  describe("Step 4: Review Pattern Escalation substep", () => {
+    it("includes a review pattern escalation substep", () => {
+      const section = extractSection(content, "## Step 4: Review Gate");
+      expect(section).toMatch(/pattern.*escalat|escalat.*pattern/i);
+    });
+
+    it("uses claude-self-improvement label for escalated patterns", () => {
+      const section = extractSection(content, "## Step 4: Review Gate");
+      expect(section).toContain("claude-self-improvement");
+    });
+
+    it("distinguishes conventions from bugs", () => {
+      const section = extractSection(content, "## Step 4: Review Gate");
+      expect(section).toMatch(/convention|missing.*rule|undocumented/i);
+      expect(section).toMatch(/bug|off-by-one/i);
+    });
+
+    it("caps at 1 rule proposal per review cycle", () => {
+      const section = extractSection(content, "## Step 4: Review Gate");
+      expect(section).toMatch(/cap.*1|at most 1|1.*per review/i);
+    });
+  });
+
+  describe("Step 7: Compound Evaluation substep", () => {
+    it("includes a compound evaluation substep for solution docs", () => {
+      const selfAssessmentSection = extractSection(
+        content,
+        "## Step 7: Self-Assessment"
+      );
+      expect(selfAssessmentSection).toMatch(/compound.*evaluat/i);
+    });
+
+    it("creates solution docs in docs/solutions/ with correct format", () => {
+      const selfAssessmentSection = extractSection(
+        content,
+        "## Step 7: Self-Assessment"
+      );
+      expect(selfAssessmentSection).toContain("docs/solutions/");
+      expect(selfAssessmentSection).toContain("frontmatter");
+    });
+
+    it("includes the required frontmatter fields", () => {
+      const selfAssessmentSection = extractSection(
+        content,
+        "## Step 7: Self-Assessment"
+      );
+      expect(selfAssessmentSection).toContain("title");
+      expect(selfAssessmentSection).toContain("date");
+      expect(selfAssessmentSection).toContain("category");
+      expect(selfAssessmentSection).toContain("severity");
+      expect(selfAssessmentSection).toContain("component");
+      expect(selfAssessmentSection).toContain("symptoms");
+      expect(selfAssessmentSection).toContain("tags");
+      expect(selfAssessmentSection).toContain("related_issues");
+    });
+
+    it("includes the required body sections", () => {
+      const selfAssessmentSection = extractSection(
+        content,
+        "## Step 7: Self-Assessment"
+      );
+      expect(selfAssessmentSection).toContain("Problem");
+      expect(selfAssessmentSection).toContain("Root Cause");
+      expect(selfAssessmentSection).toContain("Fix");
+      expect(selfAssessmentSection).toContain("Prevention");
+    });
+
+    it("is skipped for Trivial issues", () => {
+      const selfAssessmentSection = extractSection(
+        content,
+        "## Step 7: Self-Assessment"
+      );
+      expect(selfAssessmentSection).toMatch(/skip.*trivial|trivial.*skip/i);
+    });
+
+    it("commits the solution doc to the working branch", () => {
+      const selfAssessmentSection = extractSection(
+        content,
+        "## Step 7: Self-Assessment"
+      );
+      expect(selfAssessmentSection).toMatch(/commit/i);
+    });
+  });
+
+  describe("Step 8: Compound line in Report Back", () => {
+    it("includes a Compound line in the report-back template", () => {
+      const step8Section = extractSection(content, "## Step 8: Report Back");
+      expect(step8Section).toContain("Compound:");
+    });
+  });
+
   describe("Rules section", () => {
     it("includes the self-assessment rule", () => {
       const rulesSection = extractSection(content, "## Rules");
