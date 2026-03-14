@@ -82,6 +82,17 @@ function fmt(n: number | null | undefined): string {
   return String(n);
 }
 
+function formatRelativeTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "just now";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 1) return `${minutes}m ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 1) return `${hours}h ago`;
+  return `${days}d ago`;
+}
+
 function MetricPill({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
   return (
     <span className="flex items-center gap-1.5 sm:gap-1 text-sm sm:text-xs text-zinc-400" title={label}>
@@ -104,6 +115,7 @@ interface PostCardProps {
     metricsImpressions?: number | null;
     metricsReach?: number | null;
     metricsSaves?: number | null;
+    metricsUpdatedAt?: string | null;
     socialAccount: { platform: Platform; username: string };
   };
   onDelete: (id: string) => Promise<void>;
@@ -208,6 +220,13 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
                 <MetricPill icon={Bookmark} label="Saves" value={fmt(post.metricsSaves)} />
               )}
             </div>
+          )}
+          {post.status === "PUBLISHED" && (
+            <p className="text-[10px] text-zinc-500">
+              {post.metricsUpdatedAt
+                ? `Updated ${formatRelativeTime(post.metricsUpdatedAt)}`
+                : "Metrics pending"}
+            </p>
           )}
         </div>
 
