@@ -145,4 +145,48 @@ jobs:
                   state: 'closed'
                 });
               }
+
+              // --- Step 5b: Fallback — parse plan title for bug #N references ---
+              const titleBugPattern = /bug\s*#(\d+)/gi;
+              let titleBugMatch;
+              const closedFromMarker = bugMarkerMatch ? parseInt(bugMarkerMatch[1], 10) : null;
+
+              while ((titleBugMatch = titleBugPattern.exec(planIssue.title)) !== null) {
+                const bugNum = parseInt(titleBugMatch[1], 10);
+
+                // Skip if already closed via BUG_ISSUE marker
+                if (bugNum === closedFromMarker) {
+                  console.log(`#${planIssue.number}: bug #${bugNum} already closed via BUG_ISSUE marker, skipping.`);
+                  continue;
+                }
+
+                // Check if the bug is still open before closing
+                try {
+                  const bugIssue = await github.rest.issues.get({
+                    owner, repo,
+                    issue_number: bugNum
+                  });
+
+                  if (bugIssue.data.state === 'closed') {
+                    console.log(`#${planIssue.number}: bug #${bugNum} from title is already closed, skipping.`);
+                    continue;
+                  }
+
+                  console.log(`#${planIssue.number}: closing bug #${bugNum} referenced in plan title.`);
+
+                  await github.rest.issues.createComment({
+                    owner, repo,
+                    issue_number: bugNum,
+                    body: `Closing: all work items in plan issue #${planIssue.number} have been completed.`
+                  });
+
+                  await github.rest.issues.update({
+                    owner, repo,
+                    issue_number: bugNum,
+                    state: 'closed'
+                  });
+                } catch (err) {
+                  console.log(`#${planIssue.number}: failed to close bug #${bugNum}: ${err.message}`);
+                }
+              }
             }
