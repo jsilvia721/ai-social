@@ -113,13 +113,14 @@ export async function promoteBrainstormItems(
       const details = extractItemDetails(currentBody, item.title);
       const planBody = buildPlanBody(session.githubIssueNumber, details);
 
-      // Create plan issue
-      const planIssue = await github.createIssue(planTitle, planBody, ["plan"]);
-
-      // Skip if createIssue failed (returns number: 0) — don't add to dedup set so it can retry
-      if (planIssue.number === 0) {
+      // Create plan issue — throws on failure, catch to allow other items to proceed
+      let planIssue;
+      try {
+        planIssue = await github.createIssue(planTitle, planBody, ["plan"]);
+      } catch (error) {
         console.warn(
           `[promote] Failed to create plan issue for "${item.title}" — skipping, will retry next run`,
+          error,
         );
         continue;
       }

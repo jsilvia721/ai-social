@@ -258,13 +258,9 @@ describe("promoteBrainstormItems", () => {
     });
   });
 
-  it("skips item and allows retry when createIssue returns number 0", async () => {
+  it("skips item and allows retry when createIssue throws", async () => {
     setIssue(BODY_ONE_CHECKED);
-    mockCreateIssue.mockResolvedValue({
-      number: 0,
-      title: "Plan: Feature One",
-      html_url: "",
-    });
+    mockCreateIssue.mockRejectedValue(new Error("GitHub API error"));
     const session = makeSession();
     const warnSpy = jest.spyOn(console, "warn").mockImplementation();
 
@@ -280,6 +276,7 @@ describe("promoteBrainstormItems", () => {
     // Should log a warning
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("Feature One"),
+      expect.any(Error),
     );
     warnSpy.mockRestore();
   });
