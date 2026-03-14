@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Heart, MessageCircle, Repeat2, Eye, TrendingUp, Bookmark } from "lucide-react";
+import { deduplicateByRepurposeGroup } from "@/lib/analytics/dedup";
 import type { Platform } from "@/types";
 
 const PLATFORM_COLOR: Record<Platform, string> = {
@@ -73,8 +74,8 @@ export default async function AnalyticsPage() {
     return acc;
   }, {});
 
-  // Top 10 posts by likes
-  const topPosts = [...posts]
+  // Top 10 posts by likes (deduplicate repurposed posts, keeping best performer)
+  const topPosts = deduplicateByRepurposeGroup([...posts])
     .sort((a, b) => (b.metricsLikes ?? 0) - (a.metricsLikes ?? 0))
     .slice(0, 10);
 
