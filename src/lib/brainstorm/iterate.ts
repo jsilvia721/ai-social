@@ -16,6 +16,7 @@ import {
   buildIterationPrompt,
 } from "./prompts";
 import type { BrainstormSession } from "@prisma/client";
+import { reportServerError } from "@/lib/server-error-reporter";
 
 const client = new Anthropic();
 
@@ -80,6 +81,14 @@ const refineTool: Anthropic.Tool = {
  * Each comment is processed sequentially in chronological order.
  */
 export async function iterateBrainstorm(session: BrainstormSession): Promise<void> {
+  if (session.githubIssueNumber <= 0) {
+    await reportServerError(
+      `Invalid githubIssueNumber (${session.githubIssueNumber}) in iterateBrainstorm — skipping`,
+      { metadata: { sessionId: session.id, githubIssueNumber: session.githubIssueNumber } },
+    );
+    return;
+  }
+
   const comments = await github.listComments(
     session.githubIssueNumber,
     session.lastProcessedCommentId ?? undefined,
