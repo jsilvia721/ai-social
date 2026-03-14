@@ -137,6 +137,33 @@ describe("GitHub client", () => {
     });
   });
 
+  describe("createIssue error handling", () => {
+    it("throws when Octokit is null (no token)", async () => {
+      // Mutate the env mock to remove the token
+      const envModule = jest.requireMock("@/env") as { env: Record<string, unknown> };
+      const originalToken = envModule.env.GITHUB_TOKEN;
+      envModule.env.GITHUB_TOKEN = undefined;
+
+      try {
+        await expect(createIssue("Test", "Body", ["label"])).rejects.toThrow(
+          "GitHub token not configured"
+        );
+      } finally {
+        envModule.env.GITHUB_TOKEN = originalToken;
+      }
+    });
+
+    it("re-throws HTTP errors instead of returning sentinel", async () => {
+      const error = new Error("Resource not accessible by personal access token");
+      Object.assign(error, { status: 403 });
+      mockIssuesCreate.mockRejectedValue(error);
+
+      await expect(createIssue("Test", "Body", ["label"])).rejects.toThrow(
+        "Resource not accessible by personal access token"
+      );
+    });
+  });
+
   describe("updateIssueBody", () => {
     it("calls Octokit issues.update with correct params", async () => {
       await updateIssueBody(42, "Updated body");
@@ -251,15 +278,6 @@ describe("GitHub client", () => {
   });
 
   describe("API error handling", () => {
-    it("createIssue returns safe default on HTTP 403", async () => {
-      const error = new Error("Resource not accessible by personal access token");
-      Object.assign(error, { status: 403 });
-      mockIssuesCreate.mockRejectedValue(error);
-
-      const result = await createIssue("Test", "Body", ["label"]);
-      expect(result).toEqual({ number: 0, title: "Test", html_url: "" });
-    });
-
     it("updateIssueBody resolves on HTTP 403", async () => {
       const error = new Error("Resource not accessible");
       Object.assign(error, { status: 403 });
