@@ -1,4 +1,6 @@
 import { DigestPatternsSchema, DigestChangesSchema } from "@/lib/optimizer/schemas";
+import { PLATFORM_STYLES } from "@/components/accounts/platform-utils";
+import type { Platform } from "@/types";
 
 describe("DigestPatternsSchema", () => {
   it("parses valid patterns with top performers and insights", () => {
@@ -112,7 +114,7 @@ describe("insights page formatting helpers", () => {
   }
 
   function formatCadenceDelta(platform: string, delta: number): string {
-    const label = platform.charAt(0) + platform.slice(1).toLowerCase();
+    const label = PLATFORM_STYLES[platform as Platform]?.label ?? platform.charAt(0) + platform.slice(1).toLowerCase();
     const direction = delta > 0 ? "+" : "";
     return `${direction}${delta} ${label} post${Math.abs(delta) !== 1 ? "s" : ""}/week`;
   }
@@ -137,7 +139,7 @@ describe("insights page formatting helpers", () => {
 
   describe("formatCadenceDelta", () => {
     it("formats positive delta with plus sign", () => {
-      expect(formatCadenceDelta("TWITTER", 1)).toBe("+1 Twitter post/week");
+      expect(formatCadenceDelta("TWITTER", 1)).toBe("+1 Twitter / X post/week");
     });
 
     it("formats negative delta", () => {
@@ -150,8 +152,16 @@ describe("insights page formatting helpers", () => {
     });
 
     it("uses plural 'posts' for delta != 1", () => {
-      expect(formatCadenceDelta("TWITTER", 2)).toBe("+2 Twitter posts/week");
-      expect(formatCadenceDelta("TWITTER", 0)).toBe("0 Twitter posts/week");
+      expect(formatCadenceDelta("TWITTER", 2)).toBe("+2 Twitter / X posts/week");
+      expect(formatCadenceDelta("TWITTER", 0)).toBe("0 Twitter / X posts/week");
+    });
+
+    it("uses correct TikTok branding", () => {
+      expect(formatCadenceDelta("TIKTOK", 1)).toBe("+1 TikTok post/week");
+    });
+
+    it("uses correct YouTube branding", () => {
+      expect(formatCadenceDelta("YOUTUBE", 2)).toBe("+2 YouTube posts/week");
     });
   });
 });
