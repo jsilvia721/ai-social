@@ -70,6 +70,7 @@ const nextConfig: NextConfig = {
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https:",
+              "media-src 'self' https:",
               buildConnectSrc(),
               "frame-ancestors 'none'",
             ].join("; "),
