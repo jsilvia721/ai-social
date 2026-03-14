@@ -598,7 +598,7 @@ record_self_error() {
   timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%SZ')
   printf '{"category":"%s","message":"%s","timestamp":"%s"}\n' \
     "$category" \
-    "$(echo "$message" | sed 's/"/\\"/g' | head -c 500)" \
+    "$(echo "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\n' | head -c 500)" \
     "$timestamp" >> "$health_file" 2>/dev/null || true
 }
 
@@ -691,7 +691,7 @@ flush_self_errors() {
     mkdir -p "$flush_tmp/$category"
 
     local msg
-    msg=$(echo "$line" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+    msg=$(echo "$line" | sed -n 's/.*"message":"\(.*\)","timestamp".*/\1/p')
     local ts
     ts=$(echo "$line" | sed -n 's/.*"timestamp":"\([^"]*\)".*/\1/p')
 
