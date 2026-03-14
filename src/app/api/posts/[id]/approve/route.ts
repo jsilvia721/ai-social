@@ -34,11 +34,14 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   // Validate media requirement before approving (approve transitions to SCHEDULED)
-  if (post.socialAccount && requiresMedia(post.socialAccount.platform) && ((post.mediaUrls as string[]) ?? []).length === 0) {
-    return NextResponse.json(
-      { error: `${post.socialAccount.platform} requires at least one image or video` },
-      { status: 400 }
-    );
+  if (post.socialAccount) {
+    const mediaUrls = (post.mediaUrls as string[]) ?? [];
+    if (requiresMedia(post.socialAccount.platform) && mediaUrls.length === 0) {
+      return NextResponse.json(
+        { error: `${post.socialAccount.platform} requires at least one image or video` },
+        { status: 400 }
+      );
+    }
   }
 
   if (post.status !== "PENDING_REVIEW") {

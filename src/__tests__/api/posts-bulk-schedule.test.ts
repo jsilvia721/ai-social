@@ -70,7 +70,7 @@ describe("POST /api/posts/bulk-schedule", () => {
     }));
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toContain("media");
+    expect(body.error).toContain("require media");
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 

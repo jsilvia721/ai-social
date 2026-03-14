@@ -49,8 +49,9 @@ export async function POST(req: NextRequest) {
     p => p.socialAccount && requiresMedia(p.socialAccount.platform) && (p.mediaUrls as string[]).length === 0
   );
   if (missingMedia.length > 0) {
+    const platforms = [...new Set(missingMedia.map(p => p.socialAccount?.platform ?? "UNKNOWN"))].join(", ");
     return NextResponse.json(
-      { error: `${missingMedia.length} post(s) require media: ${missingMedia.map(p => p.socialAccount!.platform).join(", ")} requires at least one image or video` },
+      { error: `${missingMedia.length} post(s) require media for: ${platforms}` },
       { status: 400 }
     );
   }
