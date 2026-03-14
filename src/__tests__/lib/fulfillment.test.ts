@@ -490,6 +490,119 @@ describe("runFulfillment", () => {
     );
   });
 
+  it("fails INSTAGRAM brief when media generation returns null (TEXT format)", async () => {
+    const brief = makeBrief({
+      platform: "INSTAGRAM",
+      recommendedFormat: "TEXT",
+      aiImagePrompt: null,
+      business: {
+        contentStrategy: makeBrief().business.contentStrategy,
+        socialAccounts: [
+          {
+            id: "sa-ig",
+            businessId: "biz-1",
+            platform: "INSTAGRAM" as const,
+            platformId: "ig-123",
+            username: "@acme_ig",
+            blotatoAccountId: "blotato-ig",
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      },
+    });
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.findUnique.mockResolvedValue(null);
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+
+    const result = await runFulfillment();
+
+    expect(result.failed).toBe(1);
+    expect(prismaMock.post.create).not.toHaveBeenCalled();
+    expect(prismaMock.contentBrief.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          errorMessage: expect.stringContaining("INSTAGRAM requires media"),
+        }),
+      })
+    );
+  });
+
+  it("creates post normally for INSTAGRAM brief with IMAGE format", async () => {
+    const brief = makeBrief({
+      platform: "INSTAGRAM",
+      recommendedFormat: "IMAGE",
+      business: {
+        contentStrategy: makeBrief().business.contentStrategy,
+        socialAccounts: [
+          {
+            id: "sa-ig",
+            businessId: "biz-1",
+            platform: "INSTAGRAM" as const,
+            platformId: "ig-123",
+            username: "@acme_ig",
+            blotatoAccountId: "blotato-ig",
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      },
+    });
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.findUnique.mockResolvedValue(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prismaMock.$transaction.mockImplementation(async (fn: any) => {
+      if (typeof fn === "function") return fn(prismaMock);
+      return [];
+    });
+    prismaMock.post.create.mockResolvedValue({ id: "post-ig" } as never);
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+
+    const result = await runFulfillment();
+
+    expect(result.created).toBe(1);
+    expect(mockGenerateImage).toHaveBeenCalled();
+    expect(prismaMock.post.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          mediaUrls: ["https://cdn.example.com/media/biz-1/brief-1.png"],
+        }),
+      })
+    );
+  });
+
+  it("creates post without media for TWITTER brief with TEXT format (no regression)", async () => {
+    const brief = makeBrief({ recommendedFormat: "TEXT", aiImagePrompt: null });
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.findUnique.mockResolvedValue(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prismaMock.$transaction.mockImplementation(async (fn: any) => {
+      if (typeof fn === "function") return fn(prismaMock);
+      return [];
+    });
+    prismaMock.post.create.mockResolvedValue({ id: "post-1" } as never);
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+
+    const result = await runFulfillment();
+
+    expect(result.created).toBe(1);
+    expect(prismaMock.post.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ mediaUrls: [] }),
+      })
+    );
+  });
+
   it("scopes to specific businessId when provided", async () => {
     prismaMock.contentBrief.findMany.mockResolvedValue([] as never);
 
