@@ -5,7 +5,8 @@
  * When shouldMockExternalApis() returns true, all methods return canned data
  * from src/lib/mocks/github.ts without hitting the GitHub API.
  *
- * If GITHUB_TOKEN is not set, all methods are no-ops (return safe defaults).
+ * If GITHUB_TOKEN is not set, read-only methods return safe defaults.
+ * Write operations (createIssue) throw so callers know the write failed.
  */
 import { Octokit } from "@octokit/rest";
 import { env } from "@/env";
@@ -84,6 +85,13 @@ function isHttpError(error: unknown): boolean {
 
 // ── Public helpers ──────────────────────────────────────────────────────────
 
+/**
+ * Creates a GitHub issue. Unlike read-only helpers, this throws on failure
+ * because the returned issue number is stored in the DB — a silent fallback
+ * would corrupt downstream state.
+ *
+ * @throws {Error} When GitHub token/repo is not configured or the API call fails.
+ */
 export async function createIssue(
   title: string,
   body: string,

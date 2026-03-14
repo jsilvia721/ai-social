@@ -113,8 +113,14 @@ export async function promoteBrainstormItems(
       const details = extractItemDetails(currentBody, item.title);
       const planBody = buildPlanBody(session.githubIssueNumber, details);
 
-      // Create plan issue
-      const planIssue = await github.createIssue(planTitle, planBody, ["plan"]);
+      // Create plan issue — continue promoting remaining items if one fails
+      let planIssue: { number: number; html_url: string };
+      try {
+        planIssue = await github.createIssue(planTitle, planBody, ["plan"]);
+      } catch (error) {
+        console.warn(`[promote] Failed to create plan issue "${planTitle}": ${(error as Error).message}`);
+        continue;
+      }
 
       // Update brainstorm body with plan link
       currentBody = updateItemWithPlanLink(
