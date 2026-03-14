@@ -6,7 +6,7 @@
 ![Prisma](https://img.shields.io/badge/Prisma-7-2D3748?logo=prisma&logoColor=white)
 ![SST](https://img.shields.io/badge/SST-v3_Ion-E27152?logo=sst&logoColor=white)
 
-An autonomous AI-powered social media management platform. AI agents research trends, generate content briefs, write posts, and optimize strategy — with human-in-the-loop review before anything goes live.
+Autonomous AI agents that make professional business capabilities accessible to small teams — starting with social media management. AI agents research trends, generate content briefs, write posts, and optimize strategy — with human-in-the-loop review before anything goes live.
 
 ## Architecture
 
