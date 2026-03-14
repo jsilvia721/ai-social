@@ -13,6 +13,15 @@ jest.mock("@/lib/github", () => ({
 jest.mock("@/lib/server-error-reporter", () => ({
   reportServerError: jest.fn(),
 }));
+jest.mock("@/lib/blotato/ssrf-guard", () => ({
+  assertSafeMediaUrl: jest.fn((url: string) => {
+    // Simulate real behavior: only allow URLs starting with test S3 URL
+    const allowedPrefix = "https://storage.example.com/";
+    if (!url.startsWith(allowedPrefix)) {
+      throw new Error(`SSRF guard: mediaUrl must start with ${allowedPrefix}`);
+    }
+  }),
+}));
 
 import { POST } from "@/app/api/feedback/route";
 import { NextRequest } from "next/server";

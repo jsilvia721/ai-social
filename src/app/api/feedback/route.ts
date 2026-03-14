@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { createIssue } from "@/lib/github";
 import { reportServerError } from "@/lib/server-error-reporter";
-import { env } from "@/env";
+import { assertSafeMediaUrl } from "@/lib/blotato/ssrf-guard";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
@@ -81,8 +81,9 @@ export async function POST(req: NextRequest) {
 
   // SSRF guard: screenshotUrl must start with our S3 public URL
   if (screenshotUrl) {
-    const s3PublicUrl = env.AWS_S3_PUBLIC_URL;
-    if (!s3PublicUrl || !screenshotUrl.startsWith(s3PublicUrl)) {
+    try {
+      assertSafeMediaUrl(screenshotUrl);
+    } catch {
       return NextResponse.json(
         { error: "Screenshot URL must be hosted on our storage" },
         { status: 400 }
