@@ -250,25 +250,31 @@ export async function runMetricsRefresh(): Promise<{ processed: number }> {
           },
         });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        console.error(`[metrics-refresh] Failed to refresh metrics for post ${post.id}:`, errorMessage);
-
-        // 404 means the post no longer exists on Blotato — clear blotatoPostId
+        // 404 means the Blotato post no longer exists — clear the stale ID
         // so it's permanently excluded from future metrics fetches.
-        // For other errors (rate limits, 5xx, timeouts), update metricsUpdatedAt
-        // to rotate the post to the back of the queue.
-        try {
-          if (err instanceof BlotatoApiError && err.status === 404) {
+        if (err instanceof BlotatoApiError && err.status === 404) {
+          console.info(`[metrics-refresh] Clearing stale blotatoPostId for post ${post.id}`);
+          try {
             await prisma.post.update({
               where: { id: post.id },
               data: { blotatoPostId: null },
             });
-          } else {
-            await prisma.post.update({
-              where: { id: post.id },
-              data: { metricsUpdatedAt: new Date() },
-            });
+          } catch {
+            // Swallow — DB update must not crash the batch
           }
+          return;
+        }
+
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error(`[metrics-refresh] Failed to refresh metrics for post ${post.id}:`, errorMessage);
+
+        // For non-404 errors (rate limits, 5xx, timeouts), update metricsUpdatedAt
+        // to rotate the post to the back of the queue.
+        try {
+          await prisma.post.update({
+            where: { id: post.id },
+            data: { metricsUpdatedAt: new Date() },
+          });
         } catch {
           // Swallow — DB update must not crash the batch
         }

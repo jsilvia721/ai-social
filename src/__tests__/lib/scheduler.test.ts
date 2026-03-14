@@ -622,24 +622,23 @@ describe("runMetricsRefresh", () => {
     );
     prismaMock.post.update.mockResolvedValue(publishedPost as any);
 
+    const consoleSpy = jest.spyOn(console, "info").mockImplementation();
+
     await runMetricsRefresh();
 
+    // Should clear the stale blotatoPostId
     expect(prismaMock.post.update).toHaveBeenCalledWith({
       where: { id: "post-1" },
       data: { blotatoPostId: null },
     });
-    // Should still report the error
-    expect(mockReportServerError).toHaveBeenCalledWith(
-      "Not found",
-      expect.objectContaining({
-        url: "cron/metrics",
-        metadata: expect.objectContaining({
-          postId: "post-1",
-          blotatoPostId: "blotato-post-abc",
-          source: "blotato-metrics",
-        }),
-      })
+    // 404 errors should NOT be reported
+    expect(mockReportServerError).not.toHaveBeenCalled();
+    // Should log at info level instead
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Clearing stale blotatoPostId for post post-1")
     );
+
+    consoleSpy.mockRestore();
   });
 
   it("updates metricsUpdatedAt for non-404 errors to rotate post to back of queue", async () => {
@@ -679,6 +678,32 @@ describe("runMetricsRefresh", () => {
       data: { metricsUpdatedAt: expect.any(Date) },
     });
     expect(mockReportServerError).toHaveBeenCalled();
+  });
+
+  it("still reports non-404 BlotatoApiError normally", async () => {
+    const { BlotatoApiError } = await import("@/lib/blotato/client");
+    const publishedPost = {
+      ...makePost({ status: "PUBLISHED" }),
+      blotatoPostId: "blotato-post-abc",
+    };
+    prismaMock.post.findMany.mockResolvedValue([publishedPost] as any);
+    mockGetPostMetrics.mockRejectedValue(new BlotatoApiError("Rate limited", 429));
+
+    await runMetricsRefresh();
+
+    // Should NOT clear blotatoPostId
+    expect(prismaMock.post.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { blotatoPostId: null },
+      })
+    );
+    // Should report as error
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      "Rate limited",
+      expect.objectContaining({
+        url: "cron/metrics",
+      })
+    );
   });
 
   it("does not crash if reportServerError throws during metrics refresh", async () => {
