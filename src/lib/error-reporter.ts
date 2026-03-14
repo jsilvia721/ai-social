@@ -6,6 +6,11 @@ const DEDUP_RESET_MS = 5 * 60 * 1000; // 5 minutes
 const CIRCUIT_BREAKER_LIMIT = 100;
 const API_ENDPOINT = "/api/errors";
 
+/** Benign error patterns that should never be reported. */
+const IGNORED_PATTERNS: RegExp[] = [
+  /Failed to fetch RSC payload/,
+];
+
 interface ErrorReporterOptions {
   enabled?: boolean;
   captureConsoleErrors?: boolean;
@@ -101,6 +106,11 @@ export function reportError(error: unknown, context?: ErrorContext): void {
     }
 
     const { message, stack } = normalizeError(error);
+
+    // Skip benign errors before dedup/fingerprint logic
+    if (IGNORED_PATTERNS.some((pattern) => pattern.test(message))) {
+      return;
+    }
 
     // Deduplicate by normalized message
     const normalized = normalizeMessage(message);

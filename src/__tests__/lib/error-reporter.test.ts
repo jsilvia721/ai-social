@@ -544,6 +544,59 @@ describe("error-reporter", () => {
     });
   });
 
+  describe("ignored patterns", () => {
+    it("does not queue errors matching IGNORED_PATTERNS", () => {
+      initReporter({ debounceMs: 100 });
+      reportError(
+        new Error(
+          "Failed to fetch RSC payload for /dashboard. Falling back to browser navigation."
+        )
+      );
+      jest.advanceTimersByTime(100);
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("does not add ignored errors to the dedup fingerprint set", () => {
+      initReporter({ debounceMs: 100 });
+
+      // Report an ignored error
+      reportError(new Error("Failed to fetch RSC payload for /page"));
+      // Report a real error — should still work (not blocked by circuit breaker or dedup)
+      reportError(new Error("Real error"));
+      jest.advanceTimersByTime(100);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.message).toBe("Real error");
+    });
+
+    it("still reports non-ignored errors normally", () => {
+      initReporter({ debounceMs: 100 });
+      reportError(new Error("TypeError: cannot read property"));
+      jest.advanceTimersByTime(100);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not ignore errors with partial but non-matching text", () => {
+      initReporter({ debounceMs: 100 });
+      // "RSC payload" alone without "Failed to fetch" prefix should not match
+      reportError(new Error("Something about RSC payload went wrong"));
+      jest.advanceTimersByTime(100);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores string errors matching patterns", () => {
+      initReporter({ debounceMs: 100 });
+      reportError("Failed to fetch RSC payload for /settings");
+      jest.advanceTimersByTime(100);
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe("cleanup", () => {
     it("prevents further error reporting via reportError after cleanup", () => {
       const cleanup = initErrorReporter({ debounceMs: 100 });
