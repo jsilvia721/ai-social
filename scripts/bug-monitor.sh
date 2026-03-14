@@ -843,7 +843,7 @@ poll_error_reports() {
       if [ "$DRY_RUN" = false ]; then
         psql "$db_url" -c \
           "UPDATE \"ErrorReport\" SET status = 'ISSUE_CREATED', \"githubIssueNumber\" = ${issue_number}, \"acknowledgedAt\" = NOW() WHERE fingerprint = '${fp}';" \
-          2>>"$LOG_DIR/daemon.log" || {
+          >>/dev/null 2>>"$LOG_DIR/daemon.log" || {
             log "Warning: failed to update ErrorReport for fingerprint ${fp}"
             record_self_error "db_connection" "Failed to update ErrorReport for fingerprint ${fp}"
           }
@@ -864,7 +864,7 @@ poll_error_reports() {
         if [ "$DRY_RUN" = false ]; then
           psql "$db_url" -c \
             "UPDATE \"ErrorReport\" SET \"acknowledgedAt\" = NOW() WHERE fingerprint = '${fp}';" \
-            2>>"$LOG_DIR/daemon.log" || {
+            >>/dev/null 2>>"$LOG_DIR/daemon.log" || {
               log "Warning: failed to update acknowledgedAt for fingerprint ${fp}"
               record_self_error "db_connection" "Failed to update acknowledgedAt for fingerprint ${fp}"
             }
