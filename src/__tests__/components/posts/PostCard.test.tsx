@@ -25,6 +25,7 @@ function makePost(overrides: Partial<{
   metricsImpressions: number | null;
   metricsReach: number | null;
   metricsSaves: number | null;
+  metricsUpdatedAt: string | null;
   socialAccount: { platform: Platform; username: string };
 }> = {}) {
   return {
@@ -39,6 +40,7 @@ function makePost(overrides: Partial<{
     metricsImpressions: null,
     metricsReach: null,
     metricsSaves: null,
+    metricsUpdatedAt: null,
     socialAccount: { platform: "TWITTER" as Platform, username: "testuser" },
     ...overrides,
   };
@@ -162,6 +164,51 @@ describe("PostCard", () => {
     });
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/dashboard/posts/repurpose/rg-1");
+    });
+  });
+
+  describe("metrics fetch status", () => {
+    it("shows 'Metrics pending' for published post with null metricsUpdatedAt", () => {
+      render(
+        <PostCard
+          post={makePost({ status: "PUBLISHED", metricsUpdatedAt: null })}
+          onDelete={mockDelete}
+        />
+      );
+      expect(screen.getByText("Metrics pending")).toBeInTheDocument();
+    });
+
+    it("shows relative time for published post with metricsUpdatedAt", () => {
+      // Set metricsUpdatedAt to 2 hours ago
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      render(
+        <PostCard
+          post={makePost({ status: "PUBLISHED", metricsUpdatedAt: twoHoursAgo })}
+          onDelete={mockDelete}
+        />
+      );
+      expect(screen.getByText("Updated 2h ago")).toBeInTheDocument();
+    });
+
+    it("shows 'just now' for very recent metricsUpdatedAt", () => {
+      const justNow = new Date(Date.now() - 30 * 1000).toISOString();
+      render(
+        <PostCard
+          post={makePost({ status: "PUBLISHED", metricsUpdatedAt: justNow })}
+          onDelete={mockDelete}
+        />
+      );
+      expect(screen.getByText("Updated just now")).toBeInTheDocument();
+    });
+
+    it("does not show metrics status for non-published posts", () => {
+      render(
+        <PostCard
+          post={makePost({ status: "SCHEDULED", metricsUpdatedAt: null })}
+          onDelete={mockDelete}
+        />
+      );
+      expect(screen.queryByText("Metrics pending")).not.toBeInTheDocument();
     });
   });
 
