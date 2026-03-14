@@ -177,7 +177,7 @@ describe("PostComposer video upload retry", () => {
         metadata: expect.objectContaining({
           type: "UPLOAD",
           method: "presigned",
-          retryCount: 2,
+          retryCount: 3,
           online: true,
         }),
       })
@@ -323,6 +323,48 @@ describe("PostComposer video upload retry", () => {
 
     // Only one XHR created — no retry for 4xx
     expect(MockXHR.instances.length).toBe(1);
+  });
+
+  it("includes diagnostic metadata (retryCount, online status) in error reports", async () => {
+    // 3 total attempts, all fail
+    mockPresignedFetchCalls(3);
+
+    // Mock navigator.onLine to false to verify online status propagation
+    Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
+
+    await setupAndTriggerUpload();
+
+    // First attempt fails
+    MockXHR.instances[0].onerror?.();
+    await act(async () => { jest.advanceTimersByTime(1000); });
+    await waitFor(() => { expect(MockXHR.instances.length).toBe(2); });
+
+    // Second attempt fails
+    MockXHR.instances[1].onerror?.();
+    await act(async () => { jest.advanceTimersByTime(2000); });
+    await waitFor(() => { expect(MockXHR.instances.length).toBe(3); });
+
+    // Third attempt fails — exhausted
+    MockXHR.instances[2].onerror?.();
+
+    await waitFor(() => {
+      expect(mockReportError).toHaveBeenCalledTimes(1);
+    });
+
+    // Verify full diagnostic metadata structure
+    const [, context] = mockReportError.mock.calls[0];
+    expect(context).toEqual(expect.objectContaining({
+      metadata: expect.objectContaining({
+        type: "UPLOAD",
+        method: "presigned",
+        fileType: "video/mp4",
+        retryCount: 3,
+        online: false,
+      }),
+    }));
+
+    // Restore navigator.onLine
+    Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
   });
 
   it("shows timeout-specific error message on XHR timeout", async () => {
