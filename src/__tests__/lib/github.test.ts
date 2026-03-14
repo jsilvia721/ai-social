@@ -322,6 +322,17 @@ describe("GitHub client", () => {
       await expect(closeIssue(42)).resolves.toBeUndefined();
     });
 
+    it("createComment re-throws non-permission 403 errors unchanged", async () => {
+      const error = new Error("Rate limit exceeded");
+      Object.assign(error, { status: 403 });
+      mockIssuesCreateComment.mockRejectedValue(error);
+
+      await expect(createComment(42, "test")).rejects.toThrow("Rate limit exceeded");
+      await expect(createComment(42, "test")).rejects.not.toThrow(
+        /GITHUB_TOKEN lacks required permissions/
+      );
+    });
+
     it("createComment wraps 403 permission errors with actionable guidance and preserves cause", async () => {
       const original = new Error("Resource not accessible by personal access token");
       Object.assign(original, { status: 403 });

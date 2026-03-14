@@ -70,16 +70,20 @@ function repoParams() {
 
 // ── Error handling ─────────────────────────────────────────────────────────
 
+interface HttpError extends Error {
+  status: number;
+}
+
 /**
- * Returns true for Octokit HTTP errors (have a numeric `status` property).
+ * Type guard for Octokit HTTP errors (have a numeric `status` property).
  * Used to identify API errors (403, 404, etc.) for logging before
  * re-throwing or degrading gracefully, depending on the caller.
  */
-function isHttpError(error: unknown): boolean {
+function isHttpError(error: unknown): error is HttpError {
   return (
     error instanceof Error &&
     "status" in error &&
-    typeof (error as unknown as { status: unknown }).status === "number"
+    typeof (error as Record<string, unknown>).status === "number"
   );
 }
 
@@ -93,8 +97,8 @@ const PERMISSION_GUIDANCE =
 function wrapPermissionError(error: unknown): unknown {
   if (
     isHttpError(error) &&
-    (error as unknown as { status: number }).status === 403 &&
-    (error as Error).message.includes("Resource not accessible")
+    error.status === 403 &&
+    error.message.includes("Resource not accessible")
   ) {
     return new Error(PERMISSION_GUIDANCE, { cause: error });
   }
@@ -134,7 +138,7 @@ export async function createIssue(
     return { number: data.number, title: data.title, html_url: data.html_url };
   } catch (error) {
     if (isHttpError(error)) {
-      console.warn(`[github] createIssue failed: ${(error as Error).message}`);
+      console.warn(`[github] createIssue failed: ${error.message}`);
     }
     throw wrapPermissionError(error);
   }
@@ -157,7 +161,7 @@ export async function updateIssueBody(
     });
   } catch (error) {
     if (isHttpError(error)) {
-      console.warn(`[github] updateIssueBody failed: ${(error as Error).message}`);
+      console.warn(`[github] updateIssueBody failed: ${error.message}`);
       return;
     }
     throw error;
@@ -178,7 +182,7 @@ export async function getIssueBody(issueNumber: number): Promise<string> {
     return data.body ?? "";
   } catch (error) {
     if (isHttpError(error)) {
-      console.warn(`[github] getIssueBody failed: ${(error as Error).message}`);
+      console.warn(`[github] getIssueBody failed: ${error.message}`);
       return "";
     }
     throw error;
@@ -216,7 +220,7 @@ export async function getIssue(issueNumber: number): Promise<GitHubIssue> {
     };
   } catch (error) {
     if (isHttpError(error)) {
-      console.warn(`[github] getIssue failed: ${(error as Error).message}`);
+      console.warn(`[github] getIssue failed: ${error.message}`);
       return {
         number: issueNumber,
         title: "",
@@ -244,7 +248,7 @@ export async function closeIssue(issueNumber: number): Promise<void> {
     });
   } catch (error) {
     if (isHttpError(error)) {
-      console.warn(`[github] closeIssue failed: ${(error as Error).message}`);
+      console.warn(`[github] closeIssue failed: ${error.message}`);
       return;
     }
     throw error;
@@ -282,7 +286,7 @@ export async function listComments(
     return comments;
   } catch (error) {
     if (isHttpError(error)) {
-      console.warn(`[github] listComments failed: ${(error as Error).message}`);
+      console.warn(`[github] listComments failed: ${error.message}`);
       return [];
     }
     throw error;
@@ -311,7 +315,7 @@ export async function createComment(
     return { id: data.id, body: data.body ?? "" };
   } catch (error) {
     if (isHttpError(error)) {
-      console.warn(`[github] createComment failed: ${(error as Error).message}`);
+      console.warn(`[github] createComment failed: ${error.message}`);
     }
     throw wrapPermissionError(error);
   }
@@ -336,7 +340,7 @@ export async function getRepoFile(path: string): Promise<string> {
     return "";
   } catch (error) {
     if (isHttpError(error)) {
-      console.warn(`[github] getRepoFile failed: ${(error as Error).message}`);
+      console.warn(`[github] getRepoFile failed: ${error.message}`);
       return "";
     }
     throw error;
@@ -372,7 +376,7 @@ export async function listIssues(
     }));
   } catch (error) {
     if (isHttpError(error)) {
-      console.warn(`[github] listIssues failed: ${(error as Error).message}`);
+      console.warn(`[github] listIssues failed: ${error.message}`);
       return [];
     }
     throw error;
@@ -408,7 +412,7 @@ export async function listRecentPRs(days: number): Promise<GitHubPR[]> {
       }));
   } catch (error) {
     if (isHttpError(error)) {
-      console.warn(`[github] listRecentPRs failed: ${(error as Error).message}`);
+      console.warn(`[github] listRecentPRs failed: ${error.message}`);
       return [];
     }
     throw error;
