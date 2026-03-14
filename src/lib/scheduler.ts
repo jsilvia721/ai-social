@@ -9,6 +9,7 @@ import { getPostMetrics } from "@/lib/blotato/metrics";
 import { BlotatoApiError } from "@/lib/blotato/client";
 import { sendFailureAlert } from "@/lib/alerts";
 import { reportServerError } from "@/lib/server-error-reporter";
+import { normalizeMessage } from "@/lib/normalize-error";
 import type { Post, SocialAccount, Business, BusinessMember, User, Platform } from "@prisma/client";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -233,6 +234,14 @@ export async function runMetricsRefresh(): Promise<{ processed: number }> {
 
   if (posts.length === 0) return { processed: 0 };
 
+  // Collect failures by normalized error pattern for batched reporting
+  const errorBuckets = new Map<string, {
+    count: number;
+    postIds: string[];
+    blotatoPostIds: string[];
+    sampleMessage: string;
+  }>();
+
   await Promise.allSettled(
     posts.map(async (post) => {
       try {
@@ -279,22 +288,43 @@ export async function runMetricsRefresh(): Promise<{ processed: number }> {
           // Swallow — DB update must not crash the batch
         }
 
-        // Log to ErrorReport table — fire-and-forget (must never crash the batch)
-        try {
-          await reportServerError(errorMessage, {
-            url: "cron/metrics",
-            metadata: {
-              postId: post.id,
-              blotatoPostId: post.blotatoPostId,
-              source: "blotato-metrics",
-            },
+        // Collect error for batched reporting.
+        // Safe: all awaits have completed before this synchronous Map mutation.
+        const key = normalizeMessage(errorMessage);
+        const bucket = errorBuckets.get(key);
+        if (bucket) {
+          bucket.count += 1;
+          bucket.postIds.push(post.id);
+          bucket.blotatoPostIds.push(post.blotatoPostId!);
+        } else {
+          errorBuckets.set(key, {
+            count: 1,
+            postIds: [post.id],
+            blotatoPostIds: [post.blotatoPostId!],
+            sampleMessage: errorMessage,
           });
-        } catch {
-          // Swallow — error reporting must not interfere with metrics batch
         }
       }
     })
   );
+
+  // Report aggregated errors — once per unique error pattern
+  for (const bucket of errorBuckets.values()) {
+    try {
+      await reportServerError(bucket.sampleMessage, {
+        url: "cron/metrics",
+        metadata: {
+          count: bucket.count,
+          postIds: bucket.postIds,
+          blotatoPostIds: bucket.blotatoPostIds,
+          sampleMessage: bucket.sampleMessage,
+          source: "blotato-metrics",
+        },
+      });
+    } catch {
+      // Swallow — error reporting must not interfere with metrics batch
+    }
+  }
 
   return { processed: posts.length };
 }
