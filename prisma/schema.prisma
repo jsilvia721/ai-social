@@ -312,6 +312,38 @@ model ErrorReport {
   @@index([source, status])
 }
 
+// ── System Metrics ──────────────────────────────────────────────────────────
+
+model ApiCall {
+  id         String   @id @default(cuid())
+  service    String   // "blotato" | "github" | "anthropic"
+  endpoint   String   // e.g. "publishPost", "createIssue"
+  method     String   @default("POST")
+  statusCode Int?     // null if network error
+  latencyMs  Int
+  error      String?  @db.Text
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([service, createdAt])
+  @@index([createdAt])
+}
+
+model CronRun {
+  id             String    @id @default(cuid())
+  cronName       String    // "publish"|"metrics"|"research"|"briefs"|"fulfill"|"optimize"|"brainstorm"
+  status         String    // "RUNNING"|"SUCCESS"|"FAILED"
+  itemsProcessed Int?
+  durationMs     Int?
+  error          String?   @db.Text
+  metadata       Json?
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([cronName, startedAt])
+  @@index([startedAt])
+}
+
 // ── User Feedback ───────────────────────────────────────────────────────────
 
 model Feedback {
