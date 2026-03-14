@@ -17,12 +17,14 @@ const mockListIssues = jest.fn();
 const mockListRecentPRs = jest.fn();
 const mockGetRepoFile = jest.fn();
 const mockCreateIssue = jest.fn();
+const mockCheckWritePermissions = jest.fn();
 
 jest.mock("@/lib/github", () => ({
   listIssues: (...args: unknown[]) => mockListIssues(...args),
   listRecentPRs: (...args: unknown[]) => mockListRecentPRs(...args),
   getRepoFile: (...args: unknown[]) => mockGetRepoFile(...args),
   createIssue: (...args: unknown[]) => mockCreateIssue(...args),
+  checkWritePermissions: (...args: unknown[]) => mockCheckWritePermissions(...args),
 }));
 
 // Mock Prisma
@@ -106,6 +108,7 @@ describe("generateBrainstorm", () => {
     mockedShouldMock.mockReturnValue(false);
 
     // Default mocks
+    mockCheckWritePermissions.mockResolvedValue(true);
     mockListIssues.mockResolvedValue([
       { number: 1, title: "Issue 1", body: "", state: "open", labels: [], html_url: "" },
     ]);
@@ -224,6 +227,19 @@ describe("generateBrainstorm", () => {
         issueNumber: 42,
         url: "https://github.com/test/issues/42",
       });
+    });
+  });
+
+  describe("write permissions preflight", () => {
+    it("throws before calling Claude when write permissions are missing", async () => {
+      mockCheckWritePermissions.mockResolvedValue(false);
+      await expect(generateBrainstorm()).rejects.toThrow(
+        "GitHub token lacks write permissions"
+      );
+      // Should not call any expensive APIs
+      expect(mockListIssues).not.toHaveBeenCalled();
+      expect(mockMessagesCreate).not.toHaveBeenCalled();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
     });
   });
 

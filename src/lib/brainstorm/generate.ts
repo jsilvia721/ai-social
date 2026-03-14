@@ -81,6 +81,15 @@ export async function generateBrainstorm(): Promise<{
     return mockGenerateBrainstorm();
   }
 
+  // 0. Preflight: verify GitHub token can write before spending Claude credits
+  const canWrite = await github.checkWritePermissions();
+  if (!canWrite) {
+    throw new Error(
+      "GitHub token lacks write permissions — cannot create brainstorm issues. " +
+        "Update the GITHUB_TOKEN secret with a token that has issues:write scope.",
+    );
+  }
+
   // 1. Gather context from GitHub
   const [openIssues, recentPRs, visionDoc] = await Promise.all([
     github.listIssues(["enhancement", "bug"], "open"),
