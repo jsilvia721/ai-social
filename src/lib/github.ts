@@ -5,7 +5,8 @@
  * When shouldMockExternalApis() returns true, all methods return canned data
  * from src/lib/mocks/github.ts without hitting the GitHub API.
  *
- * If GITHUB_TOKEN is not set, all methods are no-ops (return safe defaults).
+ * If GITHUB_TOKEN is not set, read-only methods return safe defaults (empty
+ * strings/arrays). Write operations (createIssue, createComment) throw.
  */
 import { Octokit } from "@octokit/rest";
 import { env } from "@/env";
@@ -71,8 +72,8 @@ function repoParams() {
 
 /**
  * Returns true for Octokit HTTP errors (have a numeric `status` property).
- * These are non-retryable API errors (403 permission denied, 404 not found, etc.)
- * that should degrade gracefully rather than crash the caller.
+ * Used to identify API errors (403, 404, etc.) for logging before
+ * re-throwing or degrading gracefully, depending on the caller.
  */
 function isHttpError(error: unknown): boolean {
   return (
