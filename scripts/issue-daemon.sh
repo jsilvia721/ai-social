@@ -152,32 +152,43 @@ CIRCUIT_BREAKER_FILE="$LOG_DIR/.failure_times"
 CIRCUIT_BREAKER_WINDOW=60   # seconds
 CIRCUIT_BREAKER_THRESHOLD=3 # failures within window
 
+# --- Worktree lookup ----------------------------------------------------------
+# Find the worktree directory for a given issue number.
+# Scans for branches matching issue-{N}-*.
+# $1 — issue_number. Outputs worktree path or empty string.
+find_issue_worktree() {
+  local issue_number="$1"
+  for wt in .claude/worktrees/*/; do
+    [ -d "$wt" ] || continue
+    local branch
+    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [[ "$branch" == issue-${issue_number}-* ]]; then
+      echo "$wt"
+      return
+    fi
+  done
+}
+
 # --- WIP commit ---------------------------------------------------------------
 # Commit and push any uncommitted work in a worktree for the given issue.
 # Arguments: $1=issue_number
 commit_wip_if_needed() {
   local issue_number="$1"
+  local wt
+  wt=$(find_issue_worktree "$issue_number")
+  [ -n "$wt" ] || return
 
-  # Scan worktrees for a branch matching issue-{N}-*
-  for wt in .claude/worktrees/*/; do
-    [ -d "$wt" ] || continue
+  # Check for uncommitted changes (only tracked files to avoid committing secrets)
+  if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+    log "Committing WIP changes in worktree for issue #${issue_number}"
+    git -C "$wt" add -u 2>/dev/null || true
+    git -C "$wt" commit -m "WIP: interrupted by rate limit (issue #${issue_number})" 2>/dev/null || true
+  fi
 
-    local branch
-    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-
-    if [[ "$branch" == issue-${issue_number}-* ]]; then
-      # Check for uncommitted changes (only tracked files to avoid committing secrets)
-      if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
-        log "Committing WIP changes in worktree for issue #${issue_number}"
-        git -C "$wt" add -u 2>/dev/null || true
-        git -C "$wt" commit -m "WIP: interrupted by rate limit (issue #${issue_number})" 2>/dev/null || true
-      fi
-
-      # Push any unpushed commits
-      git -C "$wt" push -u origin "$branch" 2>/dev/null || true
-      return
-    fi
-  done
+  # Push any unpushed commits
+  local branch
+  branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  git -C "$wt" push -u origin "$branch" 2>/dev/null || true
 }
 
 # --- Worktree cleanup ---------------------------------------------------------
@@ -185,26 +196,18 @@ commit_wip_if_needed() {
 # Arguments: $1=issue_number
 clean_worktree() {
   local issue_number="$1"
+  local wt
+  wt=$(find_issue_worktree "$issue_number")
+  [ -n "$wt" ] || return
 
-  # Scan worktrees for a branch matching issue-{N}-*
-  for wt in .claude/worktrees/*/; do
-    [ -d "$wt" ] || continue
-
-    local branch
-    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-
-    if [[ "$branch" == issue-${issue_number}-* ]]; then
-      local cleaned
-      cleaned=$(git -C "$wt" clean -fd 2>&1 || true)
-      if [ -n "$cleaned" ]; then
-        log "Cleaned untracked files in worktree for issue #${issue_number}:"
-        echo "$cleaned" | while IFS= read -r line; do
-          log "  $line"
-        done
-      fi
-      return
-    fi
-  done
+  local cleaned
+  cleaned=$(git -C "$wt" clean -fd 2>&1 || true)
+  if [ -n "$cleaned" ]; then
+    log "Cleaned untracked files in worktree for issue #${issue_number}:"
+    echo "$cleaned" | while IFS= read -r line; do
+      log "  $line"
+    done
+  fi
 }
 
 # --- Heartbeat helper ---------------------------------------------------------
@@ -255,23 +258,6 @@ load_session_id() {
 # $1 — issue_number
 clear_session_id() {
   rm -f "$LOG_DIR/.session-${1}"
-}
-
-# --- Worktree lookup ----------------------------------------------------------
-# Find the worktree directory for a given issue number.
-# Scans for branches matching issue-{N}-*.
-# $1 — issue_number. Outputs worktree path or empty string.
-find_issue_worktree() {
-  local issue_number="$1"
-  for wt in .claude/worktrees/*/; do
-    [ -d "$wt" ] || continue
-    local branch
-    branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-    if [[ "$branch" == issue-${issue_number}-* ]]; then
-      echo "$wt"
-      return
-    fi
-  done
 }
 
 # --- Worker function ----------------------------------------------------------
