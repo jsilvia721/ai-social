@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trash2, Loader2, Calendar, CheckCircle2, XCircle, FileText, Pencil, RefreshCw, Heart, MessageCircle, Repeat2, Eye, Bookmark, TrendingUp, Copy } from "lucide-react";
 import type { PostStatus, Platform } from "@/types";
+import { formatPostError } from "./formatPostError";
 
 const STATUS_CONFIG: Record<PostStatus, { label: string; icon: React.ElementType; className: string }> = {
   DRAFT: { label: "Draft", icon: FileText, className: "bg-zinc-700 text-zinc-300 border-zinc-600" },
@@ -191,7 +192,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
           </div>
           {post.status === "FAILED" && post.errorMessage && (
             <p className="text-xs text-red-400 truncate" title={post.errorMessage}>
-              {post.errorMessage}
+              {formatPostError(post.errorMessage)}
             </p>
           )}
           {post.status === "PUBLISHED" && (
