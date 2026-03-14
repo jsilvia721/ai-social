@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PostCard } from "@/components/posts/PostCard";
+import { Pagination } from "@/components/ui/pagination";
 import { ContentCalendar } from "@/components/posts/ContentCalendar";
 import { WeekCalendar, getMondayOfWeek } from "@/components/posts/WeekCalendar";
 import { PenSquare, List, CalendarDays } from "lucide-react";
@@ -42,6 +43,9 @@ export default function PostsPage() {
   const [activeTab, setActiveTab] = useState<PostStatus | "ALL">("ALL");
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const POSTS_PER_PAGE = 20;
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -62,15 +66,20 @@ export default function PostsPage() {
     const params = new URLSearchParams();
     if (activeTab !== "ALL") params.set("status", activeTab);
     if (activeBusinessId) params.set("businessId", activeBusinessId);
-    const query = params.toString();
-    fetch(`/api/posts${query ? `?${query}` : ""}`).then(async (res) => {
-      if (res.ok && !cancelled) setPosts((await res.json()).posts);
+    params.set("page", String(page));
+    params.set("limit", String(POSTS_PER_PAGE));
+    fetch(`/api/posts?${params.toString()}`).then(async (res) => {
+      if (res.ok && !cancelled) {
+        const data = await res.json();
+        setPosts(data.posts);
+        setTotalPages(Math.max(1, Math.ceil(data.total / POSTS_PER_PAGE)));
+      }
       if (!cancelled) setIsLoading(false);
     }).catch(() => {
       if (!cancelled) setIsLoading(false);
     });
     return () => { cancelled = true; };
-  }, [view, activeTab, activeBusinessId]);
+  }, [view, activeTab, activeBusinessId, page]);
 
   useEffect(() => {
     if (view !== "calendar" || calMode !== "month") return;
@@ -113,7 +122,17 @@ export default function PostsPage() {
   async function handleDelete(id: string) {
     const res = await fetch(`/api/posts?id=${id}`, { method: "DELETE" });
     if (res.ok) {
-      setPosts((prev) => prev.filter((p) => p.id !== id));
+      const remaining = posts.filter((p) => p.id !== id);
+      if (remaining.length === 0 && page > 1) {
+        // Last post on page deleted — go to previous page (triggers re-fetch)
+        setPage((p) => p - 1);
+      } else {
+        setPosts(remaining);
+        setTotalPages((prev) => {
+          const newTotal = Math.max(1, Math.ceil(((prev * POSTS_PER_PAGE) - 1) / POSTS_PER_PAGE));
+          return newTotal;
+        });
+      }
     }
   }
 
@@ -276,7 +295,7 @@ export default function PostsPage() {
             {TABS.map(({ label, value }) => (
               <button
                 key={value}
-                onClick={() => setActiveTab(value)}
+                onClick={() => { setActiveTab(value); setPage(1); }}
                 className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
                   activeTab === value
                     ? "border-violet-500 text-violet-400"
@@ -305,6 +324,10 @@ export default function PostsPage() {
               ))
             )}
           </div>
+
+          {!isLoading && posts.length > 0 && (
+            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+          )}
         </>
       )}
     </div>
