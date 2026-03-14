@@ -58,6 +58,24 @@ describe("CronRunTimeline", () => {
     expect(screen.getByText("FAILED")).toBeInTheDocument();
   });
 
+  it("formats timestamps in 12-hour local time (not military/UTC)", () => {
+    const runs: CronRunRow[] = [
+      {
+        id: "run-1",
+        cronName: "publish",
+        status: "SUCCESS",
+        itemsProcessed: 5,
+        durationMs: 1500,
+        startedAt: "2026-03-14T10:00:00.000Z",
+      },
+    ];
+    render(<CronRunTimeline runs={runs} />);
+    // Should contain AM or PM (12-hour format), not 24-hour
+    const cells = screen.getAllByRole("cell");
+    const timeCell = cells[cells.length - 1]; // last cell is "Started At"
+    expect(timeCell.textContent).toMatch(/AM|PM/);
+  });
+
   it("shows dash for null duration and items", () => {
     const runs: CronRunRow[] = [
       {
