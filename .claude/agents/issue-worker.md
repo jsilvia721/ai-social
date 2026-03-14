@@ -239,27 +239,62 @@ EOF
 - On **success**: after Step 6 (PR creation)
 - On **failure**: before labeling the issue `claude-blocked`
 
-Review your mental journal from Steps 1–6 and decide whether any friction you encountered is worth reporting as a self-improvement issue.
+Review your mental journal from Steps 1–6. You MUST write a **Reflection** comment on the issue before deciding whether to create self-improvement issues.
+
+### Mandatory Reflection
+
+Post a comment on the issue with your reflection. This is required on every run — it ensures you actually pause and think rather than defaulting to "no learnings."
+
+```bash
+gh issue comment <number> --body "<!-- progress:step_7_reflect -->**Reflection:**
+<At least 2-3 sentences describing what you learned during this implementation.
+What was harder than expected? What pattern did you discover? What documentation
+did you wish existed? What surprised you about the codebase?>
+
+**Journal entries:** <N entries recorded during implementation>
+**Issues to file:** <N> (or: none — <specific reason why nothing qualifies>)"
+```
+
+**"None" requires justification.** You cannot say "no learnings" without explaining why. Valid justifications:
+- "The task was a single-line change following a documented pattern in `.claude/rules/testing.md`"
+- "All friction was transient (npm install timeout, GitHub API 502)"
+
+Invalid justifications:
+- "No significant learnings" (too vague — what did you encounter?)
+- "Everything went smoothly" (you implemented code — something was new)
 
 ### Significance Filter
 
-**CREATE an issue if:**
-- The learning would save a future agent >5 minutes of backtracking
-- The fix is actionable (specific file + specific change)
-- It's not already documented in CLAUDE.md, `.claude/rules/`, or `docs/solutions/`
+**Default is to CREATE.** Err on the side of filing — human review is the quality gate, not you. A low-value issue that gets closed costs 30 seconds of human time. A missed learning that causes 3 future agents to waste 10 minutes each costs 30 minutes.
 
-**SKIP if:**
-- Friction was task-specific (not generalizable to other issues)
-- Already documented somewhere in the project
-- Transient (network flake, slow dependency download)
-- Trivial (typo-level, obvious from context)
+**CREATE an issue if:**
+- The learning would save a future agent any amount of backtracking
+- You had to try something more than once to get it right
+- You discovered a pattern by reading code that wasn't documented anywhere
+- A mock, test setup, or config detail wasn't covered in `.claude/rules/` or `docs/solutions/`
+- You found a gotcha that would surprise a future agent working in the same area
+- The fix is actionable (specific file + specific change)
+
+**SKIP only if ALL of these are true:**
+- The friction was purely task-specific AND could never apply to another issue
+- It's already documented in CLAUDE.md, `.claude/rules/`, or `docs/solutions/`
+- It's genuinely transient (network flake, temporary CI issue)
 
 ### Examples
 
-- "Had to discover that `env.ts` validates at import time, not at usage time — should be documented in CLAUDE.md" ✅
-- "Prisma mock pattern in testing.md is missing the `$transaction` mock — had to figure it out from test failures" ✅
-- "npm install was slow" ❌
-- "Had to read the Posts API to understand the response shape" ❌ (task-specific)
+**File these** ✅:
+- "Had to discover that `env.ts` validates at import time, not at usage time — should be documented in CLAUDE.md"
+- "Prisma mock pattern in testing.md is missing the `$transaction` mock — had to figure it out from test failures"
+- "The `assertSafeMediaUrl` guard requires the full S3 URL prefix including the bucket name — spent time debugging a 403 before realizing"
+- "Test file naming convention `src/__tests__/api/posts.test.ts` mirrors `src/app/api/posts/` but this isn't stated anywhere"
+- "Had to look at 3 existing API routes to figure out the error response shape `{ error: string }` — a rule would help"
+- "The `ensureValidToken` function silently returns null on refresh failure — documenting this would prevent confusion"
+- "CI requires Docker for Prisma migrations but this isn't mentioned in the testing rules"
+- "Discovered that `getServerSession` must be called before any DB query — not obvious from the middleware setup"
+
+**Skip these** ❌:
+- "npm install was slow" (transient)
+- "Had to read the Posts API to understand the response shape" (normal exploration, BUT if you had to read 3+ files to piece it together, that's a documentation gap — file it)
 
 ### Issue Cap
 
@@ -315,7 +350,7 @@ gh issue comment <number> --body "PR created: <pr-url>
 **Tests:** <pass/fail summary>
 **Test plan validation:** <N/M items verified, K blocked — see #issue1, #issue2> or <All N items verified>
 **Review:** <final status of each review agent, or 'Self-review only' for trivial — never 'pending'>
-**Self-improvement:** <list of created issue links, or 'No significant learnings to report'>"
+**Self-improvement:** <list of created issue links, or 'None — <specific justification from reflection>'>"
 ```
 
 ## Resuming Interrupted Work
