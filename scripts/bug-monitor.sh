@@ -62,6 +62,14 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 mkdir -p "$LOG_DIR"
 
+# Auto-load environment file if present (e.g. DATABASE_URL)
+if [ -f ".env.bug-monitor.local" ]; then
+  set -a
+  # shellcheck source=/dev/null
+  source ".env.bug-monitor.local"
+  set +a
+fi
+
 # Source the CloudWatch query helper
 # shellcheck source=scripts/lib/cloudwatch-query.sh
 source "scripts/lib/cloudwatch-query.sh"
