@@ -145,6 +145,75 @@ describe("normalizeMessage", () => {
     });
   });
 
+  describe("compound hyphenated ID replacement", () => {
+    it("replaces seed-style compound IDs", () => {
+      expect(
+        normalizeMessage("posts/seed-blotato-post-1772985511806-xa5g/metrics")
+      ).toBe("posts/<COMPOUND_ID>/metrics");
+    });
+
+    it("replaces different compound IDs to the same placeholder", () => {
+      const a = normalizeMessage(
+        "posts/seed-blotato-post-1772985511806-xa5g/metrics"
+      );
+      const b = normalizeMessage(
+        "posts/seed-blotato-post-1773021279727-4uvf/metrics"
+      );
+      expect(a).toBe(b);
+    });
+
+    it("replaces generic compound IDs with number and short suffix", () => {
+      expect(normalizeMessage("my-resource-12345-abc")).toBe("<COMPOUND_ID>");
+    });
+
+    it("preserves simple hyphenated words without numeric segments", () => {
+      expect(normalizeMessage("auto-approval")).toBe("auto-approval");
+    });
+
+    it("preserves file paths with hyphens", () => {
+      expect(normalizeMessage("post-card.tsx")).toBe("post-card.tsx");
+    });
+
+    it("replaces compound ID with numeric suffix like a9a3", () => {
+      expect(
+        normalizeMessage("posts/seed-blotato-post-1772985511798-a9a3/metrics")
+      ).toBe("posts/<COMPOUND_ID>/metrics");
+    });
+
+    it("replaces compound ID with single prefix segment", () => {
+      expect(normalizeMessage("word-123-abc")).toBe("<COMPOUND_ID>");
+    });
+
+    it("does not replace when suffix exceeds 8 chars", () => {
+      expect(normalizeMessage("prefix-123-abcdefghi")).toBe(
+        "prefix-<N>-abcdefghi"
+      );
+    });
+  });
+
+  describe("integration: issues #337-339 produce identical output", () => {
+    const msg337 =
+      '[metrics-refresh] Failed to refresh metrics for post cmmhxsoe6000c02l8bwx5jrsr: Blotato API error 404: {"message":"Route GET:/v2/posts/seed-blotato-post-1772985511806-xa5g/metrics not found","error":"Not Found","statusCode":404}';
+    const msg338 =
+      '[metrics-refresh] Failed to refresh metrics for post cmmij3b4i000a02l526nz47xb: Blotato API error 404: {"message":"Route GET:/v2/posts/seed-blotato-post-1773021279727-4uvf/metrics not found","error":"Not Found","statusCode":404}';
+    const msg339 =
+      '[metrics-refresh] Failed to refresh metrics for post cmmhxsoe0000b02l8shft5ctj: Blotato API error 404: {"message":"Route GET:/v2/posts/seed-blotato-post-1772985511798-a9a3/metrics not found","error":"Not Found","statusCode":404}';
+
+    it("all three messages normalize to the same string", () => {
+      const n337 = normalizeMessage(msg337);
+      const n338 = normalizeMessage(msg338);
+      const n339 = normalizeMessage(msg339);
+      expect(n337).toBe(n338);
+      expect(n338).toBe(n339);
+    });
+
+    it("normalizes CUIDs, compound IDs, and numbers", () => {
+      const expected =
+        '[metrics-refresh] Failed to refresh metrics for post <ID>: Blotato API error <N>: {"message":"Route GET:/v2/posts/<COMPOUND_ID>/metrics not found","error":"Not Found","statusCode":<N>}';
+      expect(normalizeMessage(msg337)).toBe(expected);
+    });
+  });
+
   describe("combined normalization", () => {
     it("applies all rules in order", () => {
       const input =
