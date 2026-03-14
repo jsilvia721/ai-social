@@ -214,6 +214,18 @@ describe("issue-worker agent prompt", () => {
       expect(section).toContain("learnings-researcher");
     });
 
+    it("places learnings search before planning content", () => {
+      const section = extractSection(
+        content,
+        "## Step 2: Plan (Moderate + Complex only)"
+      );
+      const searchIndex = section.indexOf("learnings-researcher");
+      const planningIndex = section.indexOf("### Planning");
+
+      expect(searchIndex).toBeGreaterThan(-1);
+      expect(planningIndex).toBeGreaterThan(searchIndex);
+    });
+
     it("specifies the correct subagent_type", () => {
       const section = extractSection(
         content,
