@@ -196,5 +196,42 @@ describe("PostCard", () => {
       expect(platformIcon.className.baseVal || platformIcon.getAttribute("class")).toContain("h-6");
       expect(platformIcon.className.baseVal || platformIcon.getAttribute("class")).toContain("sm:h-5");
     });
+
+    it("shows 3 lines of content on mobile (line-clamp-3) and 2 on sm", () => {
+      render(<PostCard post={makePost()} onDelete={mockDelete} />);
+      const content = screen.getByText("Hello world post content for testing the card display");
+      expect(content.className).toContain("line-clamp-3");
+      expect(content.className).toContain("sm:line-clamp-2");
+    });
+
+    it("uses larger action icons on mobile (h-5) and standard on sm (sm:h-4)", () => {
+      render(<PostCard post={makePost()} onDelete={mockDelete} />);
+      const deleteBtn = screen.getByLabelText("Delete post");
+      const icon = deleteBtn.querySelector("svg") as SVGElement;
+      const iconClass = icon.className.baseVal || icon.getAttribute("class") || "";
+      expect(iconClass).toContain("h-5");
+      expect(iconClass).toContain("sm:h-4");
+    });
+
+    it("uses responsive metric pill text on mobile", () => {
+      const { container } = render(
+        <PostCard
+          post={makePost({
+            status: "PUBLISHED",
+            metricsLikes: 10,
+            metricsComments: 2,
+            metricsShares: 1,
+            metricsImpressions: 100,
+          })}
+          onDelete={mockDelete}
+        />
+      );
+      // MetricPill spans should have responsive text classes
+      const metricSpans = container.querySelectorAll("[title]");
+      const likesSpan = Array.from(metricSpans).find(el => el.getAttribute("title") === "Likes");
+      expect(likesSpan).toBeTruthy();
+      expect(likesSpan!.className).toContain("text-sm");
+      expect(likesSpan!.className).toContain("sm:text-xs");
+    });
   });
 });
