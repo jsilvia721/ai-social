@@ -162,6 +162,8 @@ describe("PostComposer video upload retry", () => {
         metadata: expect.objectContaining({
           type: "UPLOAD",
           method: "presigned",
+          retryCount: 2,
+          online: true,
         }),
       })
     );
