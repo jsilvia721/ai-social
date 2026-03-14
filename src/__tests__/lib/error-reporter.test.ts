@@ -150,6 +150,28 @@ describe("error-reporter", () => {
       console.error = originalConsoleError;
     });
 
+    it("console.error wrapper filters out [next-auth] diagnostic strings", () => {
+      const originalConsoleError = console.error;
+      const mockOriginal = jest.fn();
+      console.error = mockOriginal;
+
+      const cleanup = initErrorReporter({
+        captureConsoleErrors: true,
+        debounceMs: 100,
+      });
+
+      console.error("[next-auth][error][CLIENT_FETCH_ERROR] unexpected response");
+      jest.advanceTimersByTime(100);
+
+      expect(mockOriginal).toHaveBeenCalledWith(
+        "[next-auth][error][CLIENT_FETCH_ERROR] unexpected response"
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      cleanup();
+      console.error = originalConsoleError;
+    });
+
     it("console.error wrapper filters out React Warning: strings", () => {
       const originalConsoleError = console.error;
       const mockOriginal = jest.fn();
