@@ -258,6 +258,32 @@ describe("promoteBrainstormItems", () => {
     });
   });
 
+  it("skips item and allows retry when createIssue returns number 0", async () => {
+    setIssue(BODY_ONE_CHECKED);
+    mockCreateIssue.mockResolvedValue({
+      number: 0,
+      title: "Plan: Feature One",
+      html_url: "",
+    });
+    const session = makeSession();
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+
+    await promoteBrainstormItems(session);
+
+    // Should not update issue body or increment approvedCount
+    expect(mockUpdateIssueBody).not.toHaveBeenCalled();
+    expect(mockSessionUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ approvedCount: expect.anything() }),
+      }),
+    );
+    // Should log a warning
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Feature One"),
+    );
+    warnSpy.mockRestore();
+  });
+
   it("syncs status to CLOSED when GitHub issue is already closed", async () => {
     setIssue(BODY_UNCHECKED, "closed");
     const session = makeSession();
