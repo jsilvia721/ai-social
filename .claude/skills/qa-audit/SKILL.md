@@ -15,7 +15,7 @@ Crawl dashboard pages, take screenshots at mobile and desktop viewports, analyze
 - `--mobile-only` — only capture mobile viewport (375px)
 - `--desktop-only` — only capture desktop viewport (1440px)
 
-**Default test email:** `josh@jsilvia.com` — used for all auth endpoint calls below. Referenced as `{testEmail}`.
+**Default test email:** `jsilvia721@gmail.com` — used for all auth endpoint calls below. Referenced as `{testEmail}`.
 
 **Never stop and ask the user for help.** Attempt autonomous recovery, create self-improvement issues for unrecoverable blockers, and continue auditing whatever pages remain accessible. Only abort if zero pages can be loaded.
 
