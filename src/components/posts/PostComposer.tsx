@@ -201,7 +201,11 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
             setUploadProgress(null);
             resolve(attemptUpload(retryCount + 1));
           } else {
-            reject(new Error(errorMsg));
+            const error: Error & { retryCount?: number; online?: boolean } =
+              new Error(errorMsg);
+            error.retryCount = retryCount + 1;
+            error.online = navigator.onLine;
+            reject(error);
           }
         }
 
@@ -337,9 +341,19 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
       } else {
         const file = files[0];
         const method = videos.length > 0 ? "presigned" : "server";
+        const diagErr = err as Error & { retryCount?: number; online?: boolean };
         reportError(err, {
           url: window.location.href,
-          metadata: { type: "UPLOAD", method, fileType: file?.type, fileSize: file?.size },
+          metadata: {
+            type: "UPLOAD",
+            method,
+            fileType: file?.type,
+            fileSize: file?.size,
+            ...(diagErr?.retryCount != null && {
+              retryCount: diagErr.retryCount,
+              online: diagErr.online,
+            }),
+          },
         });
         setError(err instanceof Error ? err.message : "Upload failed.");
       }
