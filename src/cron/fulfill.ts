@@ -1,10 +1,9 @@
 import { runFulfillment } from "@/lib/fulfillment";
 import { sendReviewNotifications } from "@/lib/notifications";
-import { trackCronRun } from "@/lib/system-metrics";
+import { withCronTracking } from "@/lib/system-metrics";
 
-export const handler = async () => {
-  const startedAt = new Date();
-  try {
+export const handler = () =>
+  withCronTracking("fulfill", async () => {
     const result = await runFulfillment();
     console.log("[fulfill cron]", result);
 
@@ -13,23 +12,5 @@ export const handler = async () => {
       await sendReviewNotifications();
     }
 
-    await trackCronRun({
-      cronName: "fulfill",
-      status: "SUCCESS",
-      itemsProcessed: result.created,
-      durationMs: Date.now() - startedAt.getTime(),
-      startedAt,
-      completedAt: new Date(),
-    });
-  } catch (err) {
-    await trackCronRun({
-      cronName: "fulfill",
-      status: "FAILED",
-      durationMs: Date.now() - startedAt.getTime(),
-      error: err instanceof Error ? err.message : String(err),
-      startedAt,
-      completedAt: new Date(),
-    });
-    throw err;
-  }
-};
+    return { itemsProcessed: result.created };
+  });

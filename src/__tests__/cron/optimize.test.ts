@@ -2,7 +2,7 @@ jest.mock("@/lib/optimizer/run", () => ({
   runWeeklyOptimization: jest.fn(),
 }));
 jest.mock("@/lib/system-metrics", () => ({
-  trackCronRun: jest.fn().mockResolvedValue(undefined),
+  withCronTracking: jest.fn((_name: string, fn: () => Promise<void>) => fn()),
 }));
 
 import { handler } from "@/cron/optimize";

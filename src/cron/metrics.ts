@@ -1,35 +1,17 @@
 import { runMetricsRefresh } from "@/lib/scheduler";
-import { trackCronRun } from "@/lib/system-metrics";
+import { withCronTracking } from "@/lib/system-metrics";
 import { prisma } from "@/lib/db";
 
 export const handler = async () => {
-  const startedAt = new Date();
-  try {
+  await withCronTracking("metrics", async () => {
     console.log("[metrics-cron] Starting metrics refresh");
     const result = await runMetricsRefresh();
     console.log(`[metrics-cron] Done: ${result.processed} posts processed`);
+    return { itemsProcessed: result.processed };
+  });
 
-    await trackCronRun({
-      cronName: "metrics",
-      status: "SUCCESS",
-      itemsProcessed: result.processed,
-      durationMs: Date.now() - startedAt.getTime(),
-      startedAt,
-      completedAt: new Date(),
-    });
-  } catch (err) {
-    await trackCronRun({
-      cronName: "metrics",
-      status: "FAILED",
-      durationMs: Date.now() - startedAt.getTime(),
-      error: err instanceof Error ? err.message : String(err),
-      startedAt,
-      completedAt: new Date(),
-    });
-    throw err;
-  }
-
-  // Fire-and-forget: 30-day data retention cleanup
+  // Fire-and-forget: 30-day data retention cleanup.
+  // Runs after metrics refresh (hourly cadence) to keep tables bounded.
   try {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     await prisma.apiCall.deleteMany({

@@ -38,10 +38,19 @@ export async function trackApiCall(data: {
   }
 }
 
+export type CronName =
+  | "publish"
+  | "metrics"
+  | "research"
+  | "briefs"
+  | "fulfill"
+  | "optimize"
+  | "brainstorm";
+
 // Always write CronRun regardless of mock mode — cron logic still
 // runs in staging/dev and we want visibility into those executions.
 export async function trackCronRun(data: {
-  cronName: string;
+  cronName: CronName;
   status: "RUNNING" | "SUCCESS" | "FAILED";
   itemsProcessed?: number;
   durationMs?: number;
@@ -65,5 +74,44 @@ export async function trackCronRun(data: {
     });
   } catch {
     // Swallow — metrics tracking must never crash the caller
+  }
+}
+
+/**
+ * Wraps a cron handler with CronRun tracking. Records SUCCESS with
+ * duration and optional itemsProcessed on success, or FAILED with
+ * the error message on failure (then re-throws so Lambda marks it failed).
+ */
+export async function withCronTracking(
+  cronName: CronName,
+  fn: () => Promise<Record<string, unknown> | void>
+): Promise<void> {
+  const startedAt = new Date();
+  try {
+    const result = await fn();
+    await trackCronRun({
+      cronName,
+      status: "SUCCESS",
+      itemsProcessed:
+        result &&
+        typeof result === "object" &&
+        "itemsProcessed" in result &&
+        typeof result.itemsProcessed === "number"
+          ? result.itemsProcessed
+          : undefined,
+      durationMs: Date.now() - startedAt.getTime(),
+      startedAt,
+      completedAt: new Date(),
+    });
+  } catch (err) {
+    await trackCronRun({
+      cronName,
+      status: "FAILED",
+      durationMs: Date.now() - startedAt.getTime(),
+      error: err instanceof Error ? err.message : String(err),
+      startedAt,
+      completedAt: new Date(),
+    });
+    throw err;
   }
 }

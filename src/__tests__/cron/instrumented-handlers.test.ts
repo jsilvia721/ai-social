@@ -9,11 +9,13 @@ jest.mock("@/lib/scheduler", () => ({
 jest.mock("@/lib/research", () => ({ runResearchPipeline: jest.fn() }));
 jest.mock("@/lib/briefs", () => ({ runBriefGeneration: jest.fn() }));
 jest.mock("@/lib/fulfillment", () => ({ runFulfillment: jest.fn() }));
-jest.mock("@/lib/notifications", () => ({ sendReviewNotifications: jest.fn() }));
+jest.mock("@/lib/notifications", () => ({
+  sendReviewNotifications: jest.fn(),
+}));
 jest.mock("@/lib/optimizer/run", () => ({ runWeeklyOptimization: jest.fn() }));
 jest.mock("@/lib/brainstorm/run", () => ({ runBrainstormAgent: jest.fn() }));
-jest.mock("@/lib/system-metrics", () => ({
-  trackCronRun: jest.fn().mockResolvedValue(undefined),
+jest.mock("@/lib/mocks/config", () => ({
+  shouldMockExternalApis: jest.fn().mockReturnValue(false),
 }));
 
 import { handler as publishHandler } from "@/cron/publish";
@@ -31,70 +33,101 @@ import { runFulfillment } from "@/lib/fulfillment";
 import { sendReviewNotifications } from "@/lib/notifications";
 import { runWeeklyOptimization } from "@/lib/optimizer/run";
 import { runBrainstormAgent } from "@/lib/brainstorm/run";
-import { trackCronRun } from "@/lib/system-metrics";
-
-const mockTrackCronRun = trackCronRun as jest.MockedFunction<
-  typeof trackCronRun
->;
 
 beforeEach(() => {
   resetPrismaMock();
   jest.clearAllMocks();
+  prismaMock.cronRun.create.mockResolvedValue({ id: "cr-1" } as never);
 });
 
-describe("publish cron handler", () => {
-  it("tracks SUCCESS on successful run", async () => {
+describe("withCronTracking (via publish handler)", () => {
+  it("records SUCCESS with durationMs, startedAt, completedAt", async () => {
     (runScheduler as jest.Mock).mockResolvedValue(undefined);
-
     await publishHandler();
 
-    expect(runScheduler).toHaveBeenCalledTimes(1);
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
         cronName: "publish",
         status: "SUCCESS",
         itemsProcessed: undefined,
-      })
-    );
-    expect(mockTrackCronRun.mock.calls[0][0]).toHaveProperty("durationMs");
-    expect(mockTrackCronRun.mock.calls[0][0]).toHaveProperty("startedAt");
-    expect(mockTrackCronRun.mock.calls[0][0]).toHaveProperty("completedAt");
+      }),
+    });
+    const data = prismaMock.cronRun.create.mock.calls[0][0].data;
+    expect(data.durationMs).toBeGreaterThanOrEqual(0);
+    expect(data.startedAt).toBeInstanceOf(Date);
+    expect(data.completedAt).toBeInstanceOf(Date);
   });
 
-  it("tracks FAILED and re-throws on error", async () => {
+  it("records FAILED with error message and re-throws", async () => {
     (runScheduler as jest.Mock).mockRejectedValue(new Error("publish boom"));
 
     await expect(publishHandler()).rejects.toThrow("publish boom");
 
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
         cronName: "publish",
         status: "FAILED",
         error: "publish boom",
-      })
-    );
+      }),
+    });
+  });
+
+  it("stringifies non-Error thrown values", async () => {
+    (runScheduler as jest.Mock).mockRejectedValue("string error");
+
+    await expect(publishHandler()).rejects.toBe("string error");
+
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        error: "string error",
+      }),
+    });
   });
 });
 
-describe("metrics cron handler", () => {
-  it("tracks SUCCESS with itemsProcessed", async () => {
+describe("all handlers wire correct cronName", () => {
+  const cases: [string, () => Promise<void>, jest.Mock][] = [
+    ["publish", publishHandler, runScheduler as jest.Mock],
+    ["research", researchHandler, runResearchPipeline as jest.Mock],
+    ["briefs", briefsHandler, runBriefGeneration as jest.Mock],
+    ["optimize", optimizeHandler, runWeeklyOptimization as jest.Mock],
+    ["brainstorm", brainstormHandler, runBrainstormAgent as jest.Mock],
+  ];
+
+  it.each(cases)("%s handler tracks with correct name", async (name, handler, mock) => {
+    mock.mockResolvedValue(undefined);
+    await handler();
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ cronName: name, status: "SUCCESS" }),
+    });
+  });
+
+  it.each(cases)("%s handler tracks FAILED on error", async (name, handler, mock) => {
+    mock.mockRejectedValue(new Error("boom"));
+    await expect(handler()).rejects.toThrow("boom");
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ cronName: name, status: "FAILED" }),
+    });
+  });
+});
+
+describe("metrics handler", () => {
+  it("passes itemsProcessed from result.processed", async () => {
     (runMetricsRefresh as jest.Mock).mockResolvedValue({ processed: 10 });
-
     await metricsHandler();
-
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
         cronName: "metrics",
         status: "SUCCESS",
         itemsProcessed: 10,
-      })
-    );
+      }),
+    });
   });
 
   it("runs 30-day data retention cleanup", async () => {
     (runMetricsRefresh as jest.Mock).mockResolvedValue({ processed: 0 });
-    prismaMock.apiCall.deleteMany.mockResolvedValue({ count: 5 });
-    prismaMock.cronRun.deleteMany.mockResolvedValue({ count: 3 });
+    prismaMock.apiCall.deleteMany.mockResolvedValue({ count: 5 } as never);
+    prismaMock.cronRun.deleteMany.mockResolvedValue({ count: 3 } as never);
 
     await metricsHandler();
 
@@ -117,70 +150,32 @@ describe("metrics cron handler", () => {
     (runMetricsRefresh as jest.Mock).mockRejectedValue(
       new Error("metrics boom")
     );
-
     await expect(metricsHandler()).rejects.toThrow("metrics boom");
-
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
         cronName: "metrics",
         status: "FAILED",
         error: "metrics boom",
-      })
-    );
+      }),
+    });
   });
 });
 
-describe("research cron handler", () => {
-  it("tracks SUCCESS", async () => {
-    (runResearchPipeline as jest.Mock).mockResolvedValue(undefined);
-    await researchHandler();
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({ cronName: "research", status: "SUCCESS" })
-    );
-  });
-
-  it("tracks FAILED and re-throws", async () => {
-    (runResearchPipeline as jest.Mock).mockRejectedValue(new Error("boom"));
-    await expect(researchHandler()).rejects.toThrow("boom");
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({ cronName: "research", status: "FAILED" })
-    );
-  });
-});
-
-describe("briefs cron handler", () => {
-  it("tracks SUCCESS", async () => {
-    (runBriefGeneration as jest.Mock).mockResolvedValue(undefined);
-    await briefsHandler();
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({ cronName: "briefs", status: "SUCCESS" })
-    );
-  });
-
-  it("tracks FAILED and re-throws", async () => {
-    (runBriefGeneration as jest.Mock).mockRejectedValue(new Error("boom"));
-    await expect(briefsHandler()).rejects.toThrow("boom");
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({ cronName: "briefs", status: "FAILED" })
-    );
-  });
-});
-
-describe("fulfill cron handler", () => {
-  it("tracks SUCCESS with itemsProcessed from result.created", async () => {
+describe("fulfill handler", () => {
+  it("passes itemsProcessed from result.created", async () => {
     (runFulfillment as jest.Mock).mockResolvedValue({ created: 3 });
     (sendReviewNotifications as jest.Mock).mockResolvedValue(undefined);
 
     await fulfillHandler();
 
     expect(sendReviewNotifications).toHaveBeenCalled();
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
         cronName: "fulfill",
         status: "SUCCESS",
         itemsProcessed: 3,
-      })
-    );
+      }),
+    });
   });
 
   it("skips notifications when created is 0", async () => {
@@ -189,56 +184,13 @@ describe("fulfill cron handler", () => {
     await fulfillHandler();
 
     expect(sendReviewNotifications).not.toHaveBeenCalled();
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cronName: "fulfill",
-        status: "SUCCESS",
-        itemsProcessed: 0,
-      })
-    );
   });
 
-  it("tracks FAILED and re-throws", async () => {
+  it("tracks FAILED and re-throws on error", async () => {
     (runFulfillment as jest.Mock).mockRejectedValue(new Error("boom"));
     await expect(fulfillHandler()).rejects.toThrow("boom");
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({ cronName: "fulfill", status: "FAILED" })
-    );
-  });
-});
-
-describe("optimize cron handler", () => {
-  it("tracks SUCCESS", async () => {
-    (runWeeklyOptimization as jest.Mock).mockResolvedValue(undefined);
-    await optimizeHandler();
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({ cronName: "optimize", status: "SUCCESS" })
-    );
-  });
-
-  it("tracks FAILED and re-throws", async () => {
-    (runWeeklyOptimization as jest.Mock).mockRejectedValue(new Error("boom"));
-    await expect(optimizeHandler()).rejects.toThrow("boom");
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({ cronName: "optimize", status: "FAILED" })
-    );
-  });
-});
-
-describe("brainstorm cron handler", () => {
-  it("tracks SUCCESS", async () => {
-    (runBrainstormAgent as jest.Mock).mockResolvedValue(undefined);
-    await brainstormHandler();
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({ cronName: "brainstorm", status: "SUCCESS" })
-    );
-  });
-
-  it("tracks FAILED and re-throws", async () => {
-    (runBrainstormAgent as jest.Mock).mockRejectedValue(new Error("boom"));
-    await expect(brainstormHandler()).rejects.toThrow("boom");
-    expect(mockTrackCronRun).toHaveBeenCalledWith(
-      expect.objectContaining({ cronName: "brainstorm", status: "FAILED" })
-    );
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ cronName: "fulfill", status: "FAILED" }),
+    });
   });
 });
