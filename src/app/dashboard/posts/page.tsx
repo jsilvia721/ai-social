@@ -308,7 +308,7 @@ export default function PostsPage() {
           </div>
 
           {/* Posts list */}
-          <div className="space-y-3">
+          <div className="space-y-4 sm:space-y-3">
             {isLoading ? (
               <div className="py-12 text-center text-zinc-500">Loading posts…</div>
             ) : posts.length === 0 ? (

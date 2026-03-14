@@ -4,7 +4,9 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Heart, MessageCircle, Repeat2, Eye, TrendingUp, Bookmark } from "lucide-react";
+import { deduplicateByRepurposeGroup } from "@/lib/analytics/dedup";
 import type { Platform } from "@/types";
+import { PLATFORM_STYLES } from "@/components/accounts/platform-utils";
 
 const PLATFORM_COLOR: Record<Platform, string> = {
   TWITTER: "text-sky-400",
@@ -73,8 +75,8 @@ export default async function AnalyticsPage() {
     return acc;
   }, {});
 
-  // Top 10 posts by likes
-  const topPosts = [...posts]
+  // Top 10 posts by likes (deduplicate repurposed posts, keeping best performer)
+  const topPosts = deduplicateByRepurposeGroup([...posts])
     .sort((a, b) => (b.metricsLikes ?? 0) - (a.metricsLikes ?? 0))
     .slice(0, 10);
 
@@ -111,7 +113,7 @@ export default async function AnalyticsPage() {
               <Card key={platform} className="bg-zinc-800 border-zinc-700">
                 <CardHeader className="pb-2">
                   <CardTitle className={`text-sm font-semibold ${PLATFORM_COLOR[platform]}`}>
-                    {platform.charAt(0) + platform.slice(1).toLowerCase()}
+                    {PLATFORM_STYLES[platform].label}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-1 text-sm text-zinc-400">
