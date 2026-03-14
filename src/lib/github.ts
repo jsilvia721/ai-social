@@ -5,8 +5,8 @@
  * When shouldMockExternalApis() returns true, all methods return canned data
  * from src/lib/mocks/github.ts without hitting the GitHub API.
  *
- * If GITHUB_TOKEN is not set, read-only methods return safe defaults.
- * Write operations (createIssue) throw so callers know the write failed.
+ * If GITHUB_TOKEN is not set, read-only methods return safe defaults (empty
+ * strings/arrays). Write operations (createIssue, createComment) throw.
  */
 import { Octokit } from "@octokit/rest";
 import { env } from "@/env";
@@ -72,8 +72,8 @@ function repoParams() {
 
 /**
  * Returns true for Octokit HTTP errors (have a numeric `status` property).
- * These are non-retryable API errors (403 permission denied, 404 not found, etc.)
- * that should degrade gracefully rather than crash the caller.
+ * Used to identify API errors (403, 404, etc.) for logging before
+ * re-throwing or degrading gracefully, depending on the caller.
  */
 function isHttpError(error: unknown): boolean {
   return (
@@ -101,16 +101,25 @@ export async function createIssue(
 
   const octokit = getOctokit();
   if (!octokit) {
-    throw new Error("GitHub token not configured — cannot create issue");
+    throw new Error(
+      "GitHub client not configured — GITHUB_TOKEN or repo params missing"
+    );
   }
 
-  const { data } = await octokit.issues.create({
-    ...repoParams(),
-    title,
-    body,
-    labels,
-  });
-  return { number: data.number, title: data.title, html_url: data.html_url };
+  try {
+    const { data } = await octokit.issues.create({
+      ...repoParams(),
+      title,
+      body,
+      labels,
+    });
+    return { number: data.number, title: data.title, html_url: data.html_url };
+  } catch (error) {
+    if (isHttpError(error)) {
+      console.warn(`[github] createIssue failed: ${(error as Error).message}`);
+    }
+    throw error;
+  }
 }
 
 export async function updateIssueBody(
@@ -269,7 +278,11 @@ export async function createComment(
   if (shouldMockExternalApis()) return mockCreateComment(issueNumber, body);
 
   const octokit = getOctokit();
-  if (!octokit) return { id: 0, body };
+  if (!octokit) {
+    throw new Error(
+      "GitHub client not configured — GITHUB_TOKEN or repo params missing"
+    );
+  }
 
   try {
     const { data } = await octokit.issues.createComment({
@@ -281,7 +294,6 @@ export async function createComment(
   } catch (error) {
     if (isHttpError(error)) {
       console.warn(`[github] createComment failed: ${(error as Error).message}`);
-      return { id: 0, body };
     }
     throw error;
   }

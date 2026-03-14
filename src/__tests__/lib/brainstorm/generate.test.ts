@@ -275,5 +275,17 @@ describe("generateBrainstorm", () => {
       });
       await expect(generateBrainstorm()).rejects.toThrow();
     });
+
+    it("throws when createIssue returns issue number 0", async () => {
+      mockCreateIssue.mockResolvedValue({
+        number: 0,
+        title: "Brainstorm: Week of Jan 1, 2024",
+        html_url: "",
+      });
+      await expect(generateBrainstorm()).rejects.toThrow(
+        "GitHub issue creation returned invalid issue number"
+      );
+      expect(mockBrainstormCreate).not.toHaveBeenCalled();
+    });
   });
 });

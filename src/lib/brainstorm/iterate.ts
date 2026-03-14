@@ -147,11 +147,18 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
     await github.updateIssueBody(session.githubIssueNumber, updatedBody);
     currentBody = updatedBody;
 
-    // Post reply comment
-    await github.createComment(
-      session.githubIssueNumber,
-      `🔄 **Updated brainstorm** based on your feedback.\n\n> ${comment.body.split("\n")[0]}`,
-    );
+    // Post reply comment — catch errors so lastProcessedCommentId still advances
+    try {
+      await github.createComment(
+        session.githubIssueNumber,
+        `🔄 **Updated brainstorm** based on your feedback.\n\n> ${comment.body.split("\n")[0]}`,
+      );
+    } catch (error) {
+      console.warn(
+        `[iterate] Failed to post reply comment on #${session.githubIssueNumber}`,
+        error,
+      );
+    }
 
     // Update lastProcessedCommentId in DB
     await prisma.brainstormSession.update({
