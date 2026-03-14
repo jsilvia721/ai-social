@@ -393,6 +393,12 @@ create_bug_issue() {
   local metadata="${9:-}"
   local environment="${10:-}"
 
+  # Validate fingerprint — if empty, generate a fallback from error_message + source
+  if [ -z "$fingerprint" ]; then
+    log "Warning: empty fingerprint received, generating fallback from message + source"
+    fingerprint=$(generate_fingerprint "$source" "$error_message")
+  fi
+
   local summary
   summary=$(extract_error_summary "$error_message")
   local title
@@ -486,6 +492,30 @@ EOF
   fi
 }
 
+# --- Cycle-level batch dedup --------------------------------------------------
+# Tracks which fingerprints have been processed in the current poll cycle.
+# Prevents duplicate issues when GitHub search is eventually consistent.
+CYCLE_DEDUP_FILE=""
+
+init_cycle_dedup() {
+  CYCLE_DEDUP_FILE=$(mktemp)
+}
+
+cleanup_cycle_dedup() {
+  [ -n "$CYCLE_DEDUP_FILE" ] && rm -f "$CYCLE_DEDUP_FILE"
+  CYCLE_DEDUP_FILE=""
+}
+
+is_seen_this_cycle() {
+  local fp="$1"
+  [ -n "$CYCLE_DEDUP_FILE" ] && grep -qF "$fp" "$CYCLE_DEDUP_FILE" 2>/dev/null
+}
+
+mark_seen_this_cycle() {
+  local fp="$1"
+  [ -n "$CYCLE_DEDUP_FILE" ] && echo "$fp" >> "$CYCLE_DEDUP_FILE"
+}
+
 # --- Process a single error (shared by both poll sources) ---------------------
 # Checks cooldown, count threshold, deduplication, then creates/comments.
 # Echoes issue number if an issue was created, "0" otherwise.
@@ -559,6 +589,16 @@ process_error() {
     log "Linked issue #${existing_issue_number} is closed, creating new issue for recurrence"
   fi
 
+  # Within-cycle batch dedup: skip if this fingerprint was already processed
+  # in the current poll cycle. GitHub search is eventually consistent, so an
+  # issue created seconds ago may not appear in search results yet.
+  if is_seen_this_cycle "$fp"; then
+    log "Skipping duplicate fingerprint within cycle: ${fp:0:12}"
+    [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$cooldown_key"
+    echo "0"
+    return
+  fi
+
   # Check for existing open issue by fingerprint search
   local existing_url
   existing_url=$(find_existing_issue "$fp" "$environment")
@@ -566,6 +606,7 @@ process_error() {
   if [ -n "$existing_url" ]; then
     comment_existing_issue "$existing_url" "$err_count" "$last_seen" "$environment"
     [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$cooldown_key"
+    mark_seen_this_cycle "$fp"
     echo "0"
     return
   fi
@@ -577,6 +618,7 @@ process_error() {
     "$err_count" "$first_seen" "$last_seen" "$fp" "$metadata" "$environment")
 
   [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$cooldown_key"
+  mark_seen_this_cycle "$fp"
 
   if [ -n "$issue_number" ]; then
     echo "$issue_number"
@@ -853,6 +895,7 @@ fi
 while true; do
   local_issues_created=0
   since_ms=$(get_last_poll_ms)
+  init_cycle_dedup
 
   log "--- Poll cycle start (since=$(ms_to_human "$since_ms")) ---"
 
@@ -873,6 +916,9 @@ while true; do
   if [ -z "${DATABASE_URL_STAGING:-}" ] && [ -z "${DATABASE_URL_PRODUCTION:-}" ]; then
     local_issues_created=$(poll_error_reports "$local_issues_created")
   fi
+
+  # Clean up cycle-level dedup tracking
+  cleanup_cycle_dedup
 
   # Flush self-errors before advancing the poll timestamp, so errors from
   # this cycle are reported even if flush partially fails and preserves the file.

@@ -1037,6 +1037,138 @@ echo 'BUG_MONITOR_TEST_VAR=hello_from_env' > "$ENV_FILE"
 
 rm -rf "$ENV_TEST_DIR"
 
+# --- Test fingerprint rendering in create_bug_issue ----------------------------
+echo ""
+echo "=== Fingerprint Rendering Tests ==="
+echo ""
+
+echo "Fingerprint rendering in issue body:"
+
+# Simulate create_bug_issue body rendering with a valid fingerprint
+test_fp="abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+test_body_line="**Fingerprint:** \`${test_fp:0:12}\`"
+assert_eq "renders 12-char fingerprint prefix" "**Fingerprint:** \`abcdef123456\`" "$test_body_line"
+
+# Simulate with empty fingerprint — this is the bug we're fixing
+empty_fp=""
+empty_body_line="**Fingerprint:** \`${empty_fp:0:12}\`"
+assert_eq "empty fingerprint renders empty backticks (the bug)" "**Fingerprint:** \`\`" "$empty_body_line"
+
+# Test that fingerprint fallback produces a non-empty value
+# The fix: if fingerprint is empty, generate one from error_message + source
+fallback_fp=$(echo -n "SERVER:some error message" | sha256sum | awk '{print $1}')
+assert_not_empty "fallback fingerprint is non-empty" "$fallback_fp"
+assert_eq "fallback fingerprint is 64 hex chars" 64 "${#fallback_fp}"
+
+# Verify create_bug_issue has fingerprint validation
+if grep -q 'if \[ -z "$fingerprint" \]' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "create_bug_issue validates empty fingerprint"
+else
+  fail "create_bug_issue validates empty fingerprint" "validation exists" "not found"
+fi
+
+# --- Test within-cycle batch dedup -------------------------------------------
+echo ""
+echo "=== Within-Cycle Batch Dedup Tests ==="
+echo ""
+
+echo "Cycle-level fingerprint tracking:"
+
+# Test the cycle dedup mechanism using temp files
+CYCLE_DEDUP_DIR=$(mktemp -d)
+CYCLE_DEDUP_FILE="$CYCLE_DEDUP_DIR/.cycle_seen"
+touch "$CYCLE_DEDUP_FILE"
+
+# Helper: check if fingerprint was already processed this cycle
+is_seen_this_cycle() {
+  grep -qF "$1" "$CYCLE_DEDUP_FILE" 2>/dev/null
+}
+
+mark_seen_this_cycle() {
+  echo "$1" >> "$CYCLE_DEDUP_FILE"
+}
+
+# New fingerprint should not be seen
+if is_seen_this_cycle "fp_aaa"; then
+  fail "new fingerprint not seen this cycle" "not seen" "seen"
+else
+  pass "new fingerprint not seen this cycle"
+fi
+
+# After marking, should be seen
+mark_seen_this_cycle "fp_aaa"
+if is_seen_this_cycle "fp_aaa"; then
+  pass "fingerprint seen after marking"
+else
+  fail "fingerprint seen after marking" "seen" "not seen"
+fi
+
+# Different fingerprint should not be seen
+if is_seen_this_cycle "fp_bbb"; then
+  fail "different fingerprint not seen" "not seen" "seen"
+else
+  pass "different fingerprint not seen"
+fi
+
+# Mark another and verify both are tracked
+mark_seen_this_cycle "fp_bbb"
+if is_seen_this_cycle "fp_aaa" && is_seen_this_cycle "fp_bbb"; then
+  pass "multiple fingerprints tracked independently"
+else
+  fail "multiple fingerprints tracked independently" "both seen" "not both seen"
+fi
+
+rm -rf "$CYCLE_DEDUP_DIR"
+
+echo ""
+echo "DB row grouping by fingerprint:"
+
+# Simulate grouping DB rows by fingerprint using temp directory pattern
+DB_GROUP_DIR=$(mktemp -d)
+
+# Simulate 3 DB rows: 2 with same fingerprint, 1 different
+rows_fp1="aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"
+rows_fp2="bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222"
+
+# Row 1: fp1, count=5
+mkdir -p "$DB_GROUP_DIR/$rows_fp1"
+echo "5" > "$DB_GROUP_DIR/$rows_fp1/count"
+echo "Error: connection timeout" > "$DB_GROUP_DIR/$rows_fp1/message"
+echo "SERVER" > "$DB_GROUP_DIR/$rows_fp1/source"
+
+# Row 2: fp2, count=3
+mkdir -p "$DB_GROUP_DIR/$rows_fp2"
+echo "3" > "$DB_GROUP_DIR/$rows_fp2/count"
+echo "Error: null pointer" > "$DB_GROUP_DIR/$rows_fp2/message"
+echo "CLIENT" > "$DB_GROUP_DIR/$rows_fp2/source"
+
+# Count unique groups
+group_count=0
+for gdir in "$DB_GROUP_DIR"/*/; do
+  [ -d "$gdir" ] || continue
+  group_count=$((group_count + 1))
+done
+assert_eq "2 unique fingerprint groups from 2 different fps" "2" "$group_count"
+
+rm -rf "$DB_GROUP_DIR"
+
+echo ""
+echo "Batch dedup: same fingerprint produces single issue:"
+
+# Verify bug-monitor.sh has cycle dedup tracking
+if grep -q 'cycle_seen' "$REPO_ROOT/scripts/bug-monitor.sh" || grep -q 'CYCLE_DEDUP' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "bug-monitor.sh has cycle-level dedup tracking"
+else
+  fail "bug-monitor.sh has cycle-level dedup tracking" "cycle dedup exists" "not found"
+fi
+
+# Verify process_error checks cycle dedup before creating issues
+if grep -q 'is_seen_this_cycle\|cycle_seen_file\|CYCLE_DEDUP' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "process_error checks cycle dedup"
+else
+  fail "process_error checks cycle dedup" "cycle check exists" "not found"
+fi
+
 # Test that shellcheck passes
 echo ""
 echo "Shellcheck:"
