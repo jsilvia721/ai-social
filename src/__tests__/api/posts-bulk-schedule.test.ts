@@ -57,6 +57,38 @@ describe("POST /api/posts/bulk-schedule", () => {
     expect(res.status).toBe(403);
   });
 
+  it("returns 400 when any post lacks required media for its platform", async () => {
+    mockAuthenticated();
+    prismaMock.post.findMany.mockResolvedValue([
+      { id: "p1", mediaUrls: ["https://storage.example.com/img.jpg"], socialAccount: { platform: "INSTAGRAM" } },
+      { id: "p2", mediaUrls: [], socialAccount: { platform: "INSTAGRAM" } },
+    ] as any);
+
+    const res = await POST(makeRequest({
+      postIds: ["p1", "p2"],
+      scheduledAt: "2026-03-10T10:00:00Z",
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("media");
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("allows bulk-scheduling posts on platforms that don't require media", async () => {
+    mockAuthenticated();
+    prismaMock.post.findMany.mockResolvedValue([
+      { id: "p1", mediaUrls: [], socialAccount: { platform: "TWITTER" } },
+      { id: "p2", mediaUrls: [], socialAccount: { platform: "FACEBOOK" } },
+    ] as any);
+    prismaMock.$transaction.mockResolvedValue([{}, {}] as any);
+
+    const res = await POST(makeRequest({
+      postIds: ["p1", "p2"],
+      scheduledAt: "2026-03-10T10:00:00Z",
+    }));
+    expect(res.status).toBe(200);
+  });
+
   it("schedules all posts and returns 200", async () => {
     mockAuthenticated();
     prismaMock.post.findMany.mockResolvedValue([

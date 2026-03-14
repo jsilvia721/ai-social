@@ -4,6 +4,7 @@ import { repurposeContent } from "@/lib/ai/repurpose";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { requiresMedia } from "@/lib/platform-rules";
 import type { Platform } from "@/types";
 
 const PLATFORMS = ["TWITTER", "INSTAGRAM", "FACEBOOK", "TIKTOK", "YOUTUBE"] as const;
@@ -104,6 +105,11 @@ export async function POST(req: NextRequest) {
     for (const variant of result.variants) {
       const account = accountMap.get(variant.platform as Platform);
       if (!account) continue; // Skip variants for unconnected platforms
+
+      // Skip media-required platforms when scheduling (repurpose has no media)
+      if (parsed.data.status === "SCHEDULED" && requiresMedia(variant.platform as Platform)) {
+        continue;
+      }
 
       const post = await tx.post.create({
         data: {

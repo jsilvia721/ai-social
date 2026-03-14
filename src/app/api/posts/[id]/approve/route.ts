@@ -1,5 +1,6 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { requiresMedia } from "@/lib/platform-rules";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -20,6 +21,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       id,
       ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
     },
+    include: { socialAccount: true },
   });
 
   if (!post) {
@@ -29,6 +31,14 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Idempotent: already approved
   if (post.status === "SCHEDULED") {
     return NextResponse.json({ ...post, alreadyApproved: true });
+  }
+
+  // Validate media requirement before approving (approve transitions to SCHEDULED)
+  if (post.socialAccount && requiresMedia(post.socialAccount.platform) && ((post.mediaUrls as string[]) ?? []).length === 0) {
+    return NextResponse.json(
+      { error: `${post.socialAccount.platform} requires at least one image or video` },
+      { status: 400 }
+    );
   }
 
   if (post.status !== "PENDING_REVIEW") {

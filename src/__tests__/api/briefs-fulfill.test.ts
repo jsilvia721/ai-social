@@ -118,6 +118,28 @@ describe("POST /api/briefs/[id]/fulfill", () => {
     expect(body.error).toContain("does not match");
   });
 
+  it("returns 400 when fulfilling INSTAGRAM brief without media", async () => {
+    mockAuthenticated();
+    prismaMock.contentBrief.findUnique.mockResolvedValue({
+      id: "cb-1", businessId: "biz-1", status: "PENDING",
+      scheduledFor: new Date(), platform: "INSTAGRAM",
+    } as any);
+    prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
+    prismaMock.socialAccount.findUnique.mockResolvedValue({
+      id: "sa-1", businessId: "biz-1", platform: "INSTAGRAM",
+    } as any);
+
+    const [req, ctx] = makeRequest("cb-1", {
+      caption: "No media IG post",
+      mediaUrls: [],
+      socialAccountId: "sa-1",
+    });
+    const res = await POST(req, ctx);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("INSTAGRAM requires at least one image or video");
+  });
+
   it("creates SCHEDULED post and returns 201 with nextBriefId", async () => {
     mockAuthenticated();
     prismaMock.contentBrief.findUnique.mockResolvedValue({

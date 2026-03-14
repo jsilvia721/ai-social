@@ -1,5 +1,6 @@
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { requiresMedia } from "@/lib/platform-rules";
 import { getServerSession } from "next-auth/next";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -33,13 +34,24 @@ export async function POST(req: NextRequest) {
       id: { in: postIds },
       business: { members: { some: { userId: session.user.id } } },
     },
-    select: { id: true },
+    select: { id: true, mediaUrls: true, socialAccount: { select: { platform: true } } },
   });
 
   if (posts.length !== postIds.length) {
     return NextResponse.json(
       { error: "One or more posts not found or not authorized" },
       { status: 403 }
+    );
+  }
+
+  // Check media requirements for each post
+  const missingMedia = posts.filter(
+    p => p.socialAccount && requiresMedia(p.socialAccount.platform) && (p.mediaUrls as string[]).length === 0
+  );
+  if (missingMedia.length > 0) {
+    return NextResponse.json(
+      { error: `${missingMedia.length} post(s) require media: ${missingMedia.map(p => p.socialAccount!.platform).join(", ")} requires at least one image or video` },
+      { status: 400 }
     );
   }
 
