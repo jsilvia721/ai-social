@@ -3,6 +3,8 @@ name: Unblock Dependent Issues
 on:
   pull_request:
     types: [closed]
+  issues:
+    types: [closed]
 
 permissions:
   issues: write
@@ -10,49 +12,68 @@ permissions:
 
 jobs:
   unblock:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v7
         with:
           script: |
-            const pr = context.payload.pull_request;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
-            // --- Step 1: Find issues closed by this PR ---
-            // Parse "Closes #N", "Fixes #N", "Resolves #N" from PR body and title
-            const closingPattern = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
-            const text = `${pr.title}\n${pr.body || ''}`;
+            // --- Step 1: Determine which issues were closed based on event type ---
             const closedIssueNumbers = new Set();
+            let triggerDescription;
 
-            let match;
-            while ((match = closingPattern.exec(text)) !== null) {
-              closedIssueNumbers.add(parseInt(match[1], 10));
+            if (context.eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+
+              // Only act on merged PRs, not closed-without-merge
+              if (!pr.merged) {
+                console.log('PR was closed without merging, skipping.');
+                return;
+              }
+
+              // Parse "Closes #N", "Fixes #N", "Resolves #N" from PR body and title
+              const closingPattern = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
+              const text = `${pr.title}\n${pr.body || ''}`;
+              let match;
+              while ((match = closingPattern.exec(text)) !== null) {
+                closedIssueNumbers.add(parseInt(match[1], 10));
+              }
+
+              triggerDescription = `merged via PR #${pr.number}`;
+            } else if (context.eventName === 'issues') {
+              const issue = context.payload.issue;
+
+              // Skip if the "issue" is actually a PR (GitHub treats PRs as issues)
+              if (issue.pull_request) {
+                console.log('Closed item is a PR, not an issue. Skipping.');
+                return;
+              }
+
+              closedIssueNumbers.add(issue.number);
+              triggerDescription = `issue #${issue.number} closed`;
             }
 
             if (closedIssueNumbers.size === 0) {
-              console.log('No issues closed by this PR, skipping.');
+              console.log('No closed issues identified, skipping.');
               return;
             }
 
-            console.log(`PR #${pr.number} closes issues: ${[...closedIssueNumbers].map(n => '#' + n).join(', ')}`);
+            console.log(`Trigger: ${triggerDescription}. Closed issues: ${[...closedIssueNumbers].map(n => '#' + n).join(', ')}`);
 
             // --- Step 2: Find open issues that depend on any of the closed issues ---
-            // Search for issues mentioning the closed issue numbers in their body
             const dependentIssues = new Set();
 
             for (const closedNum of closedIssueNumbers) {
-              // Search for issues that reference this issue number in a dependency context
               const searchResults = await github.rest.search.issuesAndPullRequests({
                 q: `repo:${owner}/${repo} is:issue is:open "#${closedNum}" in:body`,
                 per_page: 50
               });
 
-              for (const issue of searchResults.data.items) {
-                // Verify this issue actually has a Dependencies section referencing the closed issue
-                if (issue.body && issue.body.includes('### Dependencies') && issue.body.includes(`#${closedNum}`)) {
-                  dependentIssues.add(issue.number);
+              for (const item of searchResults.data.items) {
+                if (item.body && item.body.includes('### Dependencies') && item.body.includes(`#${closedNum}`)) {
+                  dependentIssues.add(item.number);
                 }
               }
             }
@@ -65,22 +86,20 @@ jobs:
             console.log(`Found potential dependent issues: ${[...dependentIssues].map(n => '#' + n).join(', ')}`);
 
             // --- Step 3: For each dependent issue, check if ALL dependencies are resolved ---
-            const issueRefPattern = /#(\d+)/g;
-
             for (const depIssueNum of dependentIssues) {
               const issue = await github.rest.issues.get({
                 owner, repo,
                 issue_number: depIssueNum
               });
 
-              // Skip if already has claude-ready or claude-wip
+              // Skip if already has an active workflow label
               const labels = issue.data.labels.map(l => l.name);
               if (labels.includes('claude-ready') || labels.includes('claude-wip') || labels.includes('claude-done')) {
                 console.log(`#${depIssueNum}: already has active label, skipping.`);
                 continue;
               }
 
-              // Extract the Dependencies section
+              // Extract the Dependencies section from the issue body
               const body = issue.data.body || '';
               const depsMatch = body.match(/### Dependencies\s*\n([\s\S]*?)(?:\n###|\n$|$)/);
               if (!depsMatch) {
@@ -88,8 +107,10 @@ jobs:
                 continue;
               }
 
+              // Parse all issue references from the Dependencies section
               const depsSection = depsMatch[1];
               const depNumbers = [];
+              const issueRefPattern = /#(\d+)/g;
               let refMatch;
               while ((refMatch = issueRefPattern.exec(depsSection)) !== null) {
                 depNumbers.push(parseInt(refMatch[1], 10));
@@ -117,7 +138,7 @@ jobs:
               if (allResolved) {
                 console.log(`#${depIssueNum}: all dependencies resolved! Removing blocked label and adding needs-triage.`);
 
-                // Remove 'blocked' label if present (may have been manually removed already)
+                // Remove 'blocked' label if present
                 try {
                   await github.rest.issues.removeLabel({
                     owner, repo,
@@ -137,7 +158,7 @@ jobs:
                 await github.rest.issues.createComment({
                   owner, repo,
                   issue_number: depIssueNum,
-                  body: `All dependencies resolved (merged via PR #${pr.number}). Marking as \`needs-triage\` for human review. Comment \`/go\` or 👍 to approve.`
+                  body: `All dependencies resolved (${triggerDescription}). Marking as \`needs-triage\` for human review. Comment \`/go\` or 👍 to approve.`
                 });
               }
             }
