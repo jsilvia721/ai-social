@@ -47,7 +47,7 @@ describe("DevToolsToggle", () => {
     });
   });
 
-  it("uses responsive positioning to avoid mobile content overlap", async () => {
+  it("positions above FeedbackButton on all viewports", async () => {
     mockFetch.mockResolvedValueOnce({
       json: () => Promise.resolve({ mocking: false }),
     });
@@ -57,9 +57,9 @@ describe("DevToolsToggle", () => {
       expect(screen.getByText("LIVE")).toBeInTheDocument();
     });
 
-    // The container div should have mobile-friendly bottom positioning
+    // The container div should stay at bottom-16 on all viewports (above FeedbackButton)
     const container = screen.getByText("LIVE").closest("div.fixed");
     expect(container).toHaveClass("bottom-16");
-    expect(container).toHaveClass("md:bottom-4");
+    expect(container).not.toHaveClass("md:bottom-4");
   });
 });
