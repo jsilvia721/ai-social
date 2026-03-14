@@ -235,9 +235,21 @@ describe("generateBrainstorm", () => {
         html_url: "",
       });
       await expect(generateBrainstorm()).rejects.toThrow(
-        "Failed to create brainstorm issue on GitHub"
+        "GitHub issue creation returned invalid issue number: 0"
       );
       // Should NOT create a DB record with githubIssueNumber: 0
+      expect(mockBrainstormCreate).not.toHaveBeenCalled();
+    });
+
+    it("throws when createIssue returns a negative number", async () => {
+      mockCreateIssue.mockResolvedValue({
+        number: -1,
+        title: "Brainstorm: Week of Jan 1, 2024",
+        html_url: "",
+      });
+      await expect(generateBrainstorm()).rejects.toThrow(
+        "GitHub issue creation returned invalid issue number: -1"
+      );
       expect(mockBrainstormCreate).not.toHaveBeenCalled();
     });
 
