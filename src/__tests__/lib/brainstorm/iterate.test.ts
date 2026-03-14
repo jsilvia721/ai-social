@@ -376,8 +376,8 @@ describe("iterateBrainstorm", () => {
     expect(prompt).toContain("</vision>");
   });
 
-  it("handles missing vision doc gracefully by passing empty string", async () => {
-    mockGetRepoFile.mockRejectedValue(new Error("File not found"));
+  it("handles missing vision doc gracefully (getRepoFile returns empty string)", async () => {
+    mockGetRepoFile.mockResolvedValue("");
     mockListComments.mockResolvedValue([
       {
         id: 100,
@@ -395,6 +395,7 @@ describe("iterateBrainstorm", () => {
     const callArgs = mockMessagesCreate.mock.calls[0][0];
     const prompt = callArgs.messages[0].content;
     expect(prompt).toContain("<vision>");
+    expect(prompt).toContain("No vision document available.");
   });
 
   it("fetches vision doc only once for multiple comments", async () => {

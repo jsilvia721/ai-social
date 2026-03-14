@@ -99,12 +99,7 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
   if (humanComments.length === 0) return;
 
   // Fetch vision doc once before the loop (same pattern as generate.ts)
-  let visionDoc = "";
-  try {
-    visionDoc = await github.getRepoFile("docs/brainstorm-context.md");
-  } catch {
-    // Gracefully handle missing file — pass empty string
-  }
+  const visionDoc = await github.getRepoFile("docs/brainstorm-context.md");
 
   // Fetch body once, then carry forward locally after each update
   let currentBody = await github.getIssueBody(session.githubIssueNumber);
@@ -114,7 +109,7 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
     // Parse current checked state to preserve it
     const currentItems = parseBrainstormIssue(currentBody);
 
-    // 2. Call Claude with iteration prompt
+    // Call Claude with iteration prompt
     const prompt = buildIterationPrompt(currentBody, comment.body, visionDoc);
 
     const response = await client.messages.create({
@@ -133,23 +128,23 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
 
     const output = BrainstormOutputSchema.parse(toolUse.input);
 
-    // 3. Re-render issue body, preserving checked state from current body
+    // Re-render issue body, preserving checked state from current body
     const checkedTitles = new Set(
       currentItems.filter((i) => i.checked).map((i) => i.title),
     );
     const updatedBody = renderBrainstormIssue(output, checkedTitles);
 
-    // 4. Update issue body and carry forward for next iteration
+    // Update issue body and carry forward for next iteration
     await github.updateIssueBody(session.githubIssueNumber, updatedBody);
     currentBody = updatedBody;
 
-    // 5. Post reply comment
+    // Post reply comment
     await github.createComment(
       session.githubIssueNumber,
       `🔄 **Updated brainstorm** based on your feedback.\n\n> ${comment.body.split("\n")[0]}`,
     );
 
-    // 6. Update lastProcessedCommentId in DB
+    // Update lastProcessedCommentId in DB
     await prisma.brainstormSession.update({
       where: { id: session.id },
       data: { lastProcessedCommentId: comment.id },
