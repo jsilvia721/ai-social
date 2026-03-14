@@ -34,7 +34,8 @@ const PLATFORM_LABELS: Record<Platform, string> = {
 const VIDEO_PUBLISHING_PLATFORMS = new Set<Platform>(["TWITTER", "INSTAGRAM", "FACEBOOK", "TIKTOK", "YOUTUBE"]);
 
 const UPLOAD_TIMEOUT_MS = 300_000; // 5 minutes
-const UPLOAD_MAX_RETRIES = 1;
+const UPLOAD_MAX_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 1000;
 
 /** Format a Date as YYYY-MM-DDTHH:mm in local time (for datetime-local inputs). */
 function toLocalDatetimeString(date: Date): string {
@@ -198,8 +199,11 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
         function handleRetriableError(errorMsg: string) {
           xhrRef.current = null;
           if (retryCount < UPLOAD_MAX_RETRIES) {
-            setUploadProgress(null);
-            resolve(attemptUpload(retryCount + 1));
+            setUploadProgress(0);
+            const delay = RETRY_BASE_DELAY_MS * Math.pow(2, retryCount);
+            setTimeout(() => {
+              resolve(attemptUpload(retryCount + 1));
+            }, delay);
           } else {
             reject(new Error(errorMsg));
           }
