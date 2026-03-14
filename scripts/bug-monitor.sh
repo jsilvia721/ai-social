@@ -24,11 +24,13 @@ POLL_INTERVAL=300          # seconds between polls (default: 5 minutes)
 SEVERITY="error"           # minimum severity: "error" or "warn"
 DRY_RUN=false              # if true, print actions without executing
 MAX_ISSUES_PER_CYCLE=5     # safety guard: max issues created per poll cycle
+MAX_SELF_ISSUES_PER_CYCLE=2  # max self-health issues per poll cycle (separate from app bugs)
 MIN_COUNT_THRESHOLD=1      # skip errors seen fewer than this many times (unless FATAL)
 COOLDOWN_SECONDS=1800      # don't re-check the same fingerprint within this window (CloudWatch only)
 LOG_DIR="./logs/bug-monitor"
 LABEL_BUG="bug-report"
 LABEL_TRIAGE="needs-triage"
+LABEL_BUG_MONITOR_HEALTH="bug-monitor-health"
 
 # User-specified log groups (empty = auto-discover)
 declare -a LOG_GROUPS=()
@@ -96,6 +98,167 @@ log() {
   timestamp=$(date '+%Y-%m-%d %H:%M:%S')
   echo "[bug-monitor ${timestamp}] $*" >&2
   echo "[bug-monitor ${timestamp}] $*" >> "$LOG_DIR/daemon.log" 2>/dev/null || true
+}
+
+# --- Self-error recording -----------------------------------------------------
+# Appends a JSON line to the health file. Must never fail (|| true wraps the write).
+record_self_error() {
+  local category="$1"
+  local message="$2"
+  local health_file="$LOG_DIR/.self-health.jsonl"
+  local timestamp
+  timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%SZ')
+  printf '{"category":"%s","message":"%s","timestamp":"%s"}\n' \
+    "$category" \
+    "$(echo "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\n' | head -c 500)" \
+    "$timestamp" >> "$health_file" 2>/dev/null || true
+}
+
+# Category labels for issue titles
+category_label() {
+  case "$1" in
+    github_api) echo "GitHub API failures" ;;
+    db_connection) echo "DB connection failures" ;;
+    cloudwatch_query) echo "CloudWatch query failures" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# Flush self-errors: group by category, create/comment GitHub issues, truncate health file.
+# Called at end of each poll cycle. Circuit breaker: flush failures don't recurse.
+flush_self_errors() {
+  local health_file="$LOG_DIR/.self-health.jsonl"
+
+  if [ ! -f "$health_file" ] || [ ! -s "$health_file" ]; then
+    return 0
+  fi
+
+  local flush_tmp
+  flush_tmp=$(mktemp -d)
+  local flush_failed=false
+  local self_issues_created=0
+
+  # Group entries by category using temp directory (Bash 3 compatible — no associative arrays)
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    local category
+    category=$(echo "$line" | sed -n 's/.*"category":"\([^"]*\)".*/\1/p')
+    [ -z "$category" ] && continue
+
+    mkdir -p "$flush_tmp/$category"
+
+    local msg
+    msg=$(echo "$line" | sed -n 's/.*"message":"\(.*\)","timestamp".*/\1/p')
+    local ts
+    ts=$(echo "$line" | sed -n 's/.*"timestamp":"\([^"]*\)".*/\1/p')
+
+    # Increment count
+    local prev_count=0
+    if [ -f "$flush_tmp/$category/count" ]; then
+      prev_count=$(< "$flush_tmp/$category/count")
+    fi
+    echo $((prev_count + 1)) > "$flush_tmp/$category/count"
+
+    # Track first/last timestamp
+    if [ ! -f "$flush_tmp/$category/first_ts" ]; then
+      echo "$ts" > "$flush_tmp/$category/first_ts"
+    fi
+    echo "$ts" > "$flush_tmp/$category/last_ts"
+
+    # Store unique messages (max 10)
+    local msg_count=0
+    if [ -f "$flush_tmp/$category/messages" ]; then
+      msg_count=$(wc -l < "$flush_tmp/$category/messages" | tr -d ' ')
+    fi
+    if [ "$msg_count" -lt 10 ] && ! grep -qF "$msg" "$flush_tmp/$category/messages" 2>/dev/null; then
+      echo "$msg" >> "$flush_tmp/$category/messages"
+    fi
+  done < "$health_file"
+
+  # Process each category
+  for cat_dir in "$flush_tmp"/*/; do
+    [ -d "$cat_dir" ] || continue
+
+    if [ "$self_issues_created" -ge "$MAX_SELF_ISSUES_PER_CYCLE" ]; then
+      log "Max self-issues per cycle reached ($MAX_SELF_ISSUES_PER_CYCLE), deferring remaining"
+      break
+    fi
+
+    local category err_count first_ts last_ts label
+    category=$(basename "$cat_dir")
+    err_count=$(< "$cat_dir/count")
+    first_ts=$(< "$cat_dir/first_ts")
+    last_ts=$(< "$cat_dir/last_ts")
+    label=$(category_label "$category")
+
+    local fingerprint
+    fingerprint=$(generate_fingerprint "SELF" "$category")
+
+    # Check cooldown
+    if is_in_cooldown "$fingerprint"; then
+      log "Self-error category '$category' in cooldown, skipping"
+      continue
+    fi
+
+    if [ "$DRY_RUN" = true ]; then
+      log "[DRY RUN] Would create/comment self-health issue: Bug Monitor Health: ${label} (${err_count} errors, ${first_ts} - ${last_ts})"
+      set_cooldown "$fingerprint"
+      self_issues_created=$((self_issues_created + 1))
+      continue
+    fi
+
+    # Build messages list for issue body
+    local messages_body=""
+    if [ -f "$cat_dir/messages" ]; then
+      messages_body=$(while IFS= read -r m; do echo "- \`${m}\`"; done < "$cat_dir/messages")
+    fi
+
+    # Check for existing open issue
+    local existing_url
+    existing_url=$(gh issue list \
+      --state open \
+      --label "$LABEL_BUG_MONITOR_HEALTH" \
+      --search "${fingerprint:0:12}" \
+      --json number,url \
+      -q '.[0].url' 2>/dev/null || echo "")
+
+    if [ -n "$existing_url" ]; then
+      local issue_number
+      issue_number=$(echo "$existing_url" | grep -oE '[0-9]+$')
+      if ! gh issue comment "$issue_number" --body "$(printf '**New self-errors detected:** +%s\n**Time range:** %s — %s\n\n_Automated by bug-monitor daemon_' "$err_count" "$first_ts" "$last_ts")" 2>/dev/null; then
+        log "Warning: failed to comment on self-health issue #${issue_number}"
+        flush_failed=true
+        break
+      fi
+    else
+      local title="Bug Monitor Health: ${label}"
+      local body
+      body=$(printf "**Fingerprint:** \`%s\`\n\n## Category\n%s\n\n## Errors (%s total)\n%s\n\n## Time Range\n- **First:** %s\n- **Last:** %s\n\n---\n_Filed automatically by bug-monitor daemon_" \
+        "${fingerprint:0:12}" "$label" "$err_count" "$messages_body" "$first_ts" "$last_ts")
+
+      if ! gh issue create \
+        --title "$title" \
+        --label "$LABEL_BUG_MONITOR_HEALTH" \
+        --body "$body" 2>/dev/null; then
+        log "Warning: failed to create self-health issue for ${label}"
+        flush_failed=true
+        break
+      fi
+      log "Created self-health issue: ${title}"
+    fi
+
+    set_cooldown "$fingerprint"
+    self_issues_created=$((self_issues_created + 1))
+  done
+
+  rm -rf "$flush_tmp"
+
+  # Only truncate health file on success
+  if [ "$flush_failed" = false ]; then
+    : > "$health_file"
+  else
+    log "Warning: self-error flush had failures, preserving health file for next cycle"
+  fi
 }
 
 # --- Helpers ------------------------------------------------------------------
@@ -203,7 +366,10 @@ comment_existing_issue() {
 
 _Automated by bug-monitor daemon_
 EOF
-)" 2>/dev/null || log "Warning: failed to comment on issue #${issue_number}"
+)" 2>/dev/null || {
+    log "Warning: failed to comment on issue #${issue_number}"
+    record_self_error "github_api" "Failed to comment on issue #${issue_number}"
+  }
 }
 
 # --- Issue creation -----------------------------------------------------------
@@ -307,6 +473,7 @@ EOF
     echo "$issue_number"
   else
     log "Error: failed to create issue for: ${title}"
+    record_self_error "github_api" "Failed to create issue: ${title}"
     echo ""
   fi
 }
@@ -363,6 +530,7 @@ process_error() {
   if [ -n "$existing_issue_number" ]; then
     if ! [[ "$existing_issue_number" =~ ^[0-9]+$ ]]; then
       log "Error: invalid existing issue number '${existing_issue_number}', skipping"
+      record_self_error "github_api" "Invalid existing issue number: ${existing_issue_number}"
       echo "0"
       return
     fi
@@ -533,8 +701,10 @@ poll_error_reports() {
   if [ -z "$db_url" ]; then
     if [ -n "$environment" ]; then
       log "Warning: DATABASE_URL_${environment^^} not set, skipping ErrorReport poll (${environment})"
+      record_self_error "db_connection" "DATABASE_URL_${environment^^} not set"
     else
       log "Warning: DATABASE_URL not set, skipping ErrorReport poll"
+      record_self_error "db_connection" "DATABASE_URL not set"
     fi
     echo "$issues_created"
     return
@@ -602,10 +772,12 @@ poll_error_reports() {
       # Validate inputs before SQL interpolation (prevent injection)
       if ! [[ "$issue_number" =~ ^[0-9]+$ ]]; then
         log "Error: invalid issue_number '${issue_number}', skipping DB update"
+        record_self_error "db_connection" "Invalid issue_number from DB: ${issue_number}"
         continue
       fi
       if ! [[ "$fp" =~ ^[0-9a-f]{64}$ ]]; then
         log "Error: invalid fingerprint '${fp}', skipping DB update"
+        record_self_error "db_connection" "Invalid fingerprint: ${fp}"
         continue
       fi
 
@@ -613,7 +785,10 @@ poll_error_reports() {
       if [ "$DRY_RUN" = false ]; then
         psql "$db_url" -c \
           "UPDATE \"ErrorReport\" SET status = 'ISSUE_CREATED', \"githubIssueNumber\" = ${issue_number}, \"acknowledgedAt\" = NOW() WHERE fingerprint = '${fp}';" \
-          2>>"$LOG_DIR/daemon.log" || log "Warning: failed to update ErrorReport for fingerprint ${fp}"
+          2>>"$LOG_DIR/daemon.log" || {
+            log "Warning: failed to update ErrorReport for fingerprint ${fp}"
+            record_self_error "db_connection" "Failed to update ErrorReport for fingerprint ${fp}"
+          }
       else
         log "[DRY RUN] Would update ErrorReport status to ISSUE_CREATED for fingerprint ${fp}"
       fi
@@ -624,13 +799,17 @@ poll_error_reports() {
       if [ "$row_status" = "ISSUE_CREATED" ]; then
         if ! [[ "$fp" =~ ^[0-9a-f]{64}$ ]]; then
           log "Error: invalid fingerprint '${fp}', skipping acknowledgedAt update"
+          record_self_error "db_connection" "Invalid fingerprint: ${fp}"
           continue
         fi
 
         if [ "$DRY_RUN" = false ]; then
           psql "$db_url" -c \
             "UPDATE \"ErrorReport\" SET \"acknowledgedAt\" = NOW() WHERE fingerprint = '${fp}';" \
-            2>>"$LOG_DIR/daemon.log" || log "Warning: failed to update acknowledgedAt for fingerprint ${fp}"
+            2>>"$LOG_DIR/daemon.log" || {
+              log "Warning: failed to update acknowledgedAt for fingerprint ${fp}"
+              record_self_error "db_connection" "Failed to update acknowledgedAt for fingerprint ${fp}"
+            }
         else
           log "[DRY RUN] Would update acknowledgedAt for fingerprint ${fp}"
         fi
@@ -686,6 +865,10 @@ while true; do
   if [ -z "${DATABASE_URL_STAGING:-}" ] && [ -z "${DATABASE_URL_PRODUCTION:-}" ]; then
     local_issues_created=$(poll_error_reports "$local_issues_created")
   fi
+
+  # Flush self-errors before advancing the poll timestamp, so errors from
+  # this cycle are reported even if flush partially fails and preserves the file.
+  flush_self_errors
 
   # Save current time for next poll
   save_poll_time

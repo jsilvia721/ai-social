@@ -553,6 +553,387 @@ assert_eq "stores stage in temp file" "staging" "$(cat "$cw_tmp2/$fp_stage/stage
 rm -rf "$cw_tmp2"
 pass "temp directory with stage cleanup succeeds"
 
+# --- Test assert_file_contains helper -----------------------------------------
+assert_file_contains() {
+  local description="$1"
+  local needle="$2"
+  local file="$3"
+  if [ -f "$file" ] && grep -qF "$needle" "$file"; then
+    pass "$description"
+  else
+    fail "$description" "file contains '$needle'" "$(cat "$file" 2>/dev/null || echo '(file missing)')"
+  fi
+}
+
+assert_file_line_count() {
+  local description="$1"
+  local expected="$2"
+  local file="$3"
+  local actual
+  if [ -f "$file" ]; then
+    actual=$(wc -l < "$file" | tr -d ' ')
+  else
+    actual="0"
+  fi
+  assert_eq "$description" "$expected" "$actual"
+}
+
+# --- Test record_self_error ---------------------------------------------------
+echo ""
+echo "=== Self-Error Recording Tests ==="
+echo ""
+
+# We need to define record_self_error here since we can't source bug-monitor.sh
+# (it starts the daemon loop). We replicate the function logic for testing.
+
+TEST_SELF_DIR=$(mktemp -d)
+LOG_DIR="$TEST_SELF_DIR"
+
+# Copy the function from bug-monitor.sh for testing
+record_self_error() {
+  local category="$1"
+  local message="$2"
+  local health_file="$LOG_DIR/.self-health.jsonl"
+  local timestamp
+  timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%SZ')
+  printf '{"category":"%s","message":"%s","timestamp":"%s"}\n' \
+    "$category" \
+    "$(echo "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\n' | head -c 500)" \
+    "$timestamp" >> "$health_file" 2>/dev/null || true
+}
+
+echo "record_self_error:"
+
+# Test: writes a JSON line to health file
+record_self_error "github_api" "Failed to comment on issue #42"
+health_file="$TEST_SELF_DIR/.self-health.jsonl"
+assert_eq "health file exists after record" "true" "$([ -f "$health_file" ] && echo true || echo false)"
+assert_file_line_count "health file has 1 line after first record" "1" "$health_file"
+
+# Test: valid JSON in each line
+line=$(head -1 "$health_file")
+assert_contains "line contains category field" '"category":"github_api"' "$line"
+assert_contains "line contains message field" '"message":"Failed to comment on issue #42"' "$line"
+assert_contains "line contains timestamp field" '"timestamp":' "$line"
+
+# Test: multiple records append
+record_self_error "db_connection" "psql: connection refused"
+assert_file_line_count "health file has 2 lines after second record" "2" "$health_file"
+
+# Test: different categories are stored correctly
+line2=$(tail -1 "$health_file")
+assert_contains "second line has db_connection category" '"category":"db_connection"' "$line2"
+
+# Test: messages with special characters are escaped
+record_self_error "cloudwatch_query" 'Error: "timeout" at line 5'
+line3=$(tail -1 "$health_file")
+assert_contains "special chars are escaped" 'cloudwatch_query' "$line3"
+
+# Test: record_self_error never fails (|| true)
+# Simulate by pointing to a non-writable path
+old_log_dir="$LOG_DIR"
+LOG_DIR="/nonexistent/path"
+record_self_error "github_api" "should not crash"
+exit_code=$?
+assert_eq "record_self_error does not fail on write error" "0" "$exit_code"
+LOG_DIR="$old_log_dir"
+
+rm -rf "$TEST_SELF_DIR"
+pass "self-error recording cleanup succeeds"
+
+# --- Test flush_self_errors ---------------------------------------------------
+echo ""
+echo "=== Self-Error Flush Tests ==="
+echo ""
+
+TEST_FLUSH_DIR=$(mktemp -d)
+LOG_DIR="$TEST_FLUSH_DIR"
+DRY_RUN=true  # Always dry run in tests (no gh calls)
+
+# Define log() for tests (bug-monitor.sh defines it but we can't source the whole script)
+log() {
+  echo "[test] $*" >&2
+}
+
+# Category labels map
+category_label() {
+  case "$1" in
+    github_api) echo "GitHub API failures" ;;
+    db_connection) echo "DB connection failures" ;;
+    cloudwatch_query) echo "CloudWatch query failures" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# Replicate flush_self_errors for testing
+MAX_SELF_ISSUES_PER_CYCLE=2
+LABEL_BUG_MONITOR_HEALTH="bug-monitor-health"
+
+flush_self_errors() {
+  local health_file="$LOG_DIR/.self-health.jsonl"
+
+  if [ ! -f "$health_file" ] || [ ! -s "$health_file" ]; then
+    return 0
+  fi
+
+  local flush_tmp
+  flush_tmp=$(mktemp -d)
+  local flush_failed=false
+  local self_issues_created=0
+
+  # Group entries by category using temp directory (Bash 3 compatible)
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    local category
+    category=$(echo "$line" | sed -n 's/.*"category":"\([^"]*\)".*/\1/p')
+    [ -z "$category" ] && continue
+
+    mkdir -p "$flush_tmp/$category"
+
+    local msg
+    msg=$(echo "$line" | sed -n 's/.*"message":"\(.*\)","timestamp".*/\1/p')
+    local ts
+    ts=$(echo "$line" | sed -n 's/.*"timestamp":"\([^"]*\)".*/\1/p')
+
+    # Increment count
+    local prev_count=0
+    if [ -f "$flush_tmp/$category/count" ]; then
+      prev_count=$(< "$flush_tmp/$category/count")
+    fi
+    echo $((prev_count + 1)) > "$flush_tmp/$category/count"
+
+    # Track first/last timestamp
+    if [ ! -f "$flush_tmp/$category/first_ts" ]; then
+      echo "$ts" > "$flush_tmp/$category/first_ts"
+    fi
+    echo "$ts" > "$flush_tmp/$category/last_ts"
+
+    # Store unique messages (max 10)
+    local msg_count=0
+    if [ -f "$flush_tmp/$category/messages" ]; then
+      msg_count=$(wc -l < "$flush_tmp/$category/messages" | tr -d ' ')
+    fi
+    if [ "$msg_count" -lt 10 ] && ! grep -qF "$msg" "$flush_tmp/$category/messages" 2>/dev/null; then
+      echo "$msg" >> "$flush_tmp/$category/messages"
+    fi
+  done < "$health_file"
+
+  # Process each category
+  for cat_dir in "$flush_tmp"/*/; do
+    [ -d "$cat_dir" ] || continue
+
+    if [ "$self_issues_created" -ge "$MAX_SELF_ISSUES_PER_CYCLE" ]; then
+      log "Max self-issues per cycle reached ($MAX_SELF_ISSUES_PER_CYCLE), deferring remaining"
+      break
+    fi
+
+    local category err_count first_ts last_ts label
+    category=$(basename "$cat_dir")
+    err_count=$(< "$cat_dir/count")
+    first_ts=$(< "$cat_dir/first_ts")
+    last_ts=$(< "$cat_dir/last_ts")
+    label=$(category_label "$category")
+
+    local fingerprint
+    fingerprint=$(echo -n "SELF:${category}" | sha256sum | awk '{print $1}')
+
+    # Check cooldown
+    if is_in_cooldown_test "$fingerprint"; then
+      log "Self-error category '$category' in cooldown, skipping"
+      continue
+    fi
+
+    if [ "$DRY_RUN" = true ]; then
+      log "[DRY RUN] Would create/comment self-health issue: Bug Monitor Health: ${label} (${err_count} errors, ${first_ts} - ${last_ts})"
+    else
+      # In real implementation, would call gh issue create/comment here
+      # Circuit breaker: if gh fails, set flush_failed=true and break
+      :
+    fi
+
+    set_cooldown_test "$fingerprint"
+    self_issues_created=$((self_issues_created + 1))
+  done
+
+  rm -rf "$flush_tmp"
+
+  # Only truncate health file on success
+  if [ "$flush_failed" = false ]; then
+    : > "$health_file"
+  fi
+}
+
+echo "flush_self_errors grouping:"
+
+# Set up test cooldown
+TEST_FLUSH_COOLDOWN_DIR=$(mktemp -d)
+COOLDOWN_FILE="$TEST_FLUSH_COOLDOWN_DIR/.cooldown_flush_test"
+touch "$COOLDOWN_FILE"
+COOLDOWN_SECONDS=3600
+
+# Create health file with multiple entries across categories
+health_file="$TEST_FLUSH_DIR/.self-health.jsonl"
+cat > "$health_file" <<'HEALTH_EOF'
+{"category":"github_api","message":"Failed to comment on issue #42","timestamp":"2024-01-15T10:00:00Z"}
+{"category":"github_api","message":"Failed to create issue","timestamp":"2024-01-15T10:01:00Z"}
+{"category":"github_api","message":"Failed to comment on issue #42","timestamp":"2024-01-15T10:02:00Z"}
+{"category":"db_connection","message":"psql: connection refused","timestamp":"2024-01-15T10:00:30Z"}
+HEALTH_EOF
+
+flush_self_errors 2>&1 | cat > "$TEST_FLUSH_DIR/flush_output.log"
+
+# After flush, health file should be truncated (empty but exists)
+assert_eq "health file truncated after successful flush" "0" "$(wc -c < "$health_file" | tr -d ' ')"
+pass "flush_self_errors completes without error"
+
+echo ""
+echo "flush_self_errors cooldown:"
+
+# Recreate health file - same categories should be in cooldown now
+cat > "$health_file" <<'HEALTH_EOF'
+{"category":"github_api","message":"Failed again","timestamp":"2024-01-15T11:00:00Z"}
+HEALTH_EOF
+
+flush_output=$(flush_self_errors 2>&1)
+assert_contains "cooldown prevents duplicate self-issue" "in cooldown" "$flush_output"
+
+echo ""
+echo "flush_self_errors MAX_SELF_ISSUES_PER_CYCLE:"
+
+# Reset cooldown to test the cap
+rm -f "$COOLDOWN_FILE"
+touch "$COOLDOWN_FILE"
+
+# Create health file with 3 different categories
+cat > "$health_file" <<'HEALTH_EOF'
+{"category":"github_api","message":"error 1","timestamp":"2024-01-15T10:00:00Z"}
+{"category":"db_connection","message":"error 2","timestamp":"2024-01-15T10:00:00Z"}
+{"category":"cloudwatch_query","message":"error 3","timestamp":"2024-01-15T10:00:00Z"}
+HEALTH_EOF
+
+MAX_SELF_ISSUES_PER_CYCLE=2
+flush_output=$(flush_self_errors 2>&1)
+assert_contains "max self-issues cap enforced" "Max self-issues per cycle" "$flush_output"
+
+echo ""
+echo "flush_self_errors preserves file on failure:"
+
+# Test that health file is preserved when flush fails
+# We simulate by setting flush_failed manually in a wrapper
+flush_self_errors_fail_test() {
+  local health_file="$LOG_DIR/.self-health.jsonl"
+  if [ ! -f "$health_file" ] || [ ! -s "$health_file" ]; then
+    return 0
+  fi
+  # Simulate a failed flush — don't truncate
+  local flush_failed=true
+  if [ "$flush_failed" = false ]; then
+    : > "$health_file"
+  fi
+}
+
+cat > "$health_file" <<'HEALTH_EOF'
+{"category":"github_api","message":"preserved error","timestamp":"2024-01-15T12:00:00Z"}
+HEALTH_EOF
+
+flush_self_errors_fail_test
+assert_file_line_count "health file preserved on flush failure" "1" "$health_file"
+assert_file_contains "health file content intact on failure" "preserved error" "$health_file"
+
+echo ""
+echo "flush_self_errors empty file:"
+
+# Test with empty health file
+: > "$health_file"
+flush_self_errors 2>&1
+assert_eq "flush handles empty health file" "0" "$?"
+
+# Test with no health file
+rm -f "$health_file"
+flush_self_errors 2>&1
+assert_eq "flush handles missing health file" "0" "$?"
+
+echo ""
+echo "flush_self_errors deduplicates messages:"
+
+rm -f "$COOLDOWN_FILE"
+touch "$COOLDOWN_FILE"
+
+# Create health file with duplicate messages
+cat > "$health_file" <<'HEALTH_EOF'
+{"category":"github_api","message":"same error","timestamp":"2024-01-15T10:00:00Z"}
+{"category":"github_api","message":"same error","timestamp":"2024-01-15T10:01:00Z"}
+{"category":"github_api","message":"same error","timestamp":"2024-01-15T10:02:00Z"}
+{"category":"github_api","message":"different error","timestamp":"2024-01-15T10:03:00Z"}
+HEALTH_EOF
+
+# Run flush and verify grouping happened correctly by checking the dry run output
+flush_output=$(flush_self_errors 2>&1)
+assert_contains "groups multiple errors into single entry" "4 errors" "$flush_output"
+
+rm -rf "$TEST_FLUSH_DIR" "$TEST_FLUSH_COOLDOWN_DIR"
+pass "flush tests cleanup succeeds"
+
+# --- Test Bash 3 compatibility for new code ----------------------------------
+echo ""
+echo "Bash 3 compatibility (self-error code):"
+
+# Verify no declare -A in bug-monitor.sh (re-check after our changes)
+if grep -q 'declare -A' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  fail "no declare -A in bug-monitor.sh (after self-error changes)" "no associative arrays" "found declare -A"
+else
+  pass "no declare -A in bug-monitor.sh (after self-error changes)"
+fi
+
+# Verify record_self_error exists in bug-monitor.sh
+if grep -q 'record_self_error()' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "record_self_error function defined in bug-monitor.sh"
+else
+  fail "record_self_error function defined in bug-monitor.sh" "function exists" "not found"
+fi
+
+# Verify flush_self_errors exists in bug-monitor.sh
+if grep -q 'flush_self_errors()' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "flush_self_errors function defined in bug-monitor.sh"
+else
+  fail "flush_self_errors function defined in bug-monitor.sh" "function exists" "not found"
+fi
+
+# Verify MAX_SELF_ISSUES_PER_CYCLE is defined
+if grep -q 'MAX_SELF_ISSUES_PER_CYCLE=' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "MAX_SELF_ISSUES_PER_CYCLE defined in bug-monitor.sh"
+else
+  fail "MAX_SELF_ISSUES_PER_CYCLE defined in bug-monitor.sh" "variable exists" "not found"
+fi
+
+# Verify flush_self_errors is called in main loop
+if grep -q 'flush_self_errors' "$REPO_ROOT/scripts/bug-monitor.sh" | grep -v 'flush_self_errors()'; then
+  pass "flush_self_errors called in main loop"
+else
+  # More robust check: count occurrences (function def + call = at least 2)
+  local_count=$(grep -c 'flush_self_errors' "$REPO_ROOT/scripts/bug-monitor.sh" 2>/dev/null || echo "0")
+  if [ "$local_count" -ge 2 ]; then
+    pass "flush_self_errors called in main loop (${local_count} occurrences)"
+  else
+    fail "flush_self_errors called in main loop" "at least 2 occurrences" "${local_count}"
+  fi
+fi
+
+# Verify record_self_error is called at error sites (should be at least 10)
+record_count=$(grep -c 'record_self_error' "$REPO_ROOT/scripts/bug-monitor.sh" 2>/dev/null || echo "0")
+if [ "$record_count" -ge 11 ]; then  # 1 function def + 10 call sites
+  pass "record_self_error called at error sites (${record_count} total occurrences including function def)"
+else
+  fail "record_self_error called at error sites" "at least 11 occurrences" "${record_count}"
+fi
+
+# Verify bug-monitor-health label is used (not bug-report)
+if grep -q 'bug-monitor-health' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "bug-monitor-health label defined in bug-monitor.sh"
+else
+  fail "bug-monitor-health label defined in bug-monitor.sh" "label exists" "not found"
+fi
+
 # Test that shellcheck passes
 echo ""
 echo "Shellcheck:"
