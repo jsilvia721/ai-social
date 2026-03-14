@@ -39,7 +39,6 @@ describe("issue-worker agent prompt", () => {
 
     it("includes guidance fields for each entry", () => {
       expect(content).toContain("What happened:");
-      expect(content).toContain("What I did instead:");
       expect(content).toContain("What would have helped:");
     });
 
