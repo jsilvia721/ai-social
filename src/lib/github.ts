@@ -92,23 +92,17 @@ export async function createIssue(
   if (shouldMockExternalApis()) return mockCreateIssue(title, body, labels);
 
   const octokit = getOctokit();
-  if (!octokit) return { number: 0, title, html_url: "" };
-
-  try {
-    const { data } = await octokit.issues.create({
-      ...repoParams(),
-      title,
-      body,
-      labels,
-    });
-    return { number: data.number, title: data.title, html_url: data.html_url };
-  } catch (error) {
-    if (isHttpError(error)) {
-      console.warn(`[github] createIssue failed: ${(error as Error).message}`);
-      return { number: 0, title, html_url: "" };
-    }
-    throw error;
+  if (!octokit) {
+    throw new Error("GitHub token not configured — cannot create issue");
   }
+
+  const { data } = await octokit.issues.create({
+    ...repoParams(),
+    title,
+    body,
+    labels,
+  });
+  return { number: data.number, title: data.title, html_url: data.html_url };
 }
 
 export async function updateIssueBody(
