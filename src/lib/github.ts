@@ -96,9 +96,7 @@ function wrapPermissionError(error: unknown): unknown {
     (error as unknown as { status: number }).status === 403 &&
     (error as Error).message.includes("Resource not accessible")
   ) {
-    return new Error(`${PERMISSION_GUIDANCE} Original: ${(error as Error).message}`, {
-      cause: error,
-    });
+    return new Error(PERMISSION_GUIDANCE, { cause: error });
   }
   return error;
 }
