@@ -109,6 +109,43 @@ function wrapPermissionError(error: unknown): unknown {
 // ── Public helpers ──────────────────────────────────────────────────────────
 
 /**
+ * Lightweight preflight check that validates the GitHub token has write
+ * (push) access to the configured repo. Uses `GET /repos/{owner}/{repo}`
+ * which returns a `permissions` object — no side effects.
+ *
+ * Call this before expensive operations to fail fast on 403.
+ */
+export async function checkWritePermissions(): Promise<boolean> {
+  if (shouldMockExternalApis()) return true;
+
+  const octokit = getOctokit();
+  if (!octokit) return false;
+
+  const startMs = Date.now();
+  let errorMessage: string | undefined;
+  let httpStatus: number | undefined;
+  try {
+    const { data } = await octokit.repos.get(repoParams());
+    return !!data.permissions?.push;
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : String(error);
+    if (isHttpError(error)) {
+      httpStatus = error.status;
+    }
+    console.warn(`[github] checkWritePermissions failed: ${errorMessage}`);
+    return false;
+  } finally {
+    trackApiCall({
+      service: "github",
+      endpoint: "checkWritePermissions",
+      statusCode: httpStatus,
+      latencyMs: Date.now() - startMs,
+      error: errorMessage,
+    });
+  }
+}
+
+/**
  * Creates a GitHub issue. Unlike read-only helpers, this throws on failure
  * because the returned issue number is stored in the DB — a silent fallback
  * would corrupt downstream state.
