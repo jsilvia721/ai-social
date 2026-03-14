@@ -934,6 +934,109 @@ else
   fail "bug-monitor-health label defined in bug-monitor.sh" "label exists" "not found"
 fi
 
+# --- Test env file auto-loading -----------------------------------------------
+echo ""
+echo "=== Env File Auto-Loading Tests ==="
+echo ""
+
+echo "env file auto-loading block in bug-monitor.sh:"
+
+# Verify the auto-load block exists with set -a / set +a pattern
+if grep -q 'set -a' "$REPO_ROOT/scripts/bug-monitor.sh" && grep -q 'set +a' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "uses set -a / set +a pattern for auto-export"
+else
+  fail "uses set -a / set +a pattern for auto-export" "set -a and set +a" "not found"
+fi
+
+# Verify it sources .env.bug-monitor.local
+if grep -q '\.env\.bug-monitor\.local' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "references .env.bug-monitor.local"
+else
+  fail "references .env.bug-monitor.local" ".env.bug-monitor.local" "not found"
+fi
+
+# Verify it checks file existence before sourcing (graceful skip)
+if grep -B5 'source.*\.env\.bug-monitor\.local' "$REPO_ROOT/scripts/bug-monitor.sh" | grep -q '\-f'; then
+  pass "checks file existence before sourcing"
+else
+  fail "checks file existence before sourcing" "-f check" "not found"
+fi
+
+# Verify shellcheck source directive is present
+if grep -q '# shellcheck source=/dev/null' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "includes shellcheck source=/dev/null directive"
+else
+  fail "includes shellcheck source=/dev/null directive" "shellcheck directive" "not found"
+fi
+
+# Verify the block is placed after mkdir -p and before cloudwatch source
+# Extract line numbers to verify ordering
+env_load_line=$(grep -n '\.env\.bug-monitor\.local' "$REPO_ROOT/scripts/bug-monitor.sh" | head -1 | cut -d: -f1)
+mkdir_line=$(grep -n 'mkdir -p "$LOG_DIR"' "$REPO_ROOT/scripts/bug-monitor.sh" | head -1 | cut -d: -f1)
+cw_source_line=$(grep -n 'source "scripts/lib/cloudwatch-query.sh"' "$REPO_ROOT/scripts/bug-monitor.sh" | head -1 | cut -d: -f1)
+
+if [ -n "$env_load_line" ] && [ -n "$mkdir_line" ] && [ -n "$cw_source_line" ] && \
+   [ "$env_load_line" -gt "$mkdir_line" ] && [ "$env_load_line" -lt "$cw_source_line" ]; then
+  pass "env loading block is between mkdir and cloudwatch source"
+else
+  fail "env loading block is between mkdir and cloudwatch source" \
+    "mkdir($mkdir_line) < env($env_load_line) < cw($cw_source_line)" \
+    "mkdir($mkdir_line), env($env_load_line), cw($cw_source_line)"
+fi
+
+# Functional test: verify env file is actually loaded when present
+echo ""
+echo "env file functional test:"
+
+ENV_TEST_DIR=$(mktemp -d)
+ENV_FILE="$ENV_TEST_DIR/.env.bug-monitor.local"
+echo 'BUG_MONITOR_TEST_VAR=hello_from_env' > "$ENV_FILE"
+
+# Use set -a / source / set +a pattern and verify var is exported
+(
+  cd "$ENV_TEST_DIR"
+  if [ -f ".env.bug-monitor.local" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source ".env.bug-monitor.local"
+    set +a
+  fi
+  if [ "$BUG_MONITOR_TEST_VAR" = "hello_from_env" ]; then
+    echo "PASS"
+  else
+    echo "FAIL"
+  fi
+) | {
+  read -r result
+  if [ "$result" = "PASS" ]; then
+    pass "env file is sourced and vars are available"
+  else
+    fail "env file is sourced and vars are available" "hello_from_env" "$result"
+  fi
+}
+
+# Verify graceful skip when file is missing
+(
+  cd "$ENV_TEST_DIR"
+  rm -f ".env.bug-monitor.local"
+  if [ -f ".env.bug-monitor.local" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source ".env.bug-monitor.local"
+    set +a
+  fi
+  echo "PASS"
+) | {
+  read -r result
+  if [ "$result" = "PASS" ]; then
+    pass "gracefully skips when env file is missing"
+  else
+    fail "gracefully skips when env file is missing" "PASS" "$result"
+  fi
+}
+
+rm -rf "$ENV_TEST_DIR"
+
 # Test that shellcheck passes
 echo ""
 echo "Shellcheck:"
