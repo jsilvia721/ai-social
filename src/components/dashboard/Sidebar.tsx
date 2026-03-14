@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList, LogOut, Wrench, Menu, X, FileCheck, Lightbulb, SlidersHorizontal } from "lucide-react";
+import { LayoutDashboard, CalendarDays, PenSquare, Link2, Sparkles, BarChart2, Building2, ChevronsUpDown, Plus, Check, ClipboardList, LogOut, Wrench, Menu, X, FileCheck, Lightbulb, SlidersHorizontal, Activity } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useState, useTransition, useEffect, useRef, createContext, useContext } from "react";
@@ -75,9 +75,10 @@ interface SidebarProps {
   businesses?: Business[];
   activeBusinessId?: string | null;
   showDevTools?: boolean;
+  isAdmin?: boolean;
 }
 
-export function Sidebar({ user, businesses = [], activeBusinessId, showDevTools = false }: SidebarProps) {
+export function Sidebar({ user, businesses = [], activeBusinessId, showDevTools = false, isAdmin = false }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { update } = useSession();
@@ -265,6 +266,20 @@ export function Sidebar({ user, businesses = [], activeBusinessId, showDevTools 
           >
             <Wrench className="h-4 w-4 shrink-0" />
             Dev Tools
+          </Link>
+        )}
+        {isAdmin && (
+          <Link
+            href="/dashboard/system"
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              isActive("/dashboard/system")
+                ? "bg-zinc-800 text-zinc-50"
+                : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
+            )}
+          >
+            <Activity className="h-4 w-4 shrink-0" />
+            System
           </Link>
         )}
         {businesses.length === 0 && (

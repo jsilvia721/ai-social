@@ -1,0 +1,329 @@
+import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { VALID_RANGES, DURATION_MS, BUCKET_MS } from "@/lib/system/shared";
+import type { Range } from "@/lib/system/shared";
+import { TimeRangeToggle } from "@/components/system/TimeRangeToggle";
+import { SystemStatusCards } from "@/components/system/SystemStatusCards";
+import { ApiCallChart } from "@/components/system/ApiCallChart";
+import { CronRunTimeline } from "@/components/system/CronRunTimeline";
+import { ErrorTrendChart } from "@/components/system/ErrorTrendChart";
+
+function isValidRange(value: string): value is Range {
+  return (VALID_RANGES as readonly string[]).includes(value);
+}
+
+interface Props {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function SystemPage({ searchParams }: Props) {
+  const session = await getServerSession(authOptions);
+  if (!session || !session.user.isAdmin) {
+    redirect("/dashboard");
+  }
+
+  const params = await searchParams;
+  const rangeParam = typeof params.range === "string" ? params.range : "24h";
+  const range: Range = isValidRange(rangeParam) ? rangeParam : "24h";
+  const since = new Date(Date.now() - DURATION_MS[range]);
+  const bucketSize = BUCKET_MS[range];
+
+  // Fetch all data in parallel, each with independent error handling
+  const [apiCallsResult, cronRunsResult, errorsResult] = await Promise.all([
+    fetchApiCalls(since, bucketSize),
+    fetchCronRuns(since),
+    fetchErrors(since, bucketSize),
+  ]);
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-50">System Health</h1>
+          <p className="text-zinc-400 mt-1">
+            Monitor cron jobs, API calls, and error trends.
+          </p>
+        </div>
+        <TimeRangeToggle />
+      </div>
+
+      {/* Cron Status Cards */}
+      <section>
+        <h2 className="text-lg font-semibold text-zinc-200 mb-4">
+          Cron Health
+        </h2>
+        {cronRunsResult.error ? (
+          <p className="text-red-400 text-sm">
+            Failed to load cron status.
+          </p>
+        ) : (
+          <SystemStatusCards crons={cronRunsResult.cronStatuses} />
+        )}
+      </section>
+
+      {/* API Call Volume */}
+      <section>
+        <Card className="bg-zinc-800 border-zinc-700">
+          <CardHeader>
+            <CardTitle className="text-zinc-200">API Call Volume</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {apiCallsResult.error ? (
+              <p className="text-red-400 text-sm">
+                Failed to load API call data.
+              </p>
+            ) : (
+              <ApiCallChart buckets={apiCallsResult.buckets} />
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Recent Cron Runs */}
+      <section>
+        <Card className="bg-zinc-800 border-zinc-700">
+          <CardHeader>
+            <CardTitle className="text-zinc-200">Recent Cron Runs</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {cronRunsResult.error ? (
+              <p className="text-red-400 text-sm">
+                Failed to load cron run data.
+              </p>
+            ) : (
+              <CronRunTimeline runs={cronRunsResult.runs} />
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Error Trends */}
+      <section>
+        <Card className="bg-zinc-800 border-zinc-700">
+          <CardHeader>
+            <CardTitle className="text-zinc-200">Error Trends</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {errorsResult.error ? (
+              <p className="text-red-400 text-sm">
+                Failed to load error data.
+              </p>
+            ) : (
+              <ErrorTrendChart
+                buckets={errorsResult.buckets}
+                topErrors={errorsResult.topErrors}
+              />
+            )}
+          </CardContent>
+        </Card>
+      </section>
+    </div>
+  );
+}
+
+// --- Data fetching helpers with independent error handling ---
+
+interface ApiBucket {
+  timestamp: string;
+  service: string;
+  count: number;
+  avgLatencyMs: number;
+  errorCount: number;
+}
+
+async function fetchApiCalls(
+  since: Date,
+  bucketSize: number
+): Promise<{ buckets: ApiBucket[]; error?: undefined } | { buckets?: undefined; error: string }> {
+  try {
+    const rows = await prisma.apiCall.findMany({
+      where: { createdAt: { gte: since } },
+      orderBy: { createdAt: "asc" },
+      select: {
+        service: true,
+        latencyMs: true,
+        statusCode: true,
+        error: true,
+        createdAt: true,
+      },
+    });
+
+    const bucketMap = new Map<
+      string,
+      { count: number; totalLatency: number; errorCount: number; service: string }
+    >();
+
+    for (const row of rows) {
+      const bucketTime = new Date(
+        Math.floor(row.createdAt.getTime() / bucketSize) * bucketSize
+      );
+      const key = `${bucketTime.toISOString()}|${row.service}`;
+      const bucket = bucketMap.get(key) ?? {
+        count: 0,
+        totalLatency: 0,
+        errorCount: 0,
+        service: row.service,
+      };
+      bucket.count++;
+      bucket.totalLatency += row.latencyMs;
+      if (row.error || (row.statusCode && row.statusCode >= 400)) {
+        bucket.errorCount++;
+      }
+      bucketMap.set(key, bucket);
+    }
+
+    const buckets = Array.from(bucketMap.entries()).map(([key, data]) => ({
+      timestamp: key.split("|")[0],
+      service: data.service,
+      count: data.count,
+      avgLatencyMs: Math.round(data.totalLatency / data.count),
+      errorCount: data.errorCount,
+    }));
+
+    return { buckets };
+  } catch {
+    return { error: "Failed to fetch API call data" };
+  }
+}
+
+interface CronRunRow {
+  id: string;
+  cronName: string;
+  status: string;
+  itemsProcessed: number | null;
+  durationMs: number | null;
+  startedAt: string;
+}
+
+interface CronStatusRow {
+  cronName: string;
+  lastRunAt: string | null;
+  successRate: number;
+}
+
+async function fetchCronRuns(
+  since: Date
+): Promise<
+  | { runs: CronRunRow[]; cronStatuses: CronStatusRow[]; error?: undefined }
+  | { runs?: undefined; cronStatuses?: undefined; error: string }
+> {
+  try {
+    const runs = await prisma.cronRun.findMany({
+      where: { startedAt: { gte: since } },
+      orderBy: { startedAt: "desc" },
+    });
+
+    const cronMap: Record<
+      string,
+      { lastRunAt: string | null; successCount: number; total: number }
+    > = {};
+
+    const serializedRuns: CronRunRow[] = runs.map((run) => {
+      if (!cronMap[run.cronName]) {
+        cronMap[run.cronName] = { lastRunAt: null, successCount: 0, total: 0 };
+      }
+      const group = cronMap[run.cronName];
+      group.total++;
+      if (run.status === "SUCCESS") group.successCount++;
+      if (!group.lastRunAt || run.startedAt.toISOString() > group.lastRunAt) {
+        group.lastRunAt = run.startedAt.toISOString();
+      }
+
+      return {
+        id: run.id,
+        cronName: run.cronName,
+        status: run.status,
+        itemsProcessed: run.itemsProcessed,
+        durationMs: run.durationMs,
+        startedAt: run.startedAt.toISOString(),
+      };
+    });
+
+    const cronStatuses: CronStatusRow[] = Object.entries(cronMap).map(
+      ([cronName, data]) => ({
+        cronName,
+        lastRunAt: data.lastRunAt,
+        successRate: data.total > 0 ? data.successCount / data.total : 0,
+      })
+    );
+
+    return { runs: serializedRuns, cronStatuses };
+  } catch {
+    return { error: "Failed to fetch cron run data" };
+  }
+}
+
+interface ErrorBucket {
+  timestamp: string;
+  source: string;
+  count: number;
+  errorCount: number;
+}
+
+interface TopError {
+  message: string;
+  count: number;
+  lastSeenAt: string;
+  status: string;
+  source: string;
+}
+
+async function fetchErrors(
+  since: Date,
+  bucketSize: number
+): Promise<
+  | { buckets: ErrorBucket[]; topErrors: TopError[]; error?: undefined }
+  | { buckets?: undefined; topErrors?: undefined; error: string }
+> {
+  try {
+    const errors = await prisma.errorReport.findMany({
+      where: { lastSeenAt: { gte: since } },
+      orderBy: { lastSeenAt: "desc" },
+    });
+
+    const bucketMap = new Map<
+      string,
+      { count: number; errorCount: number; source: string }
+    >();
+
+    for (const error of errors) {
+      const bucketTime = new Date(
+        Math.floor(error.lastSeenAt.getTime() / bucketSize) * bucketSize
+      );
+      const key = `${bucketTime.toISOString()}|${error.source}`;
+      const bucket = bucketMap.get(key) ?? {
+        count: 0,
+        errorCount: 0,
+        source: error.source,
+      };
+      bucket.count += error.count;
+      bucket.errorCount++;
+      bucketMap.set(key, bucket);
+    }
+
+    const buckets = Array.from(bucketMap.entries()).map(([key, data]) => ({
+      timestamp: key.split("|")[0],
+      source: data.source,
+      count: data.count,
+      errorCount: data.errorCount,
+    }));
+
+    const topErrors = [...errors]
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10)
+      .map((e) => ({
+        message: e.message,
+        count: e.count,
+        lastSeenAt: e.lastSeenAt.toISOString(),
+        status: e.status,
+        source: e.source,
+      }));
+
+    return { buckets, topErrors };
+  } catch {
+    return { error: "Failed to fetch error data" };
+  }
+}

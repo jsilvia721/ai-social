@@ -46,6 +46,7 @@ export default async function DashboardLayout({
         businesses={businesses}
         activeBusinessId={session.user.activeBusinessId}
         showDevTools={showDevTools}
+        isAdmin={isAdmin}
       />
       <main className="min-h-screen pt-14 md:pt-0 md:ml-60">
         <div className="p-4 md:p-8">{children}</div>
