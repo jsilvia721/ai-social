@@ -11,6 +11,7 @@ const mockIssuesCreateComment = jest.fn();
 const mockIssuesListForRepo = jest.fn();
 const mockReposGetContent = jest.fn();
 const mockPullsList = jest.fn();
+const mockReposGet = jest.fn();
 
 jest.mock("@octokit/rest", () => ({
   Octokit: jest.fn().mockImplementation(() => ({
@@ -24,6 +25,7 @@ jest.mock("@octokit/rest", () => ({
     },
     repos: {
       getContent: mockReposGetContent,
+      get: mockReposGet,
     },
     pulls: {
       list: mockPullsList,
@@ -60,6 +62,7 @@ import {
   getRepoFile,
   listIssues,
   listRecentPRs,
+  checkWritePermissions,
 } from "@/lib/github";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
 import { trackApiCall } from "@/lib/system-metrics";
@@ -543,6 +546,90 @@ describe("GitHub client", () => {
           endpoint: "getIssue",
           statusCode: 404,
           error: "Not found",
+        })
+      );
+    });
+  });
+
+  describe("checkWritePermissions", () => {
+    it("returns true when token has push permissions", async () => {
+      mockReposGet.mockResolvedValue({
+        data: { permissions: { push: true } },
+      });
+
+      const result = await checkWritePermissions();
+      expect(result).toBe(true);
+      expect(mockReposGet).toHaveBeenCalledWith({
+        owner: "test-owner",
+        repo: "test-repo",
+      });
+    });
+
+    it("returns false when token lacks push permissions", async () => {
+      mockReposGet.mockResolvedValue({
+        data: { permissions: { push: false } },
+      });
+
+      const result = await checkWritePermissions();
+      expect(result).toBe(false);
+    });
+
+    it("returns false when octokit is null (missing token)", async () => {
+      const envModule = jest.requireMock("@/env") as { env: Record<string, unknown> };
+      const originalToken = envModule.env.GITHUB_TOKEN;
+      envModule.env.GITHUB_TOKEN = undefined;
+
+      try {
+        const result = await checkWritePermissions();
+        expect(result).toBe(false);
+        expect(mockReposGet).not.toHaveBeenCalled();
+      } finally {
+        envModule.env.GITHUB_TOKEN = originalToken;
+      }
+    });
+
+    it("returns false and logs warning on API error", async () => {
+      const error = new Error("Resource not accessible by personal access token");
+      Object.assign(error, { status: 403 });
+      mockReposGet.mockRejectedValue(error);
+
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+      const result = await checkWritePermissions();
+      expect(result).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[github] checkWritePermissions failed")
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("returns false on non-HTTP errors", async () => {
+      mockReposGet.mockRejectedValue(new Error("Network timeout"));
+
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+      const result = await checkWritePermissions();
+      expect(result).toBe(false);
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it("returns true when mock mode is enabled", async () => {
+      mockedShouldMock.mockReturnValue(true);
+
+      const result = await checkWritePermissions();
+      expect(result).toBe(true);
+      expect(mockReposGet).not.toHaveBeenCalled();
+    });
+
+    it("tracks API call", async () => {
+      mockReposGet.mockResolvedValue({
+        data: { permissions: { push: true } },
+      });
+
+      await checkWritePermissions();
+      expect(mockTrackApiCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: "github",
+          endpoint: "checkWritePermissions",
         })
       );
     });
