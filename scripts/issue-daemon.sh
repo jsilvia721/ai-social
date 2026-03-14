@@ -178,11 +178,11 @@ commit_wip_if_needed() {
   wt=$(find_issue_worktree "$issue_number")
   [ -n "$wt" ] || return
 
-  # Check for uncommitted changes (only tracked files to avoid committing secrets)
+  # Check for uncommitted changes (include untracked files — worktree is isolated and .gitignore excludes secrets)
   if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
     log "Committing WIP changes in worktree for issue #${issue_number}"
-    git -C "$wt" add -u 2>/dev/null || true
-    git -C "$wt" commit -m "WIP: interrupted by rate limit (issue #${issue_number})" 2>/dev/null || true
+    git -C "$wt" add -A 2>/dev/null || true
+    git -C "$wt" commit -m "WIP: worker interrupted (issue #${issue_number})" 2>/dev/null || true
   fi
 
   # Push any unpushed commits
