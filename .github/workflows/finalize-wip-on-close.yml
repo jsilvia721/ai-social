@@ -1,0 +1,43 @@
+name: Finalize WIP on Close
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write
+
+jobs:
+  finalize-wip:
+    if: contains(github.event.issue.labels.*.name, 'claude-wip')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = issue.number;
+
+            // Skip if the "issue" is actually a PR (GitHub treats PRs as issues)
+            if (issue.pull_request) {
+              console.log(`#${issue_number}: is a pull request, not an issue. Skipping.`);
+              return;
+            }
+
+            console.log(`#${issue_number}: closed with claude-wip label. Transitioning to claude-done.`);
+
+            await github.rest.issues.removeLabel({
+              owner, repo,
+              issue_number,
+              name: 'claude-wip'
+            });
+
+            await github.rest.issues.addLabels({
+              owner, repo,
+              issue_number,
+              labels: ['claude-done']
+            });
+
+            console.log(`#${issue_number}: removed claude-wip, added claude-done.`);
