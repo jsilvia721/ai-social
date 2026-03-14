@@ -242,8 +242,23 @@ export async function runMetricsRefresh(): Promise<{ processed: number }> {
             metricsUpdatedAt: new Date(),
           },
         });
-      } catch {
-        // Best-effort — don't fail the whole batch if one post's metrics can't be fetched
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error(`[metrics-refresh] Failed to refresh metrics for post ${post.id}:`, errorMessage);
+
+        // Log to ErrorReport table — fire-and-forget (must never crash the batch)
+        try {
+          await reportServerError(errorMessage, {
+            url: "cron/metrics",
+            metadata: {
+              postId: post.id,
+              blotatoPostId: post.blotatoPostId,
+              source: "blotato-metrics",
+            },
+          });
+        } catch {
+          // Swallow — error reporting must not interfere with metrics batch
+        }
       }
     })
   );

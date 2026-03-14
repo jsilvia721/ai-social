@@ -2,15 +2,18 @@ import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/blotato/publish");
+jest.mock("@/lib/blotato/metrics");
 jest.mock("@/lib/alerts");
 jest.mock("@/lib/server-error-reporter");
 
 import { runScheduler, runMetricsRefresh } from "@/lib/scheduler";
 import { publishPost } from "@/lib/blotato/publish";
+import { getPostMetrics } from "@/lib/blotato/metrics";
 import { sendFailureAlert } from "@/lib/alerts";
 import { reportServerError } from "@/lib/server-error-reporter";
 
 const mockPublishPost = publishPost as jest.MockedFunction<typeof publishPost>;
+const mockGetPostMetrics = getPostMetrics as jest.MockedFunction<typeof getPostMetrics>;
 const mockSendFailureAlert = sendFailureAlert as jest.MockedFunction<typeof sendFailureAlert>;
 const mockReportServerError = reportServerError as jest.MockedFunction<typeof reportServerError>;
 
@@ -503,19 +506,13 @@ describe("runMetricsRefresh", () => {
       saves: 3,
     };
 
-    // Spy on global.fetch for the Blotato metrics call
-    const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers(),
-      json: async () => mockMetrics,
-    } as Response);
-
+    mockGetPostMetrics.mockResolvedValue(mockMetrics);
     prismaMock.post.update.mockResolvedValue(publishedPost as any);
 
     const result = await runMetricsRefresh();
 
     expect(result.processed).toBe(1);
+    expect(mockGetPostMetrics).toHaveBeenCalledWith("blotato-post-abc");
     expect(prismaMock.post.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "post-1" },
@@ -530,8 +527,6 @@ describe("runMetricsRefresh", () => {
         }),
       })
     );
-
-    fetchSpy.mockRestore();
   });
 
   it("caps refresh at 50 posts (oldest-stale first)", async () => {
@@ -545,5 +540,86 @@ describe("runMetricsRefresh", () => {
         orderBy: expect.objectContaining({ metricsUpdatedAt: "asc" }),
       })
     );
+  });
+
+  it("calls reportServerError when getPostMetrics throws", async () => {
+    const publishedPost = {
+      ...makePost({ status: "PUBLISHED" }),
+      blotatoPostId: "blotato-post-abc",
+    };
+    prismaMock.post.findMany.mockResolvedValue([publishedPost] as any);
+    mockGetPostMetrics.mockRejectedValue(new Error("Metrics API down"));
+
+    await runMetricsRefresh();
+
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      "Metrics API down",
+      expect.objectContaining({
+        url: "cron/metrics",
+        metadata: expect.objectContaining({
+          postId: "post-1",
+          blotatoPostId: "blotato-post-abc",
+          source: "blotato-metrics",
+        }),
+      })
+    );
+  });
+
+  it("still processes remaining posts when one fails (allSettled resilience)", async () => {
+    const post1 = {
+      ...makePost({ id: "post-1", status: "PUBLISHED" }),
+      blotatoPostId: "blotato-1",
+    };
+    const post2 = {
+      ...makePost({ id: "post-2", status: "PUBLISHED" }),
+      blotatoPostId: "blotato-2",
+    };
+    prismaMock.post.findMany.mockResolvedValue([post1, post2] as any);
+    // First post fails, second succeeds
+    mockGetPostMetrics
+      .mockRejectedValueOnce(new Error("Metrics API down"))
+      .mockResolvedValueOnce({
+        likes: 10,
+        comments: 2,
+        shares: 1,
+        impressions: 500,
+        reach: 400,
+        saves: 0,
+      });
+    prismaMock.post.update.mockResolvedValue(post2 as any);
+
+    const result = await runMetricsRefresh();
+
+    // Both posts counted as processed
+    expect(result.processed).toBe(2);
+    // Second post's metrics should still be updated
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "post-2" },
+        data: expect.objectContaining({
+          metricsLikes: 10,
+        }),
+      })
+    );
+    // Error reported for first post
+    expect(mockReportServerError).toHaveBeenCalledWith(
+      "Metrics API down",
+      expect.objectContaining({
+        metadata: expect.objectContaining({ postId: "post-1" }),
+      })
+    );
+  });
+
+  it("does not crash if reportServerError throws during metrics refresh", async () => {
+    const publishedPost = {
+      ...makePost({ status: "PUBLISHED" }),
+      blotatoPostId: "blotato-post-abc",
+    };
+    prismaMock.post.findMany.mockResolvedValue([publishedPost] as any);
+    mockGetPostMetrics.mockRejectedValue(new Error("API down"));
+    mockReportServerError.mockRejectedValue(new Error("DB dead"));
+
+    // Should NOT throw despite both getPostMetrics and reportServerError failing
+    await expect(runMetricsRefresh()).resolves.toEqual({ processed: 1 });
   });
 });
