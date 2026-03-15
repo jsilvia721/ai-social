@@ -379,6 +379,7 @@ model Feedback {
   status            String   @default("PENDING") // PENDING, ISSUE_CREATED, FAILED
   githubIssueNumber Int?
   githubIssueUrl    String?
+  conversationHistory Json?   // chat messages between user and feedback agent
   metadata          Json?    // userAgent, viewport, etc.
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
