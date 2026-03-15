@@ -74,8 +74,10 @@ For each conflicted file:
 After all files in the current rebase step are resolved:
 
 ```bash
-git rebase --continue
+GIT_EDITOR=true git rebase --continue
 ```
+
+> **Note:** `GIT_EDITOR=true` prevents git from opening an interactive editor during rebase, which would hang the non-interactive agent.
 
 Repeat steps 2–3 for any subsequent rebase conflicts until the rebase completes.
 
@@ -90,15 +92,16 @@ If `ci:check` **passes**, proceed to step 5.
 If `ci:check` **fails**:
 
 ```bash
-git rebase --abort 2>/dev/null  # abort if still in rebase
 echo "ERROR: ci:check failed after conflict resolution." >&2
+gh pr comment <pr-number> --body "❌ Automated conflict resolution failed: ci:check did not pass after resolving conflicts. Manual resolution required."
 exit 1
 ```
 
-### 5. Push
+### 5. Push and Notify
 
 ```bash
 git push --force-with-lease
+gh pr comment <pr-number> --body "✅ Merge conflicts resolved automatically by conflict-resolver agent. Force-pushed rebased branch."
 ```
 
 ## Resolution Strategy
