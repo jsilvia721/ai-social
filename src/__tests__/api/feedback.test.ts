@@ -92,6 +92,7 @@ describe("POST /api/feedback", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBeDefined();
+    expect(typeof body.error).toBe("string");
   });
 
   it("returns 400 when message is empty string", async () => {
