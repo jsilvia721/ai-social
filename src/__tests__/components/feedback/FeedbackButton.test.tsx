@@ -1,8 +1,28 @@
 /**
  * @jest-environment jsdom
  */
+
+// Polyfill Web Streams and TextEncoder/TextDecoder for jsdom
+import { TextEncoder, TextDecoder } from "util";
+import { ReadableStream } from "stream/web";
+Object.assign(global, {
+  TextEncoder,
+  TextDecoder,
+  ReadableStream,
+});
+
+// Mock scrollIntoView for jsdom
+Element.prototype.scrollIntoView = jest.fn();
+
 import "@testing-library/jest-dom";
-import React, { createContext, useState, useContext, isValidElement, cloneElement, createElement } from "react";
+import React, {
+  createContext,
+  useState,
+  useContext,
+  isValidElement,
+  cloneElement,
+  createElement,
+} from "react";
 import {
   render,
   screen,
@@ -76,13 +96,36 @@ const mockFetch = jest.fn();
 
 beforeEach(() => {
   jest.clearAllMocks();
-  jest.useFakeTimers();
   global.fetch = mockFetch as unknown as typeof fetch;
 });
 
-afterEach(() => {
-  jest.useRealTimers();
-});
+/** Create a mock ReadableStream that yields SSE events */
+function createMockSSEResponse(chunks: string[], done = true) {
+  const encoder = new TextEncoder();
+  const events = chunks.map(
+    (c) => `data: ${JSON.stringify({ type: "text", text: c })}\n\n`
+  );
+  if (done) events.push("data: [DONE]\n\n");
+
+  let index = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (index < events.length) {
+        controller.enqueue(encoder.encode(events[index]));
+        index++;
+      } else {
+        controller.close();
+      }
+    },
+  });
+
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers({ "Content-Type": "text/event-stream" }),
+    body: stream,
+  };
+}
 
 describe("FeedbackButton", () => {
   it("renders the floating feedback button", () => {
@@ -99,224 +142,74 @@ describe("FeedbackButton", () => {
     expect(container).toHaveClass("fixed", "bottom-4", "right-4", "z-50");
   });
 
-  it("opens dialog when clicked", () => {
+  it("opens dialog with chat interface when clicked", async () => {
+    const greetingResponse = createMockSSEResponse(["Hi! How can I help?"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse);
+
     render(<FeedbackButton />);
     fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-    expect(screen.getByText(/send feedback/i)).toBeInTheDocument();
+
+    // Should show chat input (not textarea from old flow)
     expect(
-      screen.getByPlaceholderText(/what's on your mind/i)
+      screen.getByPlaceholderText(/type your message/i)
     ).toBeInTheDocument();
+
+    // Should NOT show old textarea elements
+    expect(
+      screen.queryByPlaceholderText(/what's on your mind/i)
+    ).not.toBeInTheDocument();
   });
 
-  it("has sr-only label for textarea", () => {
-    render(<FeedbackButton />);
-    fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-    const label = document.querySelector('label[for="feedback-message"]');
-    expect(label).toBeInTheDocument();
-    expect(label).toHaveClass("sr-only");
-  });
+  it("does not render old textarea or character counter", () => {
+    const greetingResponse = createMockSSEResponse(["Hello!"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse);
 
-  it("shows character counter when message exceeds 4000 chars", () => {
     render(<FeedbackButton />);
     fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-    const textarea = screen.getByPlaceholderText(/what's on your mind/i);
-    fireEvent.change(textarea, { target: { value: "a".repeat(4001) } });
-    expect(screen.getByText(/4001\s*\/\s*5000/)).toBeInTheDocument();
-  });
 
-  it("does not show character counter for short messages", () => {
-    render(<FeedbackButton />);
-    fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-    const textarea = screen.getByPlaceholderText(/what's on your mind/i);
-    fireEvent.change(textarea, { target: { value: "Short message" } });
+    // No textarea with old placeholder
+    expect(screen.queryByLabelText(/feedback message/i)).not.toBeInTheDocument();
+    // No character counter
     expect(screen.queryByText(/\/\s*5000/)).not.toBeInTheDocument();
   });
 
-  it("disables send button when message is empty", () => {
+  it("dialog shows Send Feedback title", () => {
+    const greetingResponse = createMockSSEResponse(["Hello!"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse);
+
     render(<FeedbackButton />);
     fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-    const sendBtn = screen.getByRole("button", { name: /send/i });
-    expect(sendBtn).toBeDisabled();
+    expect(screen.getByText(/send feedback/i)).toBeInTheDocument();
   });
 
-  it("submits feedback with correct payload", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          id: "fb-1",
-          githubIssueUrl: "https://github.com/test/1",
-        }),
-    });
+  it("fetches AI greeting when dialog opens", async () => {
+    const greetingResponse = createMockSSEResponse(["Hello! What can I help with?"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse);
 
     render(<FeedbackButton />);
     fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-
-    const textarea = screen.getByPlaceholderText(/what's on your mind/i);
-    fireEvent.change(textarea, { target: { value: "Great feature!" } });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /send/i }));
-    });
-
-    await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: expect.stringContaining("Great feature!"),
-      });
-    });
-
-    // Verify payload structure
-    const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(callBody).toMatchObject({
-      message: "Great feature!",
-      pageUrl: expect.any(String),
-      metadata: { userAgent: expect.any(String) },
-    });
-  });
-
-  it("shows success state with GitHub issue link", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          id: "fb-1",
-          githubIssueUrl: "https://github.com/test/issues/1",
-        }),
-    });
-
-    render(<FeedbackButton />);
-    fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-
-    const textarea = screen.getByPlaceholderText(/what's on your mind/i);
-    fireEvent.change(textarea, { target: { value: "Bug report" } });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /send/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText(/thank you/i)).toBeInTheDocument();
-    });
-
-    expect(
-      screen.getByRole("link", { name: /view issue on github/i })
-    ).toHaveAttribute("href", "https://github.com/test/issues/1");
-  });
-
-  it("shows error state on submission failure", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      json: () => Promise.resolve({ error: "Server error" }),
-    });
-
-    render(<FeedbackButton />);
-    fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-
-    const textarea = screen.getByPlaceholderText(/what's on your mind/i);
-    fireEvent.change(textarea, { target: { value: "Bug report" } });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /send/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toBeInTheDocument();
-    });
-  });
-
-  it("shows spinner and disables button during submission", async () => {
-    // Never resolves to keep loading state
-    mockFetch.mockReturnValueOnce(new Promise(() => {}));
-
-    render(<FeedbackButton />);
-    fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-
-    const textarea = screen.getByPlaceholderText(/what's on your mind/i);
-    fireEvent.change(textarea, { target: { value: "Loading test" } });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /send/i }));
-    });
-
-    // Button should be disabled during submission
-    await waitFor(() => {
-      const sendBtn = screen.getByRole("button", { name: /send/i });
-      expect(sendBtn).toBeDisabled();
-    });
-  });
-
-  it("handles screenshot upload success", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({ url: "https://s3.example.com/screenshot.png" }),
-    });
-
-    render(<FeedbackButton />);
-    fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-
-    const fileInput = screen.getByLabelText(/attach screenshot/i);
-    const file = new File(["screenshot"], "screenshot.png", {
-      type: "image/png",
-    });
-
-    await act(async () => {
-      fireEvent.change(fileInput, { target: { files: [file] } });
-    });
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(
-        "/api/upload",
+        "/api/feedback/chat",
         expect.objectContaining({ method: "POST" })
       );
     });
-
-    // Should show the filename
-    await waitFor(() => {
-      expect(screen.getByText("screenshot.png")).toBeInTheDocument();
-    });
   });
 
-  it("handles screenshot upload failure gracefully", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      json: () => Promise.resolve({ error: "Upload failed" }),
-    });
+  it("resets FeedbackChat state when dialog is closed and reopened", async () => {
+    // First open: greeting
+    const greetingResponse1 = createMockSSEResponse(["Hello!"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse1);
 
     render(<FeedbackButton />);
     fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
 
-    const fileInput = screen.getByLabelText(/attach screenshot/i);
-    const file = new File(["screenshot"], "screenshot.png", {
-      type: "image/png",
-    });
-
-    await act(async () => {
-      fireEvent.change(fileInput, { target: { files: [file] } });
-    });
-
     await waitFor(() => {
-      expect(screen.getByText(/upload failed/i)).toBeInTheDocument();
+      expect(screen.getByText(/Hello!/)).toBeInTheDocument();
     });
 
-    // Should still be able to submit without screenshot
-    const textarea = screen.getByPlaceholderText(/what's on your mind/i);
-    fireEvent.change(textarea, { target: { value: "Bug without screenshot" } });
-    expect(screen.getByRole("button", { name: /send/i })).not.toBeDisabled();
-  });
-
-  it("resets state when dialog is closed", () => {
-    render(<FeedbackButton />);
-
-    // Open and type
-    fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-    const textarea = screen.getByPlaceholderText(/what's on your mind/i);
-    fireEvent.change(textarea, { target: { value: "Some text" } });
-    expect(textarea).toHaveValue("Some text");
-
-    // Close via the X button (from DialogContent's showCloseButton)
+    // Close via X button
     const closeButtons = screen.getAllByRole("button");
     const closeBtn = closeButtons.find(
       (btn) => btn.querySelector(".sr-only")?.textContent === "Close"
@@ -325,9 +218,36 @@ describe("FeedbackButton", () => {
       fireEvent.click(closeBtn);
     }
 
-    // Re-open
+    // Re-open should fetch a new greeting (fresh FeedbackChat instance)
+    const greetingResponse2 = createMockSSEResponse(["Hello again!"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse2);
     fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
-    const newTextarea = screen.getByPlaceholderText(/what's on your mind/i);
-    expect(newTextarea).toHaveValue("");
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("shows chat message log region", async () => {
+    const greetingResponse = createMockSSEResponse(["Hello!"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse);
+
+    render(<FeedbackButton />);
+    fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("log")).toBeInTheDocument();
+    });
+  });
+
+  it("has accessible sr-only Close label in dialog", () => {
+    const greetingResponse = createMockSSEResponse(["Hello!"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse);
+
+    render(<FeedbackButton />);
+    fireEvent.click(screen.getByRole("button", { name: /feedback/i }));
+
+    const closeBtn = screen.getByRole("button", { name: /close/i });
+    expect(closeBtn).toBeInTheDocument();
   });
 });

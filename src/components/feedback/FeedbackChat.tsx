@@ -115,7 +115,15 @@ async function consumeSSEStream(
   }
 }
 
-export function FeedbackChat() {
+export interface FeedbackChatProps {
+  /** When provided, component renders without its own Dialog wrapper (embedded mode). */
+  onClose?: () => void;
+  /** Called when feedback is successfully submitted in embedded mode. */
+  onSuccess?: (issueUrl?: string) => void;
+}
+
+export function FeedbackChat({ onClose, onSuccess }: FeedbackChatProps = {}) {
+  const embedded = !!onClose;
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
@@ -159,9 +167,15 @@ export function FeedbackChat() {
   }
 
   function handleOpenChange(nextOpen: boolean) {
-    setOpen(nextOpen);
-    if (!nextOpen) {
-      resetState();
+    if (embedded) {
+      if (!nextOpen) {
+        onClose?.();
+      }
+    } else {
+      setOpen(nextOpen);
+      if (!nextOpen) {
+        resetState();
+      }
     }
   }
 
@@ -259,16 +273,17 @@ export function FeedbackChat() {
     []
   );
 
-  /** Fetch the initial greeting when the dialog opens. */
+  /** Fetch the initial greeting when the dialog opens (or on mount in embedded mode). */
   useEffect(() => {
-    if (open && messages.length === 0 && streamingState === "idle") {
+    const shouldFetch = embedded || open;
+    if (shouldFetch && messages.length === 0 && streamingState === "idle") {
       // Send a greeting request — the API expects at least one user message,
       // so we send a minimal "hi" that the system prompt will respond to
       const greetingMessages: Message[] = [{ role: "user", content: "hi" }];
       sendToChat(greetingMessages);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, embedded]);
 
   function handleSendMessage() {
     const trimmed = inputValue.trim();
@@ -378,6 +393,7 @@ export function FeedbackChat() {
 
       const data = await res.json();
       setSuccess({ issueUrl: data.githubIssueUrl });
+      onSuccess?.(data.githubIssueUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Submit failed");
     } finally {
@@ -402,6 +418,218 @@ export function FeedbackChat() {
     inputValue.trim().length >= MIN_MESSAGE_LENGTH && streamingState === "idle";
   const showWrapUp = userExchangeCount >= 2 && !summary && streamingState === "idle";
 
+  const chatContent = (
+    <>
+      {/* Header */}
+      <DialogHeader className="flex-none border-b border-zinc-800 px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <DialogTitle className="text-base">
+              {embedded ? "Send Feedback" : "Feedback"}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Tell us what&apos;s on your mind
+            </DialogDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            {userExchangeCount > 0 && (
+              <span className="text-xs text-zinc-500">
+                {userExchangeCount} of {EXCHANGE_CAP}
+              </span>
+            )}
+            <button
+              onClick={() => handleOpenChange(false)}
+              className="rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+              <span className="sr-only">Close</span>
+            </button>
+          </div>
+        </div>
+      </DialogHeader>
+
+      {success ? (
+        /* Success state */
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="text-center space-y-2">
+            <p className="text-sm text-emerald-400 font-medium">
+              Thank you for your feedback!
+            </p>
+            {success.issueUrl?.startsWith("https://github.com/") && (
+              <a
+                href={success.issueUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-400 hover:underline inline-block"
+              >
+                View issue on GitHub
+              </a>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Message list */}
+          <div
+            role="log"
+            aria-label="Chat messages"
+            className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0 md:min-h-[300px] md:max-h-[50vh]"
+          >
+            {messages.map((msg, i) => {
+              // Don't render the initial "hi" greeting trigger
+              if (i === 0 && msg.role === "user" && msg.content === "hi") {
+                return null;
+              }
+              return (
+                <ChatMessage
+                  key={i}
+                  role={msg.role}
+                  content={msg.content}
+                  screenshotUrl={msg.screenshotUrl}
+                />
+              );
+            })}
+
+            {/* Streaming text */}
+            {streamingState === "streaming" && streamingText && (
+              <ChatMessage
+                role="assistant"
+                content={streamingText}
+                isStreaming
+              />
+            )}
+
+            {/* Typing indicator */}
+            {streamingState === "waiting" && <TypingIndicator />}
+
+            {/* Summary card */}
+            {summary && !success && (
+              <ChatSummary
+                summary={summary}
+                onConfirm={handleConfirmSummary}
+                onCorrect={handleCorrectSummary}
+                isSubmitting={isSubmitting}
+              />
+            )}
+
+            {/* Error display */}
+            {error && (
+              <div
+                role="alert"
+                className="flex items-center gap-2 rounded-lg bg-red-900/20 border border-red-800/50 px-3 py-2 text-sm text-red-400"
+              >
+                <span className="flex-1">{error}</span>
+                {streamingState === "error" && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={handleRetry}
+                    aria-label="Retry"
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" />
+                    Retry
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* Scroll anchor */}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input area */}
+          {!summary && (
+            <div className="flex-none border-t border-zinc-800 p-3 space-y-2 safe-area-bottom">
+              {/* Screenshot preview */}
+              {screenshot && (
+                <div className="flex items-center gap-2 text-sm text-zinc-300 bg-zinc-800 rounded-md px-3 py-1.5">
+                  <Paperclip className="h-3 w-3 text-zinc-400 flex-none" />
+                  <span className="truncate flex-1 text-xs">
+                    {screenshot.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={removeScreenshot}
+                    className="text-zinc-500 hover:text-zinc-300 flex-none"
+                    aria-label="Remove screenshot"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+
+              {/* Wrap up button */}
+              {showWrapUp && (
+                <div className="flex justify-center">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={handleWrapUp}
+                    aria-label="Wrap up"
+                  >
+                    Wrap up
+                  </Button>
+                </div>
+              )}
+
+              <div className="flex items-end gap-2">
+                {/* Paperclip button */}
+                <label
+                  className="flex-none cursor-pointer text-zinc-400 hover:text-zinc-300 transition-colors p-1"
+                  aria-label="Attach screenshot"
+                >
+                  {isUploading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Paperclip className="h-4 w-4" />
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    data-testid="chat-screenshot-input"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleScreenshotUpload}
+                    className="hidden"
+                    disabled={isUploading}
+                  />
+                </label>
+
+                {/* Text input */}
+                <textarea
+                  ref={inputRef}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Type your message..."
+                  rows={1}
+                  className="flex-1 resize-none rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[38px] max-h-[120px]"
+                  disabled={streamingState !== "idle"}
+                />
+
+                {/* Send button */}
+                <Button
+                  size="icon-sm"
+                  onClick={handleSendMessage}
+                  disabled={!canSend}
+                  aria-label="Send"
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+
+  // In embedded mode, render content directly (parent manages Dialog)
+  if (embedded) {
+    return chatContent;
+  }
+
+  // Standalone mode: render with own Dialog wrapper
   return (
     <div className="fixed bottom-4 right-4 z-50">
       <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -419,205 +647,7 @@ export function FeedbackChat() {
           className="flex flex-col fixed inset-0 max-w-none translate-x-0 translate-y-0 top-0 left-0 rounded-none h-dvh w-dvw md:inset-auto md:top-[50%] md:left-[50%] md:translate-x-[-50%] md:translate-y-[-50%] md:rounded-lg md:h-auto md:max-h-[80vh] md:w-full md:max-w-lg p-0"
           showCloseButton={false}
         >
-          {/* Header */}
-          <DialogHeader className="flex-none border-b border-zinc-800 px-4 py-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <DialogTitle className="text-base">Feedback</DialogTitle>
-                <DialogDescription className="text-xs">
-                  Tell us what&apos;s on your mind
-                </DialogDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                {userExchangeCount > 0 && (
-                  <span className="text-xs text-zinc-500">
-                    {userExchangeCount} of {EXCHANGE_CAP}
-                  </span>
-                )}
-                <button
-                  onClick={() => handleOpenChange(false)}
-                  className="rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
-                  aria-label="Close"
-                >
-                  <X className="h-4 w-4" />
-                  <span className="sr-only">Close</span>
-                </button>
-              </div>
-            </div>
-          </DialogHeader>
-
-          {success ? (
-            /* Success state */
-            <div className="flex-1 flex items-center justify-center p-6">
-              <div className="text-center space-y-2">
-                <p className="text-sm text-emerald-400 font-medium">
-                  Thank you for your feedback!
-                </p>
-                {success.issueUrl?.startsWith("https://github.com/") && (
-                  <a
-                    href={success.issueUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-blue-400 hover:underline inline-block"
-                  >
-                    View issue on GitHub
-                  </a>
-                )}
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Message list */}
-              <div
-                role="log"
-                aria-label="Chat messages"
-                className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0 md:min-h-[300px] md:max-h-[50vh]"
-              >
-                {messages.map((msg, i) => {
-                  // Don't render the initial "hi" greeting trigger
-                  if (i === 0 && msg.role === "user" && msg.content === "hi") {
-                    return null;
-                  }
-                  return (
-                    <ChatMessage
-                      key={i}
-                      role={msg.role}
-                      content={msg.content}
-                      screenshotUrl={msg.screenshotUrl}
-                    />
-                  );
-                })}
-
-                {/* Streaming text */}
-                {streamingState === "streaming" && streamingText && (
-                  <ChatMessage
-                    role="assistant"
-                    content={streamingText}
-                    isStreaming
-                  />
-                )}
-
-                {/* Typing indicator */}
-                {streamingState === "waiting" && <TypingIndicator />}
-
-                {/* Summary card */}
-                {summary && !success && (
-                  <ChatSummary
-                    summary={summary}
-                    onConfirm={handleConfirmSummary}
-                    onCorrect={handleCorrectSummary}
-                    isSubmitting={isSubmitting}
-                  />
-                )}
-
-                {/* Error display */}
-                {error && (
-                  <div
-                    role="alert"
-                    className="flex items-center gap-2 rounded-lg bg-red-900/20 border border-red-800/50 px-3 py-2 text-sm text-red-400"
-                  >
-                    <span className="flex-1">{error}</span>
-                    {streamingState === "error" && (
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={handleRetry}
-                        aria-label="Retry"
-                      >
-                        <RotateCcw className="h-3 w-3 mr-1" />
-                        Retry
-                      </Button>
-                    )}
-                  </div>
-                )}
-
-                {/* Scroll anchor */}
-                <div ref={messagesEndRef} />
-              </div>
-
-              {/* Input area */}
-              {!summary && (
-                <div className="flex-none border-t border-zinc-800 p-3 space-y-2 safe-area-bottom">
-                  {/* Screenshot preview */}
-                  {screenshot && (
-                    <div className="flex items-center gap-2 text-sm text-zinc-300 bg-zinc-800 rounded-md px-3 py-1.5">
-                      <Paperclip className="h-3 w-3 text-zinc-400 flex-none" />
-                      <span className="truncate flex-1 text-xs">
-                        {screenshot.name}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={removeScreenshot}
-                        className="text-zinc-500 hover:text-zinc-300 flex-none"
-                        aria-label="Remove screenshot"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Wrap up button */}
-                  {showWrapUp && (
-                    <div className="flex justify-center">
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={handleWrapUp}
-                        aria-label="Wrap up"
-                      >
-                        Wrap up
-                      </Button>
-                    </div>
-                  )}
-
-                  <div className="flex items-end gap-2">
-                    {/* Paperclip button */}
-                    <label
-                      className="flex-none cursor-pointer text-zinc-400 hover:text-zinc-300 transition-colors p-1"
-                      aria-label="Attach screenshot"
-                    >
-                      {isUploading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Paperclip className="h-4 w-4" />
-                      )}
-                      <input
-                        ref={fileInputRef}
-                        data-testid="chat-screenshot-input"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleScreenshotUpload}
-                        className="hidden"
-                        disabled={isUploading}
-                      />
-                    </label>
-
-                    {/* Text input */}
-                    <textarea
-                      ref={inputRef}
-                      value={inputValue}
-                      onChange={(e) => setInputValue(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      placeholder="Type your message..."
-                      rows={1}
-                      className="flex-1 resize-none rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[38px] max-h-[120px]"
-                      disabled={streamingState !== "idle"}
-                    />
-
-                    {/* Send button */}
-                    <Button
-                      size="icon-sm"
-                      onClick={handleSendMessage}
-                      disabled={!canSend}
-                      aria-label="Send"
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+          {chatContent}
         </DialogContent>
       </Dialog>
     </div>
