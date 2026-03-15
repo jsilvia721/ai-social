@@ -69,7 +69,7 @@ If the task does **not** reference a bug, omit the marker entirely.
 ```bash
 gh issue create \
   --title "Plan: <concise description of the overall task>" \
-  --label "<parsed-label>" \
+  --label "plan" --label "<parsed-label>" \
   --body "$(cat <<'ISSUE_EOF'
 ### Plan: <title>
 <!-- BUG_ISSUE: #N -->  ← include ONLY if task references a bug issue; omit otherwise
