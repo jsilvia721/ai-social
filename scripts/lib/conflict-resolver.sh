@@ -1,0 +1,521 @@
+#!/usr/bin/env bash
+# conflict-resolver.sh — Conflict detection and resolution library for daemon PRs.
+#
+# Usage:
+#   source scripts/lib/conflict-resolver.sh
+#
+# Required:
+#   LOG_DIR — directory for per-PR log files and conflict state
+#   log()  — logging function (provided by the daemon)
+#
+# Functions:
+#   detect_conflicting_prs          — find open daemon PRs with merge conflicts
+#   attempt_clean_rebase            — try a clean git rebase in a worktree
+#   push_rebased_branch             — force-with-lease push from worktree
+#   poll_ci_status                  — wait for CI checks to pass/fail
+#   handle_mechanical_conflicts     — resolve lockfile-only conflicts
+#   is_excluded_conflict            — check if conflicts are in excluded files
+#   is_mechanical_conflict          — check if only lockfiles are conflicted
+#   handle_resolution_success       — comment, remove label, clean state
+#   handle_resolution_failure       — label, comment, record retry state
+#   should_retry                    — check if PR should be retried
+#   cleanup_conflict_worktree       — remove a single conflict worktree
+#   cleanup_stale_conflict_worktrees — remove all conflict worktrees (crash recovery)
+#   ensure_conflict_state_dir       — create state directory
+#   conflict_log                    — log to per-PR log file
+
+set -euo pipefail
+
+# The repo root can be overridden for testing.
+CONFLICT_RESOLVER_REPO_ROOT="${CONFLICT_RESOLVER_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
+# The bot login used to identify daemon-created commits.
+DAEMON_BOT_LOGIN="${DAEMON_BOT_LOGIN:-app/claude-code-bot}"
+
+# Maximum retry attempts before giving up.
+CONFLICT_MAX_RETRIES="${CONFLICT_MAX_RETRIES:-3}"
+
+# Lockfile patterns considered "mechanical" (auto-resolvable).
+# Only package-lock.json — this project uses npm exclusively.
+LOCKFILE_PATTERNS="^package-lock\.json$"
+
+# Excluded file patterns (should skip to label).
+EXCLUDED_PATTERNS="^(prisma/migrations/|prisma/schema\.prisma|sst\.config\.ts)"
+
+# --- Input validation ---------------------------------------------------------
+
+# Validate that a PR number is a positive integer.
+# $1 — value to check
+# Returns: 0 if valid, 1 if not
+_validate_pr_number() {
+  local val="$1"
+  if ! [[ "$val" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: invalid pr_number: $val" >&2
+    return 1
+  fi
+}
+
+# Validate that a branch name contains only safe characters.
+# $1 — branch name to check
+# Returns: 0 if valid, 1 if not
+_validate_branch_name() {
+  local val="$1"
+  if ! [[ "$val" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+    echo "ERROR: invalid branch name: $val" >&2
+    return 1
+  fi
+}
+
+# --- Logging ------------------------------------------------------------------
+
+# Log a message to the per-PR log file.
+# $1 — PR number, $2+ — message
+conflict_log() {
+  local pr_number="$1"
+  shift
+  local log_file="$LOG_DIR/conflict-pr-${pr_number}.log"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$log_file"
+}
+
+# --- State directory ----------------------------------------------------------
+
+# Create the conflict state directory if it doesn't exist.
+ensure_conflict_state_dir() {
+  mkdir -p "$LOG_DIR/conflict-state"
+}
+
+# --- Detection ----------------------------------------------------------------
+
+# Find open daemon PRs with merge conflicts.
+# Returns a JSON array of PR objects (number, title, headRefName, mergeable).
+# Filters to:
+#   - issue-* branches only
+#   - mergeable=CONFLICTING
+#   - most recent commit author is the daemon bot
+detect_conflicting_prs() {
+  local pr_json
+  pr_json=$(gh pr list --state open --json number,title,headRefName,mergeable 2>/dev/null || echo "[]")
+
+  # Filter to issue-* branches with CONFLICTING status
+  local candidates
+  candidates=$(echo "$pr_json" | jq '[.[] | select(.headRefName | startswith("issue-")) | select(.mergeable == "CONFLICTING")]')
+
+  local result="[]"
+  local count
+  count=$(echo "$candidates" | jq 'length')
+
+  local i=0
+  while [ "$i" -lt "$count" ]; do
+    local pr_number
+    pr_number=$(echo "$candidates" | jq -r ".[$i].number")
+
+    # Check if the most recent commit was authored by the daemon
+    local last_author
+    last_author=$(gh pr view "$pr_number" --json commits 2>/dev/null | jq -r '.commits[-1].authors[0].login' 2>/dev/null || echo "")
+
+    if [ "$last_author" = "$DAEMON_BOT_LOGIN" ]; then
+      result=$(echo "$result" | jq --argjson pr "$(echo "$candidates" | jq ".[$i]")" '. + [$pr]')
+    fi
+
+    i=$((i + 1))
+  done
+
+  echo "$result"
+}
+
+# --- Rebase -------------------------------------------------------------------
+
+# Attempt a clean rebase of a PR branch onto origin/main.
+# Creates a fresh worktree, fetches, and rebases.
+# $1 — PR number, $2 — head branch name
+# Returns: 0 = clean rebase, 1 = conflicts, 2 = other error
+attempt_clean_rebase() {
+  local pr_number="$1"
+  local head_branch="$2"
+  _validate_pr_number "$pr_number" || return 2
+  _validate_branch_name "$head_branch" || return 2
+  local worktree_path="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
+
+  conflict_log "$pr_number" "Starting clean rebase of $head_branch onto origin/main"
+
+  # Clean up any existing worktree first
+  if [ -d "$worktree_path" ]; then
+    conflict_log "$pr_number" "Removing existing worktree at $worktree_path"
+    git worktree remove "$worktree_path" --force 2>/dev/null || rm -rf "$worktree_path"
+  fi
+
+  # Fetch latest
+  if ! git fetch origin 2>/dev/null; then
+    conflict_log "$pr_number" "ERROR: git fetch origin failed"
+    return 2
+  fi
+
+  # Create fresh worktree from the PR branch
+  if ! git worktree add "$worktree_path" "origin/${head_branch}" 2>/dev/null; then
+    conflict_log "$pr_number" "ERROR: failed to create worktree from origin/${head_branch}"
+    return 2
+  fi
+
+  # Abort any stuck rebase state in the worktree
+  if [ -d "${worktree_path}/.git/rebase-merge" ] || [ -d "${worktree_path}/.git/rebase-apply" ]; then
+    conflict_log "$pr_number" "Aborting stuck rebase state"
+    git -C "$worktree_path" rebase --abort 2>/dev/null || true
+  fi
+
+  # Attempt rebase
+  local rebase_output
+  if rebase_output=$(git -C "$worktree_path" rebase origin/main 2>&1); then
+    conflict_log "$pr_number" "Clean rebase succeeded"
+    return 0
+  else
+    # Check if it's a conflict or other error
+    if echo "$rebase_output" | grep -qiE 'CONFLICT|merge conflict|could not apply'; then
+      conflict_log "$pr_number" "Rebase hit conflicts: $(echo "$rebase_output" | head -5)"
+      # Abort the failed rebase so worktree is clean for agent or cleanup
+      git -C "$worktree_path" rebase --abort 2>/dev/null || true
+      return 1
+    else
+      conflict_log "$pr_number" "Rebase failed with unexpected error: $rebase_output"
+      git -C "$worktree_path" rebase --abort 2>/dev/null || true
+      return 2
+    fi
+  fi
+}
+
+# --- Push ---------------------------------------------------------------------
+
+# Push the rebased branch with --force-with-lease from the worktree.
+# $1 — PR number
+# Returns: 0 = success, 1 = lease rejection or other failure
+push_rebased_branch() {
+  local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
+  local worktree_path="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
+
+  # Determine the branch name from the worktree
+  local branch_name
+  branch_name=$(git -C "$worktree_path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+  if [ -z "$branch_name" ] || [ "$branch_name" = "HEAD" ]; then
+    conflict_log "$pr_number" "ERROR: could not determine branch name in worktree"
+    return 1
+  fi
+
+  conflict_log "$pr_number" "Pushing $branch_name with --force-with-lease"
+
+  local push_output
+  if push_output=$(git -C "$worktree_path" push --force-with-lease origin "$branch_name" 2>&1); then
+    conflict_log "$pr_number" "Push succeeded"
+    return 0
+  else
+    conflict_log "$pr_number" "Push failed: $push_output"
+    return 1
+  fi
+}
+
+# --- CI polling ---------------------------------------------------------------
+
+# Poll CI status for a PR until all checks pass, any fails, or timeout.
+# $1 — PR number, $2 — timeout in seconds (default: 900)
+# Returns: 0 = all pass, 1 = any fail, 2 = timeout
+poll_ci_status() {
+  local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 2
+  local timeout="${2:-900}"
+  local poll_interval=30
+  local start_time
+  start_time=$(date +%s)
+
+  conflict_log "$pr_number" "Polling CI status (timeout: ${timeout}s)"
+
+  while true; do
+    local elapsed=$(( $(date +%s) - start_time ))
+    if [ "$elapsed" -ge "$timeout" ]; then
+      conflict_log "$pr_number" "CI polling timed out after ${timeout}s"
+      return 2
+    fi
+
+    # Get check status
+    local checks_output
+    checks_output=$(gh pr checks "$pr_number" 2>&1 || true)
+
+    # Check for any failures
+    if echo "$checks_output" | grep -qE '\bfail\b'; then
+      conflict_log "$pr_number" "CI check failed"
+      return 1
+    fi
+
+    # Check if all passed (no "pending" or "in_progress" lines)
+    if [ -n "$checks_output" ] && ! echo "$checks_output" | grep -qiE 'pending|in_progress|queued'; then
+      # If there's output and no pending items, checks are done
+      if echo "$checks_output" | grep -qE '\bpass\b'; then
+        conflict_log "$pr_number" "All CI checks passed"
+        return 0
+      fi
+    fi
+
+    conflict_log "$pr_number" "CI still running (${elapsed}s elapsed), waiting ${poll_interval}s..."
+    sleep "$poll_interval"
+  done
+}
+
+# --- Conflict classification --------------------------------------------------
+
+# Check if only lockfiles are conflicted (mechanical resolution possible).
+# $1 — worktree path
+# Returns: 0 = only lockfiles, 1 = non-lockfile conflicts exist
+is_mechanical_conflict() {
+  local worktree_path="$1"
+
+  local conflicted_files
+  conflicted_files=$(git -C "$worktree_path" diff --name-only --diff-filter=U 2>/dev/null || echo "")
+
+  if [ -z "$conflicted_files" ]; then
+    return 1
+  fi
+
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    local basename
+    basename=$(basename "$file")
+    if ! echo "$basename" | grep -qE "$LOCKFILE_PATTERNS"; then
+      return 1
+    fi
+  done <<< "$conflicted_files"
+
+  return 0
+}
+
+# Check if any conflicted files are in excluded paths.
+# $1 — PR number, $2 — worktree path
+# Returns: 0 = has excluded files (should skip), 1 = no excluded files
+is_excluded_conflict() {
+  local pr_number="$1"
+  local worktree_path="$2"
+
+  local conflicted_files
+  conflicted_files=$(git -C "$worktree_path" diff --name-only --diff-filter=U 2>/dev/null || echo "")
+
+  if [ -z "$conflicted_files" ]; then
+    return 1
+  fi
+
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    if echo "$file" | grep -qE "$EXCLUDED_PATTERNS"; then
+      conflict_log "$pr_number" "Excluded conflict file detected: $file"
+      return 0
+    fi
+  done <<< "$conflicted_files"
+
+  return 1
+}
+
+# --- Mechanical resolution ----------------------------------------------------
+
+# Attempt to resolve mechanical (lockfile-only) conflicts.
+# $1 — PR number
+# Returns: 0 = resolved, 1 = non-mechanical conflicts remain
+handle_mechanical_conflicts() {
+  local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
+  local worktree_path="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
+
+  conflict_log "$pr_number" "Attempting mechanical conflict resolution"
+
+  # Fetch and start rebase (caller should have already attempted rebase)
+  # Re-attempt rebase to get into conflicted state
+  git -C "$worktree_path" fetch origin 2>/dev/null || true
+  local rebase_output
+  rebase_output=$(git -C "$worktree_path" rebase origin/main 2>&1 || true)
+
+  local conflicted_files
+  conflicted_files=$(git -C "$worktree_path" diff --name-only --diff-filter=U 2>/dev/null || echo "")
+
+  if [ -z "$conflicted_files" ]; then
+    conflict_log "$pr_number" "No conflicted files found"
+    return 1
+  fi
+
+  # Check all conflicted files are lockfiles
+  if ! is_mechanical_conflict "$worktree_path"; then
+    conflict_log "$pr_number" "Non-mechanical conflicts detected, aborting"
+    git -C "$worktree_path" rebase --abort 2>/dev/null || true
+    return 1
+  fi
+
+  # Resolve each lockfile
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    conflict_log "$pr_number" "Resolving mechanical conflict: $file"
+
+    local basename
+    basename=$(basename "$file")
+
+    # Delete the conflicted lockfile and regenerate
+    rm -f "${worktree_path}/${file}"
+    git -C "$worktree_path" add "$file" 2>/dev/null || true
+    (cd "$worktree_path" && npm install --package-lock-only --ignore-scripts 2>/dev/null) || true
+    git -C "$worktree_path" add "$file" 2>/dev/null || true
+  done <<< "$conflicted_files"
+
+  # Continue the rebase
+  if git -C "$worktree_path" rebase --continue 2>/dev/null; then
+    conflict_log "$pr_number" "Mechanical conflict resolution succeeded"
+    return 0
+  else
+    conflict_log "$pr_number" "Rebase --continue failed after mechanical resolution"
+    git -C "$worktree_path" rebase --abort 2>/dev/null || true
+    return 1
+  fi
+}
+
+# --- Success/failure handlers -------------------------------------------------
+
+# Handle successful conflict resolution.
+# Comments on PR, removes label, cleans up state file.
+# $1 — PR number
+handle_resolution_success() {
+  local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
+
+  conflict_log "$pr_number" "Resolution succeeded — commenting and cleaning up"
+
+  local new_head
+  new_head=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+  local comment_body
+  comment_body="$(cat <<EOF
+**Conflict auto-resolved** by the daemon.
+
+Rebased onto \`origin/main\` (new HEAD: \`${new_head}\`). CI checks should run automatically.
+EOF
+)"
+
+  gh pr comment "$pr_number" --body "$comment_body" 2>/dev/null || true
+  gh pr edit "$pr_number" --remove-label "needs-manual-rebase" 2>/dev/null || true
+
+  # Clean up retry state
+  local state_file="$LOG_DIR/conflict-state/pr-${pr_number}.state"
+  rm -f "$state_file"
+}
+
+# Handle failed conflict resolution.
+# Adds label, comments with reason, records retry state.
+# $1 — PR number, $2 — failure reason
+handle_resolution_failure() {
+  local pr_number="$1"
+  local reason="$2"
+  _validate_pr_number "$pr_number" || return 1
+
+  ensure_conflict_state_dir
+  conflict_log "$pr_number" "Resolution failed: $reason"
+
+  # Read existing state or start fresh
+  local state_file="$LOG_DIR/conflict-state/pr-${pr_number}.state"
+  local attempt_count=0
+
+  if [ -f "$state_file" ]; then
+    attempt_count=$(grep '^attempt_count=' "$state_file" | cut -d= -f2 || echo "0")
+    [[ "$attempt_count" =~ ^[0-9]+$ ]] || attempt_count=0
+  fi
+
+  attempt_count=$((attempt_count + 1))
+
+  local main_sha
+  main_sha=$(git rev-parse origin/main 2>/dev/null || echo "unknown")
+  local now_epoch
+  now_epoch=$(date +%s)
+
+  # Write state file
+  cat > "$state_file" <<EOF
+attempt_count=${attempt_count}
+main_sha_at_failure=${main_sha}
+last_attempt_epoch=${now_epoch}
+EOF
+
+  # Add label and comment
+  gh pr edit "$pr_number" --add-label "needs-manual-rebase" 2>/dev/null || true
+
+  local comment_body
+  comment_body="$(cat <<EOF
+**Automatic conflict resolution failed** (attempt ${attempt_count}/${CONFLICT_MAX_RETRIES}).
+
+**Reason:** ${reason}
+
+Will retry automatically when \`main\` advances (if attempts remain).
+EOF
+)"
+
+  gh pr comment "$pr_number" --body "$comment_body" 2>/dev/null || true
+}
+
+# --- Retry logic --------------------------------------------------------------
+
+# Check if a PR should be retried.
+# Returns 0 if should retry, 1 if not.
+# Retries if: attempt_count < max AND current origin/main differs from last failure.
+# $1 — PR number
+should_retry() {
+  local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
+  local state_file="$LOG_DIR/conflict-state/pr-${pr_number}.state"
+
+  # No state file => first attempt, should try
+  if [ ! -f "$state_file" ]; then
+    return 0
+  fi
+
+  local attempt_count
+  attempt_count=$(grep '^attempt_count=' "$state_file" | cut -d= -f2 || echo "0")
+  [[ "$attempt_count" =~ ^[0-9]+$ ]] || attempt_count=0
+
+  # Max retries reached
+  if [ "$attempt_count" -ge "$CONFLICT_MAX_RETRIES" ]; then
+    return 1
+  fi
+
+  local recorded_sha
+  recorded_sha=$(grep '^main_sha_at_failure=' "$state_file" | cut -d= -f2 || echo "")
+
+  local current_sha
+  current_sha=$(git rev-parse origin/main 2>/dev/null || echo "")
+
+  # Only retry if main has advanced
+  if [ "$recorded_sha" = "$current_sha" ]; then
+    return 1
+  fi
+
+  return 0
+}
+
+# --- Worktree cleanup ---------------------------------------------------------
+
+# Remove a single conflict worktree.
+# $1 — PR number
+cleanup_conflict_worktree() {
+  local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
+  local worktree_path="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
+
+  if [ -d "$worktree_path" ]; then
+    conflict_log "$pr_number" "Removing conflict worktree at $worktree_path"
+    git worktree remove "$worktree_path" --force 2>/dev/null || rm -rf "$worktree_path"
+  fi
+}
+
+# Remove all conflict-pr-* worktrees (crash recovery on daemon startup).
+cleanup_stale_conflict_worktrees() {
+  local worktree_dir="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees"
+
+  if [ ! -d "$worktree_dir" ]; then
+    return 0
+  fi
+
+  for dir in "$worktree_dir"/conflict-pr-*; do
+    [ -d "$dir" ] || continue
+    local pr_num="${dir##*conflict-pr-}"
+    log "Cleaning up stale conflict worktree: $dir (PR #$pr_num)"
+    git worktree remove "$dir" --force 2>/dev/null || rm -rf "$dir"
+  done
+}
