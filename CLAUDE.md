@@ -38,8 +38,8 @@ See `.claude/rules/visual-testing.md` for Playwright MCP, design-iterator, desig
 - **Run `npm run ci:check` before every push** — lint + typecheck + coverage (mirrors CI).
 - **Run E2E tests locally before pushing** — catches selector/UI issues without waiting for CI.
 - **Verify before done** — never mark complete without proving it works (tests pass, no regressions).
-- **Always branch from `origin/main`** — run `git fetch origin` first, then `git checkout -b <branch> origin/main`. Never branch from current HEAD or another feature branch. Before creating a PR, run `git fetch origin && git merge origin/main` to surface conflicts locally.
-- **Create worktrees correctly** — use `git worktree add .claude/worktrees/<name> -b <branch> origin/main`.
+- **Always branch from `origin/main`** — run `git fetch origin` first, then `git checkout -b <branch> origin/main`. Never branch from current HEAD or another feature branch. Before creating a PR, run `git fetch origin && git merge origin/main` to surface conflicts locally. **Exception:** If the work issue contains a `<!-- TARGET_BRANCH: ... -->` marker, branch from `origin/<target_branch>` instead and target the PR at that branch.
+- **Create worktrees correctly** — use `git worktree add .claude/worktrees/<name> -b <branch> origin/main`. If a `TARGET_BRANCH` marker is present, use `origin/<target_branch>` as the base instead of `origin/main`.
 - **Never stash across bases** — commit WIP on the current branch, create a new branch from the correct base, and cherry-pick or re-apply changes.
 - **If stuck, re-plan** — don't keep pushing when something goes sideways.
 - **Every `schema.prisma` change MUST have a migration** — run `npx prisma migrate dev --name <name>`, never just `npx prisma generate`. CI enforces with `prisma migrate diff --exit-code`.
@@ -82,6 +82,9 @@ Unified publishing via `src/lib/blotato/`. Connect flows in `src/app/api/connect
 
 ### Hooks
 `.claude/hooks/` contains bash scripts that enforce Hard Rules as gates. Wired via `.claude/settings.json`. Hook scripts parse stdin JSON with `jq` and exit 2 to block dangerous operations. See individual scripts for blocked patterns.
+
+### Feature Branch Lifecycle (Plan-Based Work)
+For complex plans decomposed into multiple issues, the plan-executor creates a feature branch (`feat/plan-<number>-<slug>`) and injects a `<!-- TARGET_BRANCH: <branch> -->` marker into each child issue. Individual task PRs target the feature branch and auto-merge when CI passes. Once all child issues are closed, a final PR is created from the feature branch to `main` for human review. This keeps `main` stable while allowing incremental progress on multi-issue plans.
 
 ### Infrastructure (SST v3 Ion)
 `sst.config.ts`: Next.js on Lambda/CloudFront, S3 bucket, two EventBridge crons, 14 SST secrets from SSM Parameter Store. Secrets mapped to Lambda env vars explicitly (not via `link`).
