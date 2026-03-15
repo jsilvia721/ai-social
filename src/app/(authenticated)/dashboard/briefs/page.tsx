@@ -3,9 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { QueueItem } from "@/components/briefs/QueueItem";
 import { FulfillmentPanel } from "@/components/briefs/FulfillmentPanel";
+import { StoryboardReviewCard } from "@/components/briefs/StoryboardReviewCard";
 import { ClipboardList, CheckCircle2, ListFilter } from "lucide-react";
 
-type BriefStatus = "PENDING" | "FULFILLED" | "EXPIRED" | "CANCELLED";
+type BriefStatus = "PENDING" | "FULFILLED" | "EXPIRED" | "CANCELLED" | "STORYBOARD_REVIEW" | "RENDERING";
 type BriefFormat = "TEXT" | "IMAGE" | "CAROUSEL" | "VIDEO";
 type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK" | "TIKTOK" | "YOUTUBE";
 
@@ -23,10 +24,17 @@ interface Brief {
   weekOf: string;
   sortOrder: number;
   businessId: string;
+  videoScript?: string | null;
+  videoPrompt?: string | null;
+  storyboardImageUrl?: string | null;
+  updatedAt?: string;
 }
 
-const TABS: { label: string; value: BriefStatus | "ALL" }[] = [
+type TabValue = BriefStatus | "ALL" | "REVIEW";
+
+const TABS: { label: string; value: TabValue }[] = [
   { label: "Pending", value: "PENDING" },
+  { label: "Review", value: "REVIEW" },
   { label: "Fulfilled", value: "FULFILLED" },
   { label: "All", value: "ALL" },
 ];
@@ -34,7 +42,7 @@ const TABS: { label: string; value: BriefStatus | "ALL" }[] = [
 export default function BriefsPage() {
   const [briefs, setBriefs] = useState<Brief[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<BriefStatus | "ALL">("PENDING");
+  const [activeTab, setActiveTab] = useState<TabValue>("PENDING");
   const [selectedBriefId, setSelectedBriefId] = useState<string | null>(null);
 
   const selectedBrief = briefs.find((b) => b.id === selectedBriefId) ?? null;
@@ -42,12 +50,23 @@ export default function BriefsPage() {
   const fetchBriefs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (activeTab !== "ALL") params.set("status", activeTab);
-      const res = await fetch(`/api/briefs?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        setBriefs(data);
+      if (activeTab === "REVIEW") {
+        // Fetch both STORYBOARD_REVIEW and RENDERING briefs
+        const [reviewRes, renderingRes] = await Promise.all([
+          fetch("/api/briefs?status=STORYBOARD_REVIEW"),
+          fetch("/api/briefs?status=RENDERING"),
+        ]);
+        const reviewData = reviewRes.ok ? await reviewRes.json() : [];
+        const renderingData = renderingRes.ok ? await renderingRes.json() : [];
+        setBriefs([...reviewData, ...renderingData]);
+      } else {
+        const params = new URLSearchParams();
+        if (activeTab !== "ALL") params.set("status", activeTab);
+        const res = await fetch(`/api/briefs?${params}`);
+        if (res.ok) {
+          const data = await res.json();
+          setBriefs(data);
+        }
       }
     } catch {
       // silent
@@ -83,7 +102,24 @@ export default function BriefsPage() {
     setSelectedBriefId(next?.id ?? null);
   }
 
+  function handleStoryboardStatusChange(briefId: string, newStatus: "RENDERING" | "REMOVED") {
+    if (newStatus === "REMOVED") {
+      setBriefs((prev) => prev.filter((b) => b.id !== briefId));
+    } else {
+      // Update brief status to RENDERING in place
+      setBriefs((prev) =>
+        prev.map((b) =>
+          b.id === briefId ? { ...b, status: "RENDERING" as BriefStatus, updatedAt: new Date().toISOString() } : b
+        )
+      );
+    }
+  }
+
+  const isStoryboardBrief = (b: Brief) =>
+    b.status === "STORYBOARD_REVIEW" || b.status === "RENDERING";
+
   const pendingCount = briefs.filter((b) => b.status === "PENDING").length;
+  const reviewCount = briefs.filter(isStoryboardBrief).length;
 
   return (
     <div className="flex flex-col md:flex-row h-full">
@@ -94,9 +130,13 @@ export default function BriefsPage() {
             <div>
               <h1 className="text-2xl font-bold text-zinc-50">Content Queue</h1>
               <p className="text-sm text-zinc-400 mt-1">
-                {pendingCount > 0
-                  ? `${pendingCount} brief${pendingCount === 1 ? "" : "s"} to fulfill`
-                  : "All caught up!"}
+                {activeTab === "REVIEW"
+                  ? reviewCount > 0
+                    ? `${reviewCount} storyboard${reviewCount === 1 ? "" : "s"} to review`
+                    : "No storyboards to review"
+                  : pendingCount > 0
+                    ? `${pendingCount} brief${pendingCount === 1 ? "" : "s"} to fulfill`
+                    : "All caught up!"}
               </p>
             </div>
             <div className="flex items-center gap-1">
@@ -138,14 +178,32 @@ export default function BriefsPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {briefs.map((brief) => (
-                <QueueItem
-                  key={brief.id}
-                  brief={brief}
-                  isSelected={brief.id === selectedBriefId}
-                  onClick={() => setSelectedBriefId(brief.id)}
-                />
-              ))}
+              {briefs.map((brief) =>
+                isStoryboardBrief(brief) ? (
+                  <StoryboardReviewCard
+                    key={brief.id}
+                    brief={{
+                      id: brief.id,
+                      topic: brief.topic,
+                      platform: brief.platform,
+                      scheduledFor: brief.scheduledFor,
+                      videoScript: brief.videoScript ?? null,
+                      videoPrompt: brief.videoPrompt ?? null,
+                      storyboardImageUrl: brief.storyboardImageUrl ?? null,
+                      status: brief.status as "STORYBOARD_REVIEW" | "RENDERING",
+                      updatedAt: brief.updatedAt ?? new Date().toISOString(),
+                    }}
+                    onStatusChange={handleStoryboardStatusChange}
+                  />
+                ) : (
+                  <QueueItem
+                    key={brief.id}
+                    brief={brief as Parameters<typeof QueueItem>[0]["brief"]}
+                    isSelected={brief.id === selectedBriefId}
+                    onClick={() => setSelectedBriefId(brief.id)}
+                  />
+                )
+              )}
             </div>
           )}
         </div>
