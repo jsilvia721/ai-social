@@ -184,6 +184,8 @@ show_ci_health() {
   fi
 
   local state_file="${CI_MONITOR_STATE_FILE:-${DAEMON_STATE_DIR}/ci-monitor-state}"
+  local now
+  now=$(date +%s)
 
   # No state file = clean start
   if [ ! -f "$state_file" ]; then
@@ -192,6 +194,7 @@ show_ci_health() {
   fi
 
   # Count entries by status
+  # Format: run_id|status|fingerprint|detected_epoch|rerun_epoch|issue_number|workflow_name
   local rerunning=0 filed=0 resolved=0
   while IFS='|' read -r rid st fp det re iss wf; do
     [ -z "$rid" ] && continue
@@ -208,8 +211,6 @@ show_ci_health() {
   local file_mtime
   file_mtime=$(stat -f%m "$state_file" 2>/dev/null || stat -c%Y "$state_file" 2>/dev/null || echo "")
   if [ -n "$file_mtime" ]; then
-    local now
-    now=$(date +%s)
     local age=$((now - file_mtime))
     last_check=$(format_elapsed "$age")
     echo "  Last check: ${last_check} ago"
@@ -227,8 +228,7 @@ show_ci_health() {
   # Verbose: show last 5 entries
   if [ "$VERBOSE" -eq 1 ]; then
     echo "    --- recent entries ---"
-    local now
-    now=$(date +%s)
+    # Format: run_id|status|fingerprint|detected_epoch|rerun_epoch|issue_number|workflow_name
     tail -5 "$state_file" | while IFS='|' read -r rid st fp det re iss wf; do
       [ -z "$rid" ] && continue
       local age_str=""

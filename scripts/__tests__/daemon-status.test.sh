@@ -482,6 +482,7 @@ echo "1003|filed|fp3|${detected}||200|CI Build" >> "$CI_STATE_FILE"
 echo "1004|resolved|fp4|${detected}|||Deploy" >> "$CI_STATE_FILE"
 
 output=$(CI_MONITOR_STATE_FILE="$CI_STATE_FILE" run_status)
+assert_contains "shows last check timestamp" "Last check" "$output"
 assert_contains "shows rerunning count" "rerunning: 2" "$output"
 assert_contains "shows filed count" "filed: 1" "$output"
 assert_contains "shows resolved count" "resolved: 1" "$output"
