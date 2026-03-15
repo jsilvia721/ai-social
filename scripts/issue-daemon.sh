@@ -39,6 +39,8 @@ WALL_TIMEOUT=60            # wall-clock timeout in minutes per worker
 HEARTBEAT_INTERVAL=30      # seconds between heartbeat writes
 STALE_THRESHOLD=300        # seconds before a heartbeat is considered stale (5 min)
 TMUX_MODE="auto"           # "auto" (detect), "on" (force), "off" (disable)
+LABEL_NEEDS_REBASE="needs-manual-rebase"
+CONFLICT_RESOLVER_TIMEOUT=15  # wall-clock timeout in minutes for conflict resolver agent
 
 # --- Parse flags --------------------------------------------------------------
 while getopts "w:i:b:T:t:" opt; do
@@ -80,6 +82,9 @@ done
 for pr_file in "$LOG_DIR"/.pr-check-*; do
   [ -f "$pr_file" ] && rm -f "$pr_file"
 done
+
+# Clean up stale conflict worktrees from a previous run (crash recovery)
+cleanup_stale_conflict_worktrees
 
 # Reap orphaned processes matching a pattern with ppid=1 (parent daemon died).
 # $1 — pgrep pattern, $2 — label for log messages
@@ -242,6 +247,11 @@ fi
 # record_failure, check_circuit_breaker)
 # shellcheck source=scripts/lib/rate-limit-helpers.sh
 source "scripts/lib/rate-limit-helpers.sh"
+
+# Source conflict resolver library (detect_conflicting_prs, attempt_clean_rebase,
+# push_rebased_branch, poll_ci_status, handle_mechanical_conflicts, etc.)
+# shellcheck source=scripts/lib/conflict-resolver.sh
+source "scripts/lib/conflict-resolver.sh"
 
 # --- Rate limit exit handler --------------------------------------------------
 # Shared handler for when a worker/executor hits a rate limit.
@@ -754,6 +764,88 @@ EOF
   remove_worker "$self_pid"
 }
 
+# --- Conflict resolver agent function -----------------------------------------
+run_conflict_resolver() {
+  local pr_number="$1"
+  local head_branch="$2"
+  local log_file="$LOG_DIR/conflict-pr-${pr_number}.log"
+
+  log "Starting conflict-resolver agent for PR #${pr_number} (branch: ${head_branch})"
+
+  local worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
+
+  # Record start time
+  local start_time
+  start_time=$(date +%s)
+
+  # Run Claude conflict-resolver agent in the worktree
+  # shellcheck disable=SC2086
+  (perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
+    $STDBUF_PREFIX claude -p "$(cat <<EOF
+You are the conflict-resolver agent. Resolve merge conflicts on PR #${pr_number} (branch: ${head_branch}).
+
+Read the PR with: gh pr view ${pr_number} --json title,body,headRefName,baseRefName
+
+The worktree is at ${worktree_path}. A rebase was already attempted and aborted.
+Fetch, rebase onto origin/main, resolve conflicts following your agent instructions,
+run ci:check, and push with --force-with-lease.
+
+If you cannot resolve the conflicts, exit with a non-zero code.
+EOF
+)" \
+    --agent "conflict-resolver" \
+    $TMUX_FLAGS \
+    --max-budget-usd "$MAX_BUDGET" \
+    --allowedTools "Bash,Edit,Glob,Grep,Read,Write" \
+    2>&1 | tee -a "$log_file") &
+  local claude_pid=$!
+
+  # Start heartbeat writer
+  local hb_pid
+  hb_pid=$(start_heartbeat "$pr_number" "$claude_pid")
+
+  # Wait for Claude to finish (with wall-clock timeout)
+  local timeout_secs=$(( CONFLICT_RESOLVER_TIMEOUT * 60 ))
+  local waited=0
+  while kill -0 "$claude_pid" 2>/dev/null; do
+    if [ "$waited" -ge "$timeout_secs" ]; then
+      conflict_log "$pr_number" "Conflict resolver timed out after ${CONFLICT_RESOLVER_TIMEOUT}m"
+      kill -TERM "$claude_pid" 2>/dev/null || true
+      sleep 5
+      kill -9 "$claude_pid" 2>/dev/null || true
+      break
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+  wait "$claude_pid" 2>/dev/null
+  local exit_code=$?
+
+  # Stop heartbeat
+  stop_heartbeat "$hb_pid" "$pr_number"
+
+  local end_time
+  end_time=$(date +%s)
+  local runtime=$(( end_time - start_time ))
+
+  # Get our own PID for cleanup (Bash 3 compatible)
+  local self_pid
+  self_pid=$(sh -c 'echo $PPID')
+
+  if [ $exit_code -eq 0 ]; then
+    log "Conflict-resolver for PR #${pr_number} completed successfully (${runtime}s)"
+    handle_resolution_success "$pr_number"
+  else
+    log "Conflict-resolver for PR #${pr_number} failed (exit code: $exit_code, ${runtime}s)"
+    handle_resolution_failure "$pr_number" "Agent exited with code $exit_code"
+  fi
+
+  # Clean up worktree
+  cleanup_conflict_worktree "$pr_number"
+  kill_worker_tmux_session "$pr_number"
+  remove_worker "$self_pid"
+}
+
 # --- Plan writer function -----------------------------------------------------
 run_plan_writer() {
   local issue_number="$1"
@@ -973,6 +1065,8 @@ while true; do
           stale_log_file="$LOG_DIR/plan-writer-${w_issue}.log"
         elif [ "$w_type" = "bug-investigate" ]; then
           stale_log_file="$LOG_DIR/bug-investigate-${w_issue}.log"
+        elif [ "$w_type" = "conflict-resolver" ]; then
+          stale_log_file="$LOG_DIR/conflict-pr-${w_issue}.log"
         fi
         log "Worker PID $w_pid for issue #${w_issue} appears stalled (no heartbeat for ${stale_min}m)"
         gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
@@ -1187,6 +1281,129 @@ while true; do
           record_worker "$!" "$number" "worker"
           log "Spawned worker PID $! for issue #${number}"
         done <<< "$issues"
+      fi
+    fi
+
+    # --- Priority 3: Conflict resolution (lowest priority) ---
+    # Detect daemon PRs with merge conflicts and attempt resolution.
+    # Clean rebases run in-process (no worker slot consumed).
+    # Agent-assisted resolution spawns a Claude agent and consumes a worker slot.
+    # Processes at most 1 PR per poll cycle (sequential safety).
+    conflict_pr=""
+    conflict_branch=""
+
+    # First: check newly detected conflicting PRs
+    conflicting_json=$(detect_conflicting_prs 2>/dev/null || echo "[]")
+    conflict_count=$(echo "$conflicting_json" | jq 'length')
+    if [ "$conflict_count" -gt 0 ]; then
+      conflict_pr=$(echo "$conflicting_json" | jq -r '.[0].number')
+      conflict_branch=$(echo "$conflicting_json" | jq -r '.[0].headRefName')
+      # Check if we should retry (skip if retries exhausted or main hasn't advanced)
+      if ! should_retry "$conflict_pr"; then
+        log "Skipping conflict PR #${conflict_pr} (retries exhausted or main unchanged)"
+        conflict_pr=""
+        conflict_branch=""
+      fi
+    fi
+
+    # Second: check needs-manual-rebase PRs eligible for retry
+    if [ -z "$conflict_pr" ]; then
+      rebase_prs=$(gh pr list --state open --label "$LABEL_NEEDS_REBASE" \
+        --json number,headRefName \
+        -q '.[] | @json' 2>/dev/null || echo "")
+      if [ -n "$rebase_prs" ]; then
+        while IFS= read -r pr_json; do
+          pr_num=$(echo "$pr_json" | jq -r '.number')
+          pr_branch=$(echo "$pr_json" | jq -r '.headRefName')
+          if should_retry "$pr_num"; then
+            conflict_pr="$pr_num"
+            conflict_branch="$pr_branch"
+            break
+          fi
+        done <<< "$rebase_prs"
+      fi
+    fi
+
+    # Process the selected conflict PR (at most 1 per cycle)
+    if [ -n "$conflict_pr" ] && [ -n "$conflict_branch" ]; then
+      log "Processing conflict PR #${conflict_pr} (branch: ${conflict_branch})"
+      ensure_conflict_state_dir
+
+      # Step 1: Attempt clean rebase
+      rebase_result=0
+      attempt_clean_rebase "$conflict_pr" "$conflict_branch" || rebase_result=$?
+
+      if [ "$rebase_result" -eq 0 ]; then
+        # Clean rebase succeeded — push and poll CI in-process (no worker slot)
+        log "Clean rebase succeeded for PR #${conflict_pr}, pushing..."
+        if push_rebased_branch "$conflict_pr"; then
+          log "Push succeeded for PR #${conflict_pr}, polling CI..."
+          ci_result=0
+          poll_ci_status "$conflict_pr" 900 || ci_result=$?
+          if [ "$ci_result" -eq 0 ]; then
+            handle_resolution_success "$conflict_pr"
+            log "Conflict resolved for PR #${conflict_pr} — CI passed"
+          else
+            handle_resolution_failure "$conflict_pr" "CI checks failed after clean rebase"
+            log "CI failed after clean rebase for PR #${conflict_pr}"
+          fi
+        else
+          handle_resolution_failure "$conflict_pr" "Push --force-with-lease failed"
+          log "Push failed for PR #${conflict_pr}"
+        fi
+        cleanup_conflict_worktree "$conflict_pr"
+
+      elif [ "$rebase_result" -eq 1 ]; then
+        # Rebase has conflicts
+        worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${conflict_pr}"
+
+        # Check for excluded files first
+        if is_excluded_conflict "$conflict_pr" "$worktree_path"; then
+          log "PR #${conflict_pr} has excluded file conflicts — labeling for manual rebase"
+          handle_resolution_failure "$conflict_pr" "Conflicts in excluded files (prisma migrations, sst.config.ts, etc.)"
+          cleanup_conflict_worktree "$conflict_pr"
+        else
+          # Try mechanical (lockfile-only) resolution
+          mechanical_result=0
+          handle_mechanical_conflicts "$conflict_pr" || mechanical_result=$?
+
+          if [ "$mechanical_result" -eq 0 ]; then
+            # Mechanical resolution succeeded — push and poll CI in-process
+            log "Mechanical conflict resolution succeeded for PR #${conflict_pr}, pushing..."
+            if push_rebased_branch "$conflict_pr"; then
+              ci_result=0
+              poll_ci_status "$conflict_pr" 900 || ci_result=$?
+              if [ "$ci_result" -eq 0 ]; then
+                handle_resolution_success "$conflict_pr"
+                log "Mechanical conflict resolved for PR #${conflict_pr} — CI passed"
+              else
+                handle_resolution_failure "$conflict_pr" "CI checks failed after mechanical resolution"
+              fi
+            else
+              handle_resolution_failure "$conflict_pr" "Push --force-with-lease failed after mechanical resolution"
+            fi
+            cleanup_conflict_worktree "$conflict_pr"
+          else
+            # Mechanical resolution failed — spawn agent if slot available
+            active=$(active_worker_count)
+            available_slots=$(( MAX_WORKERS - active ))
+            if [ "$available_slots" -gt 0 ]; then
+              log "Spawning conflict-resolver agent for PR #${conflict_pr}"
+              run_conflict_resolver "$conflict_pr" "$conflict_branch" &
+              record_worker "$!" "$conflict_pr" "conflict-resolver"
+              log "Spawned conflict-resolver PID $! for PR #${conflict_pr}"
+            else
+              log "No worker slots available for conflict-resolver on PR #${conflict_pr}, will retry next cycle"
+              cleanup_conflict_worktree "$conflict_pr"
+            fi
+          fi
+        fi
+
+      else
+        # rebase_result == 2 — unexpected error
+        log "Unexpected error during rebase for PR #${conflict_pr}"
+        handle_resolution_failure "$conflict_pr" "Unexpected error during rebase"
+        cleanup_conflict_worktree "$conflict_pr"
       fi
     fi
   else
