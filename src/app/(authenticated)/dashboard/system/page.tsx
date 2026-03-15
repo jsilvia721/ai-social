@@ -2,14 +2,11 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { VALID_RANGES, DURATION_MS, BUCKET_MS } from "@/lib/system/shared";
 import type { Range } from "@/lib/system/shared";
-import { TimeRangeToggle } from "@/components/system/TimeRangeToggle";
-import { SystemStatusCards } from "@/components/system/SystemStatusCards";
-import { ApiCallChart } from "@/components/system/ApiCallChart";
-import { CronRunTimeline } from "@/components/system/CronRunTimeline";
-import { ErrorTrendChart } from "@/components/system/ErrorTrendChart";
+import { SystemTabs } from "@/components/system/SystemTabs";
+import { HealthPanel } from "@/components/system/HealthPanel";
+import { CronScheduleManager } from "@/components/system/CronScheduleManager";
 import type { ApiBucket, CronRunRow, CronStatusInfo, ErrorBucket, TopError } from "@/components/system/types";
 
 function isValidRange(value: string): value is Range {
@@ -42,86 +39,23 @@ export default async function SystemPage({ searchParams }: Props) {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-50">System Health</h1>
-          <p className="text-zinc-400 mt-1">
-            Monitor cron jobs, API calls, and error trends.
-          </p>
-        </div>
-        <TimeRangeToggle />
+      <div>
+        <h1 className="text-2xl font-bold text-zinc-50">System</h1>
+        <p className="text-zinc-400 mt-1">
+          Monitor system health and manage cron schedules.
+        </p>
       </div>
 
-      {/* Cron Status Cards */}
-      <section>
-        <h2 className="text-lg font-semibold text-zinc-200 mb-4">
-          Cron Health
-        </h2>
-        {!cronRunsResult.ok ? (
-          <p className="text-red-400 text-sm">
-            Failed to load cron status.
-          </p>
-        ) : (
-          <SystemStatusCards crons={cronRunsResult.cronStatuses} />
-        )}
-      </section>
-
-      {/* API Call Volume */}
-      <section>
-        <Card className="bg-zinc-800 border-zinc-700">
-          <CardHeader>
-            <CardTitle className="text-zinc-200">API Call Volume</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!apiCallsResult.ok ? (
-              <p className="text-red-400 text-sm">
-                Failed to load API call data.
-              </p>
-            ) : (
-              <ApiCallChart buckets={apiCallsResult.buckets} />
-            )}
-          </CardContent>
-        </Card>
-      </section>
-
-      {/* Recent Cron Runs */}
-      <section>
-        <Card className="bg-zinc-800 border-zinc-700">
-          <CardHeader>
-            <CardTitle className="text-zinc-200">Recent Cron Runs</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!cronRunsResult.ok ? (
-              <p className="text-red-400 text-sm">
-                Failed to load cron run data.
-              </p>
-            ) : (
-              <CronRunTimeline runs={cronRunsResult.runs} />
-            )}
-          </CardContent>
-        </Card>
-      </section>
-
-      {/* Error Trends */}
-      <section>
-        <Card className="bg-zinc-800 border-zinc-700">
-          <CardHeader>
-            <CardTitle className="text-zinc-200">Error Trends</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!errorsResult.ok ? (
-              <p className="text-red-400 text-sm">
-                Failed to load error data.
-              </p>
-            ) : (
-              <ErrorTrendChart
-                buckets={errorsResult.buckets}
-                topErrors={errorsResult.topErrors}
-              />
-            )}
-          </CardContent>
-        </Card>
-      </section>
+      <SystemTabs
+        healthContent={
+          <HealthPanel
+            apiCalls={apiCallsResult}
+            cronRuns={cronRunsResult}
+            errors={errorsResult}
+          />
+        }
+        schedulesContent={<CronScheduleManager />}
+      />
     </div>
   );
 }
