@@ -5,10 +5,9 @@
 
 import { Readable } from "stream";
 import Replicate from "replicate";
-import { S3Client } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { env } from "@/env";
-import { getPublicUrl } from "@/lib/storage";
+import { s3, bucket, getPublicUrl } from "@/lib/storage";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
 
 export interface GeneratedImage {
@@ -126,12 +125,12 @@ export async function downloadAndUploadVideo(
   }
 
   // Stream the response body to S3 via multipart upload
-  const nodeStream = Readable.fromWeb(response.body as import("stream/web").ReadableStream);
-  const s3 = new S3Client({ region: process.env.AWS_REGION ?? "us-east-1" });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Node.js ReadableStream type mismatch with Web Streams API
+  const nodeStream = Readable.fromWeb(response.body as any);
   const upload = new Upload({
     client: s3,
     params: {
-      Bucket: env.AWS_S3_BUCKET ?? "ai-social-dev",
+      Bucket: bucket,
       Key: s3Key,
       Body: nodeStream,
       ContentType: "video/mp4",

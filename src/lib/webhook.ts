@@ -77,10 +77,11 @@ export function verifyReplicateWebhook(
     if (parts.length < 2 || parts[0] !== "v1") continue;
 
     const sigValue = parts.slice(1).join(","); // rejoin in case base64 contains commas
-    const expectedBuf = Buffer.from(expectedSig);
-    const actualBuf = Buffer.from(sigValue);
+    const expectedBuf = Buffer.from(expectedSig, "base64");
+    const actualBuf = Buffer.from(sigValue, "base64");
 
-    if (expectedBuf.length === actualBuf.length && crypto.timingSafeEqual(expectedBuf, actualBuf)) {
+    // Both buffers should be 32 bytes (SHA-256 output). Guard length for timingSafeEqual.
+    if (expectedBuf.length === 32 && actualBuf.length === 32 && crypto.timingSafeEqual(expectedBuf, actualBuf)) {
       return { valid: true, body: rawBody };
     }
   }

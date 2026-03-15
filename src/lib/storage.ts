@@ -4,9 +4,9 @@ import { env } from "@/env";
 
 // In Lambda, credentials come from the IAM execution role — no static keys needed.
 // Locally, set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION in .env.local.
-const s3 = new S3Client({ region: process.env.AWS_REGION ?? "us-east-1" });
+export const s3 = new S3Client({ region: process.env.AWS_REGION ?? "us-east-1" });
 
-const bucket = env.AWS_S3_BUCKET ?? "ai-social-dev";
+export const bucket = env.AWS_S3_BUCKET ?? "ai-social-dev";
 const publicBase = env.AWS_S3_PUBLIC_URL ?? "http://localhost:9000/ai-social-dev";
 
 export async function uploadFile(

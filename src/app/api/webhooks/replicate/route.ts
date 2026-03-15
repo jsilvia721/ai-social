@@ -91,7 +91,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     } catch (err) {
       await reportServerError("Webhook: failed to mark brief as FAILED", {
         url: "/api/webhooks/replicate",
-        metadata: { predictionId: prediction.id, error: prediction.error },
+        metadata: {
+          predictionId: prediction.id,
+          error: prediction.error,
+          dbError: err instanceof Error ? err.message : String(err),
+        },
       });
     }
     return NextResponse.json({ status: "processed" });
