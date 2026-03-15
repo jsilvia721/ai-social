@@ -26,7 +26,15 @@ const VALID_CRON_NAMES = [
 
 const VALID_DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] as const;
 
-const RATE_CRONS = new Set([
+type RateCronName =
+  | "publish"
+  | "metrics"
+  | "research"
+  | "briefs"
+  | "fulfill"
+  | "brainstorm";
+
+const RATE_CRONS = new Set<string>([
   "publish",
   "metrics",
   "research",
@@ -35,10 +43,11 @@ const RATE_CRONS = new Set([
   "brainstorm",
 ]);
 
-const WEEKLY_CRONS = new Set(["optimize", "briefs"]);
+// optimize is the only weekly cron
+const WEEKLY_CRONS = new Set<string>(["optimize"]);
 
-// Safety rails: min/max interval in minutes per cron
-const INTERVAL_LIMITS: Record<string, { min: number; max: number }> = {
+// Safety rails: min/max interval in minutes per rate cron
+const INTERVAL_LIMITS: Record<RateCronName, { min: number; max: number }> = {
   publish: { min: 1, max: 10 },
   metrics: { min: 15, max: 600 },
   research: { min: 60, max: 2880 },
@@ -51,6 +60,20 @@ const INTERVAL_LIMITS: Record<string, { min: number; max: number }> = {
 // Zod schemas
 // ---------------------------------------------------------------------------
 
+function hasScheduleFields(data: {
+  intervalValue?: number;
+  intervalUnit?: string;
+  dayOfWeek?: string;
+  hourUtc?: number;
+}): boolean {
+  return (
+    data.intervalValue !== undefined ||
+    data.intervalUnit !== undefined ||
+    data.dayOfWeek !== undefined ||
+    data.hourUtc !== undefined
+  );
+}
+
 const patchSchema = z
   .object({
     cronName: z.enum(VALID_CRON_NAMES),
@@ -61,22 +84,19 @@ const patchSchema = z
     hourUtc: z.number().int().min(0).max(23).optional(),
   })
   .superRefine((data, ctx) => {
-    const hasScheduleChange =
-      data.intervalValue !== undefined ||
-      data.intervalUnit !== undefined ||
-      data.dayOfWeek !== undefined ||
-      data.hourUtc !== undefined;
-
-    if (!hasScheduleChange) return;
+    if (!hasScheduleFields(data)) return;
 
     // Rate cron validation
     if (RATE_CRONS.has(data.cronName) && data.intervalValue !== undefined) {
       const unit = data.intervalUnit ?? "minutes";
       const valueInMinutes =
         unit === "hours" ? data.intervalValue * 60 : data.intervalValue;
-      const limits = INTERVAL_LIMITS[data.cronName];
+      const limits = INTERVAL_LIMITS[data.cronName as RateCronName];
 
-      if (limits && (valueInMinutes < limits.min || valueInMinutes > limits.max)) {
+      if (
+        limits &&
+        (valueInMinutes < limits.min || valueInMinutes > limits.max)
+      ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: `${data.cronName} interval must be between ${limits.min} and ${limits.max} minutes, got ${valueInMinutes}`,
@@ -101,6 +121,52 @@ const patchSchema = z
 
 function buildCronExpression(dayOfWeek: string, hourUtc: number): string {
   return `cron(0 ${hourUtc} ? * ${dayOfWeek} *)`;
+}
+
+/**
+ * Sync schedule to EventBridge, setting syncStatus to PENDING on failure.
+ * Returns a warning string if sync failed, undefined on success.
+ */
+async function syncScheduleToEventBridge(
+  cronName: CronName,
+  expression: string
+): Promise<string | undefined> {
+  const result = await updateCronSchedule(cronName, expression);
+  if (!result.success) {
+    await prisma.cronConfig.update({
+      where: { cronName },
+      data: { syncStatus: "PENDING" },
+    });
+    return "EventBridge sync pending";
+  }
+  return undefined;
+}
+
+/**
+ * Sync enable/disable toggle to EventBridge, setting syncStatus to PENDING on failure.
+ */
+async function syncToggleToEventBridge(
+  cronName: CronName,
+  enabled: boolean
+): Promise<string | undefined> {
+  const result = enabled
+    ? await enableCron(cronName)
+    : await disableCron(cronName);
+  if (!result.success) {
+    await prisma.cronConfig.update({
+      where: { cronName },
+      data: { syncStatus: "PENDING" },
+    });
+    return "EventBridge sync pending";
+  }
+  return undefined;
+}
+
+function jsonSuccess(warning?: string) {
+  return NextResponse.json({
+    success: true,
+    ...(warning ? { warning } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -188,37 +254,17 @@ export async function PATCH(req: NextRequest) {
     parsed.data;
 
   try {
-    // Determine what to update
-    const hasScheduleChange =
-      intervalValue !== undefined ||
-      dayOfWeek !== undefined ||
-      hourUtc !== undefined;
+    const hasScheduleChange = hasScheduleFields(parsed.data);
 
-    let warning: string | undefined;
-
-    // Handle enable/disable toggle
+    // Handle enable/disable toggle (no schedule change)
     if (enabled !== undefined && !hasScheduleChange) {
       await prisma.cronConfig.update({
         where: { cronName },
         data: { enabled },
       });
 
-      const ebResult = enabled
-        ? await enableCron(cronName as CronName)
-        : await disableCron(cronName as CronName);
-
-      if (!ebResult.success) {
-        await prisma.cronConfig.update({
-          where: { cronName },
-          data: { syncStatus: "PENDING" },
-        });
-        warning = "EventBridge sync pending";
-      }
-
-      return NextResponse.json({
-        success: true,
-        ...(warning ? { warning } : {}),
-      });
+      const warning = await syncToggleToEventBridge(cronName, enabled);
+      return jsonSuccess(warning);
     }
 
     // Handle schedule change for rate-based crons
@@ -227,7 +273,6 @@ export async function PATCH(req: NextRequest) {
       const ebUnit = unit === "minutes" ? "minute" : "hour";
       const expression = buildRateExpression(intervalValue, ebUnit);
 
-      // Update DB first
       await prisma.cronConfig.update({
         where: { cronName },
         data: {
@@ -239,24 +284,8 @@ export async function PATCH(req: NextRequest) {
         },
       });
 
-      // Sync to EventBridge
-      const ebResult = await updateCronSchedule(
-        cronName as CronName,
-        expression
-      );
-
-      if (!ebResult.success) {
-        await prisma.cronConfig.update({
-          where: { cronName },
-          data: { syncStatus: "PENDING" },
-        });
-        warning = "EventBridge sync pending";
-      }
-
-      return NextResponse.json({
-        success: true,
-        ...(warning ? { warning } : {}),
-      });
+      const warning = await syncScheduleToEventBridge(cronName, expression);
+      return jsonSuccess(warning);
     }
 
     // Handle schedule change for weekly crons
@@ -274,23 +303,8 @@ export async function PATCH(req: NextRequest) {
         },
       });
 
-      const ebResult = await updateCronSchedule(
-        cronName as CronName,
-        expression
-      );
-
-      if (!ebResult.success) {
-        await prisma.cronConfig.update({
-          where: { cronName },
-          data: { syncStatus: "PENDING" },
-        });
-        warning = "EventBridge sync pending";
-      }
-
-      return NextResponse.json({
-        success: true,
-        ...(warning ? { warning } : {}),
-      });
+      const warning = await syncScheduleToEventBridge(cronName, expression);
+      return jsonSuccess(warning);
     }
 
     // If only cronName provided, nothing to update
