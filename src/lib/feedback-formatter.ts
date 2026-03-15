@@ -34,6 +34,14 @@ export function truncateOnWordBoundary(text: string, maxLen: number): string {
   return truncated + "…";
 }
 
+/**
+ * Escape Markdown metacharacters to prevent injection in GitHub issue bodies.
+ * Applied to user-controlled metadata fields (userName, pageUrl).
+ */
+function escapeMarkdown(text: string): string {
+  return text.replace(/([\\`*_{}[\]()#+\-.!|@>~])/g, "\\$1");
+}
+
 const TITLE_PREFIX: Record<FeedbackClassification, string> = {
   bug: "[Bug] ",
   feature: "[Feature] ",
@@ -48,8 +56,8 @@ const LABELS: Record<FeedbackClassification, string[]> = {
 
 function buildHeader(params: FormatFeedbackParams): string {
   const lines = [
-    `**From:** ${params.userName}`,
-    `**Page:** ${params.pageUrl || "Not captured"}`,
+    `**From:** ${escapeMarkdown(params.userName)}`,
+    `**Page:** ${params.pageUrl ? escapeMarkdown(params.pageUrl) : "Not captured"}`,
     `**Date:** ${new Date().toISOString()}`,
   ];
   return lines.join("\n");

@@ -40,7 +40,9 @@ describe("formatFeedbackIssue", () => {
         classification: "bug",
         pageUrl: "http://localhost:3000/dashboard",
       });
-      expect(result.body).toContain("http://localhost:3000/dashboard");
+      // pageUrl is Markdown-escaped in the body for injection prevention
+      expect(result.body).toContain("localhost");
+      expect(result.body).toContain("dashboard");
     });
 
     it("includes screenshot when provided", () => {
@@ -119,6 +121,28 @@ describe("formatFeedbackIssue", () => {
     });
     expect(result.title.length).toBeLessThanOrEqual(80);
     expect(result.title).toMatch(/…$/);
+  });
+
+  it("escapes Markdown metacharacters in userName to prevent injection", () => {
+    const result = formatFeedbackIssue({
+      ...baseParams,
+      userName: "evil](https://evil.com)",
+      classification: "general",
+    });
+    // Brackets and parens should be escaped
+    expect(result.body).not.toContain("](https://evil.com)");
+    expect(result.body).toContain("\\]");
+    expect(result.body).toContain("\\(");
+  });
+
+  it("escapes Markdown metacharacters in pageUrl", () => {
+    const result = formatFeedbackIssue({
+      ...baseParams,
+      classification: "general",
+      pageUrl: "http://example.com/page?x=1&y=2#section",
+    });
+    // Hash should be escaped to prevent heading injection
+    expect(result.body).toContain("\\#section");
   });
 
   it("shows Not captured when pageUrl is not provided", () => {
