@@ -16,7 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     if: >
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.repository.id == github.event.repository.id
     concurrency:
       group: auto-merge-${{ github.event.workflow_run.head_branch }}
       cancel-in-progress: false
@@ -71,6 +72,28 @@ jobs:
               return;
             }
 
+            // Security: Only auto-merge PRs from trusted authors (not forks)
+            const trustedAssociations = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+            if (!trustedAssociations.includes(pr.author_association)) {
+              console.log(`PR author association "${pr.author_association}" is not trusted. Skipping auto-merge.`);
+              core.setOutput('found', 'false');
+              return;
+            }
+
+            // Security: Reject PRs from forks
+            if (pr.head.repo && pr.head.repo.fork) {
+              console.log('PR is from a fork. Skipping auto-merge.');
+              core.setOutput('found', 'false');
+              return;
+            }
+
+            // Validate branch name contains only safe characters (prevent injection)
+            if (!/^[a-zA-Z0-9_\-\/\.]+$/.test(baseBranch)) {
+              console.log(`Base branch "${baseBranch}" contains unsafe characters. Skipping.`);
+              core.setOutput('found', 'false');
+              return;
+            }
+
             core.setOutput('found', 'true');
             core.setOutput('pr_number', pr.number.toString());
             core.setOutput('base_branch', baseBranch);
@@ -86,11 +109,12 @@ jobs:
       - name: Sync main into feature branch
         if: steps.find-pr.outputs.found == 'true'
         id: sync-main
+        env:
+          BASE_BRANCH: ${{ steps.find-pr.outputs.base_branch }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          BASE_BRANCH="${{ steps.find-pr.outputs.base_branch }}"
           echo "Syncing origin/main into ${BASE_BRANCH}..."
 
           git fetch origin main
