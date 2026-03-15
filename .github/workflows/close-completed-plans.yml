@@ -6,6 +6,8 @@ on:
 
 permissions:
   issues: write
+  pull-requests: write
+  contents: read
 
 jobs:
   close-plans:
@@ -59,10 +61,16 @@ jobs:
               }
 
               // Parse issue numbers from table rows in the summary comment
+              issueRefPattern.lastIndex = 0;
               const workIssueNumbers = [];
+              const seenIssueNums = new Set();
               let match;
               while ((match = issueRefPattern.exec(summaryComment.body)) !== null) {
-                workIssueNumbers.push(parseInt(match[1], 10));
+                const num = parseInt(match[1], 10);
+                if (!seenIssueNums.has(num)) {
+                  seenIssueNums.add(num);
+                  workIssueNumbers.push(num);
+                }
               }
 
               if (workIssueNumbers.length === 0) {
@@ -81,12 +89,14 @@ jobs:
               // --- Step 3: Check if ALL work issues are closed ---
               let allClosed = true;
               const openIssues = [];
+              const workIssueData = new Map();
 
               for (const workNum of workIssueNumbers) {
                 const workIssue = await github.rest.issues.get({
                   owner, repo,
                   issue_number: workNum
                 });
+                workIssueData.set(workNum, workIssue.data);
                 if (workIssue.data.state !== 'closed') {
                   allClosed = false;
                   openIssues.push(workNum);
@@ -99,14 +109,114 @@ jobs:
                 continue;
               }
 
+              // --- Step 3b: Create Final PR if FEATURE_BRANCH marker exists ---
+              let finalPrNumber = null;
+
+              // Search comments for the FEATURE_BRANCH marker
+              const featureBranchComment = comments.data.find(c =>
+                c.body && c.body.includes('<!-- FEATURE_BRANCH:')
+              );
+
+              if (featureBranchComment) {
+                // Only trust markers from repo members (not arbitrary commenters)
+                const trustedAssociations = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+                const authorAssoc = featureBranchComment.author_association;
+                // Strict branch name: alphanumeric, hyphens, slashes, dots, underscores
+                const branchMatch = trustedAssociations.includes(authorAssoc)
+                  ? featureBranchComment.body.match(/<!-- FEATURE_BRANCH: ([\w\-\/.]+) -->/)
+                  : null;
+
+                if (!trustedAssociations.includes(authorAssoc)) {
+                  console.log(`#${planIssue.number}: FEATURE_BRANCH marker from untrusted author (${authorAssoc}), skipping.`);
+                } else if (branchMatch) {
+                  const featureBranch = branchMatch[1].trim();
+                  console.log(`#${planIssue.number}: found FEATURE_BRANCH marker: ${featureBranch}`);
+
+                  // Build task-to-PR mapping table
+                  // Fetch merged PRs once to avoid repeated API calls
+                  let mergedPrs = [];
+                  try {
+                    const prsResponse = await github.rest.pulls.list({
+                      owner, repo,
+                      state: 'closed',
+                      per_page: 100
+                    });
+                    mergedPrs = prsResponse.data.filter(pr => pr.merged_at);
+                  } catch (err) {
+                    console.log(`  Failed to fetch PRs: ${err.message}`);
+                  }
+
+                  // Sanitize text for safe Markdown table embedding
+                  const sanitizeMd = (str) => str.replace(/[|[\]]/g, '\\$&');
+
+                  const taskRows = [];
+                  for (const workNum of workIssueNumbers) {
+                    const cached = workIssueData.get(workNum);
+                    const workTitle = cached ? sanitizeMd(cached.title) : `(issue #${workNum})`;
+
+                    const closesPattern = new RegExp(`(?:closes|fixes|resolves)\\s+#${workNum}\\b`, 'i');
+                    const linkedPr = mergedPrs.find(pr =>
+                      pr.body && closesPattern.test(pr.body)
+                    );
+
+                    if (linkedPr) {
+                      taskRows.push(`| #${workNum} | ${workTitle} | #${linkedPr.number} |`);
+                    } else {
+                      taskRows.push(`| #${workNum} | ${workTitle} | — |`);
+                    }
+                  }
+
+                  const taskTable = [
+                    '| Issue | Title | PR |',
+                    '|-------|-------|----|',
+                    ...taskRows
+                  ].join('\n');
+
+                  const prBody = [
+                    `## Plan: #${planIssue.number}`,
+                    '',
+                    `**${planIssue.title}**`,
+                    '',
+                    '## Completed Tasks',
+                    '',
+                    taskTable,
+                    '',
+                    '---',
+                    '',
+                    '> **Note:** This PR should be **squash merged** to keep a clean commit history on main.'
+                  ].join('\n');
+
+                  try {
+                    const pr = await github.rest.pulls.create({
+                      owner, repo,
+                      title: planIssue.title,
+                      head: featureBranch,
+                      base: 'main',
+                      body: prBody
+                    });
+
+                    finalPrNumber = pr.data.number;
+                    console.log(`#${planIssue.number}: created final PR #${finalPrNumber}`);
+                  } catch (err) {
+                    console.log(`#${planIssue.number}: failed to create final PR: ${err.message}`);
+                  }
+                }
+              } else {
+                console.log(`#${planIssue.number}: no FEATURE_BRANCH marker found, skipping final PR creation.`);
+              }
+
               // --- Step 4: All work issues closed — close the plan issue ---
               const issueList = workIssueNumbers.map(n => `#${n}`).join(', ');
               console.log(`#${planIssue.number}: all work items completed! Closing plan.`);
 
+              const closeComment = finalPrNumber
+                ? `All work complete. Final PR: #${finalPrNumber}. Review and squash-merge to main.`
+                : `All work items completed. Closing plan. Issues: ${issueList}.`;
+
               await github.rest.issues.createComment({
                 owner, repo,
                 issue_number: planIssue.number,
-                body: `All work items completed. Closing plan. Issues: ${issueList}.`
+                body: closeComment
               });
 
               await github.rest.issues.addLabels({
@@ -115,11 +225,15 @@ jobs:
                 labels: ['claude-done']
               });
 
-              await github.rest.issues.removeLabel({
-                owner, repo,
-                issue_number: planIssue.number,
-                name: 'claude-active'
-              });
+              try {
+                await github.rest.issues.removeLabel({
+                  owner, repo,
+                  issue_number: planIssue.number,
+                  name: 'claude-active'
+                });
+              } catch (err) {
+                console.log(`  Warning: could not remove claude-active label: ${err.message}`);
+              }
 
               await github.rest.issues.update({
                 owner, repo,
