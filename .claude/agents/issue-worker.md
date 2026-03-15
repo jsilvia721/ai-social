@@ -21,8 +21,6 @@ target_branch=$(gh issue view <number> --json body --jq '.body' | grep -oP '(?<=
 
 If the marker is present, use `origin/<target_branch>` everywhere this document references `origin/main`. If absent, `target_branch` defaults to `main` — preserving identical behavior for all pre-existing and standalone issues.
 
-**This variable is used in:** Step 3 (branch creation), Step 4 (review diffs), Step 6 (PR base branch), and Resuming Interrupted Work.
-
 ## Journaling
 
 Throughout Steps 1–6, maintain a mental journal of friction you encounter. This is prompt-level only — do not write files or external state.
@@ -217,7 +215,7 @@ If `target_branch` is not `main`, add `--base <target_branch>` to the `gh pr cre
 ```bash
 gh pr create \
   --title "<concise title under 70 chars>" \
-  ${target_branch != "main" ? "--base <target_branch>" : ""} \
+  # Add: --base <target_branch> (if target_branch is not "main")
   --body "$(cat <<'EOF'
 ## Summary
 <what was done and why>
@@ -340,7 +338,7 @@ gh issue comment <number> --body "PR created: <pr-url>
 
 When your prompt mentions "retrying interrupted issue" or "RETRY", check for an existing WIP branch with `git branch -r --list "origin/issue-<number>-*"`. If found, check it out and continue from there.
 
-**Important:** When resuming, re-read the issue body to discover the `TARGET_BRANCH` marker. Do not assume `origin/main` — the original issue may target a feature branch. Parse the target branch the same way as in Step 1.
+**Important:** When resuming, re-read the issue body and parse `TARGET_BRANCH` the same way as in Step 1 — do not default to `origin/main`.
 
 ## Rules
 
