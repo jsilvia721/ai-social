@@ -288,25 +288,34 @@ describe("runScheduler", () => {
     );
   });
 
-  it("does NOT retry on duck-type BlotatoApiError 4xx (broken instanceof)", async () => {
-    const duckTypeError = new Error("Invalid account");
-    duckTypeError.name = "BlotatoApiError";
-    (duckTypeError as any).status = 404;
-
+  it("does NOT retry on duck-typed BlotatoApiError when instanceof fails (bundled env)", async () => {
+    // Simulate a broken prototype chain — error has correct name and status but wrong prototype
+    const duckTypedError = Object.assign(new Error("Invalid account"), {
+      status: 403,
+      name: "BlotatoApiError",
+    });
     const post = makePost({ status: "SCHEDULED", retryCount: 0 });
     prismaMock.post.findMany.mockResolvedValue([post] as any);
     prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
-    mockPublishPost.mockRejectedValue(duckTypeError);
+    mockPublishPost.mockRejectedValue(duckTypedError);
     prismaMock.post.update.mockResolvedValue(post as any);
+
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation();
 
     await runScheduler();
 
-    // Should go straight to FAILED via duck-type fallback
+    // Should go straight to FAILED, skip retry (403 is a 4xx non-429)
     expect(prismaMock.post.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "FAILED" }),
       })
     );
+    // Should warn about duck-type fallback
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("duck-type fallback"),
+    );
+
+    warnSpy.mockRestore();
   });
 
   it("retries on 429 rate limit errors", async () => {
@@ -670,6 +679,41 @@ describe("runMetricsRefresh", () => {
     );
 
     consoleSpy.mockRestore();
+  });
+
+  it("clears blotatoPostId when duck-typed BlotatoApiError 404 (instanceof fails)", async () => {
+    // Simulate broken prototype chain — name + status match but instanceof won't
+    const duckTypedError = Object.assign(new Error("Not found"), {
+      status: 404,
+      name: "BlotatoApiError",
+    });
+    const publishedPost = {
+      ...makePost({ status: "PUBLISHED" }),
+      blotatoPostId: "blotato-post-abc",
+    };
+    prismaMock.post.findMany.mockResolvedValue([publishedPost] as any);
+    mockGetPostMetrics.mockRejectedValue(duckTypedError);
+    prismaMock.post.update.mockResolvedValue(publishedPost as any);
+
+    const consoleSpy = jest.spyOn(console, "info").mockImplementation();
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+
+    await runMetricsRefresh();
+
+    // Should clear the stale blotatoPostId
+    expect(prismaMock.post.update).toHaveBeenCalledWith({
+      where: { id: "post-1" },
+      data: { blotatoPostId: null },
+    });
+    // 404 errors should NOT be reported
+    expect(mockReportServerError).not.toHaveBeenCalled();
+    // Should warn about duck-type fallback
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("duck-type fallback"),
+    );
+
+    consoleSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it("logs a warning when Prisma cleanup of blotatoPostId fails after 404", async () => {
