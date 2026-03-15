@@ -51,7 +51,7 @@ export type CronName =
 // runs in staging/dev and we want visibility into those executions.
 export async function trackCronRun(data: {
   cronName: CronName;
-  status: "RUNNING" | "SUCCESS" | "FAILED";
+  status: "RUNNING" | "SUCCESS" | "FAILED" | "SKIPPED";
   itemsProcessed?: number;
   durationMs?: number;
   error?: string;
@@ -78,14 +78,49 @@ export async function trackCronRun(data: {
 }
 
 /**
- * Wraps a cron handler with CronRun tracking. Records SUCCESS with
- * duration and optional itemsProcessed on success, or FAILED with
- * the error message on failure (then re-throws so Lambda marks it failed).
+ * Checks whether a cron job is enabled via the CronConfig table.
+ * Fails open (returns enabled: true) on any DB error or missing config,
+ * so crons keep running even if the config table is unavailable.
+ */
+export async function checkCronEnabled(
+  cronName: CronName
+): Promise<{ enabled: boolean }> {
+  try {
+    const config = await prisma.cronConfig.findUnique({
+      where: { cronName },
+      select: { enabled: true },
+    });
+    // Fail open if config row doesn't exist
+    return { enabled: config?.enabled ?? true };
+  } catch {
+    // Fail open on DB error
+    return { enabled: true };
+  }
+}
+
+/**
+ * Wraps a cron handler with CronRun tracking. Checks CronConfig first;
+ * if disabled, records a SKIPPED run and returns early. Otherwise records
+ * SUCCESS with duration and optional itemsProcessed on success, or FAILED
+ * with the error message on failure (then re-throws so Lambda marks it failed).
  */
 export async function withCronTracking(
   cronName: CronName,
   fn: () => Promise<Record<string, unknown> | void>
 ): Promise<void> {
+  const { enabled } = await checkCronEnabled(cronName);
+  if (!enabled) {
+    const now = new Date();
+    await trackCronRun({
+      cronName,
+      status: "SKIPPED",
+      durationMs: 0,
+      startedAt: now,
+      completedAt: now,
+    });
+    return;
+  }
+
   const startedAt = new Date();
   try {
     const result = await fn();

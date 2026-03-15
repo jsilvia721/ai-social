@@ -352,6 +352,22 @@ model CronRun {
   @@index([startedAt])
 }
 
+// ── Cron Configuration ──────────────────────────────────────────────────
+
+model CronConfig {
+  id                 String   @id @default(cuid())
+  cronName           String   @unique
+  scheduleExpression String
+  scheduleType       String   // "rate" | "cron"
+  enabled            Boolean  @default(true)
+  intervalValue      Int?     // for rate crons (e.g., 1, 60, 6)
+  intervalUnit       String?  // "minutes" | "hours"
+  dayOfWeek          String?  // for weekly crons (e.g., "SUN")
+  hourUtc            Int?     // for weekly crons (e.g., 23)
+  syncStatus         String   @default("SYNCED") // "SYNCED" | "PENDING"
+  updatedAt          DateTime @updatedAt
+}
+
 // ── User Feedback ───────────────────────────────────────────────────────────
 
 model Feedback {

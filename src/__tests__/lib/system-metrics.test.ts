@@ -5,7 +5,11 @@ jest.mock("@/lib/mocks/config", () => ({
   shouldMockExternalApis: jest.fn(),
 }));
 
-import { trackApiCall, trackCronRun } from "@/lib/system-metrics";
+import {
+  trackApiCall,
+  trackCronRun,
+  withCronTracking,
+} from "@/lib/system-metrics";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
 
 const mockShouldMock = shouldMockExternalApis as jest.MockedFunction<
@@ -143,5 +147,76 @@ describe("trackCronRun", () => {
         startedAt: now,
       })
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("withCronTracking", () => {
+  it("skips execution and records SKIPPED when cron is disabled", async () => {
+    prismaMock.cronConfig.findUnique.mockResolvedValue({
+      id: "cc-1",
+      cronName: "publish",
+      scheduleExpression: "rate(1 minute)",
+      scheduleType: "rate",
+      enabled: false,
+      intervalValue: 1,
+      intervalUnit: "minutes",
+      dayOfWeek: null,
+      hourUtc: null,
+      syncStatus: "SYNCED",
+      updatedAt: new Date(),
+    });
+    prismaMock.cronRun.create.mockResolvedValue({ id: "cr-skip" } as any);
+
+    const handler = jest.fn();
+    await withCronTracking("publish", handler);
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        cronName: "publish",
+        status: "SKIPPED",
+      }),
+    });
+  });
+
+  it("executes handler when cron is enabled", async () => {
+    prismaMock.cronConfig.findUnique.mockResolvedValue({
+      id: "cc-2",
+      cronName: "metrics",
+      scheduleExpression: "rate(60 minutes)",
+      scheduleType: "rate",
+      enabled: true,
+      intervalValue: 60,
+      intervalUnit: "minutes",
+      dayOfWeek: null,
+      hourUtc: null,
+      syncStatus: "SYNCED",
+      updatedAt: new Date(),
+    });
+    prismaMock.cronRun.create.mockResolvedValue({ id: "cr-ok" } as any);
+
+    const handler = jest.fn().mockResolvedValue({ itemsProcessed: 3 });
+    await withCronTracking("metrics", handler);
+
+    expect(handler).toHaveBeenCalled();
+    expect(prismaMock.cronRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        cronName: "metrics",
+        status: "SUCCESS",
+        itemsProcessed: 3,
+      }),
+    });
+  });
+
+  it("executes handler when checkCronEnabled fails open (DB error)", async () => {
+    prismaMock.cronConfig.findUnique.mockRejectedValue(
+      new Error("DB down")
+    );
+    prismaMock.cronRun.create.mockResolvedValue({ id: "cr-ok" } as any);
+
+    const handler = jest.fn().mockResolvedValue(undefined);
+    await withCronTracking("publish", handler);
+
+    expect(handler).toHaveBeenCalled();
   });
 });
