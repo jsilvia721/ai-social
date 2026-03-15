@@ -37,9 +37,22 @@ jobs:
               name: 'needs-human-review'
             });
 
-            if (labels.includes('plan')) {
+            // Detect plan issues by body content (authoritative) OR label
+            const isPlan = body.includes('PLAN_ITEMS_START') || labels.includes('plan');
+
+            if (isPlan) {
               // Plan issues: check for PLAN_ITEMS markers
               if (body.includes('PLAN_ITEMS_START')) {
+                // Ensure plan label is present for downstream daemon routing
+                if (!labels.includes('plan')) {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number,
+                    labels: ['plan']
+                  });
+                }
+
                 await github.rest.issues.addLabels({
                   owner: context.repo.owner,
                   repo: context.repo.repo,

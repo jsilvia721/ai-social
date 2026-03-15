@@ -164,7 +164,7 @@ PLAN_EOF
 ### 7. Add Review Label
 
 ```bash
-gh issue edit <number> --add-label needs-human-review
+gh issue edit <number> --add-label plan --add-label needs-human-review
 ```
 
 ### 8. Post Completion Comment
