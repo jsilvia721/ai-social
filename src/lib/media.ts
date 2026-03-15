@@ -9,10 +9,22 @@ import { Upload } from "@aws-sdk/lib-storage";
 import { env } from "@/env";
 import { s3, bucket, getPublicUrl } from "@/lib/storage";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
+import { VIDEO_DURATION_DEFAULT, VIDEO_PROMPT_MAX_LENGTH } from "@/lib/video";
 
 export interface GeneratedImage {
   buffer: Buffer;
   mimeType: string;
+}
+
+export interface GenerateVideoOptions {
+  prompt: string;
+  aspectRatio: string;
+  webhookUrl: string;
+  duration?: number;
+}
+
+export interface GenerateVideoResult {
+  predictionId: string;
 }
 
 const REPLICATE_TIMEOUT_MS = 60_000;
@@ -88,6 +100,42 @@ export async function generateImage(prompt: string): Promise<GeneratedImage> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Generate a video asynchronously via Replicate (Kling V3 Omni).
+ * Returns the prediction ID — the result is delivered via webhook callback.
+ */
+export async function generateVideo(
+  options: GenerateVideoOptions
+): Promise<GenerateVideoResult> {
+  if (shouldMockExternalApis() || !env.REPLICATE_API_TOKEN) {
+    return { predictionId: "mock-prediction-id" };
+  }
+
+  // Sanitize prompt: strip control characters, limit to Kling V3 max
+  const sanitizedPrompt = options.prompt
+    .replace(/[\x00-\x1F\x7F]/g, "")
+    .slice(0, VIDEO_PROMPT_MAX_LENGTH);
+
+  // Audit log: capture prompt for debugging/review
+  console.log("[video-gen] prompt:", sanitizedPrompt.slice(0, 200));
+
+  const replicate = getReplicateClient();
+  const prediction = await replicate.predictions.create({
+    model: "kwaivgi/kling-v3-omni-video",
+    input: {
+      prompt: sanitizedPrompt,
+      aspect_ratio: options.aspectRatio,
+      duration: options.duration ?? VIDEO_DURATION_DEFAULT,
+      mode: "pro",
+      generate_audio: true,
+    },
+    webhook: options.webhookUrl,
+    webhook_events_filter: ["completed"],
+  });
+
+  return { predictionId: prediction.id };
 }
 
 // ── Allowed hostnames for video download ────────────────────────────────────
