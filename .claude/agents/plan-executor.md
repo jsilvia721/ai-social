@@ -48,12 +48,19 @@ Process items in topological order (roots first, then dependents). For each item
 
 **Plan auto-approval:** The parent plan has been approved by the human, so child work issues are **auto-approved**. Root issues get `claude-ready` (not `needs-human-review`). This eliminates the need for individual `/go` approvals on each work item.
 
+First, derive the feature branch name for TARGET_BRANCH markers:
+1. Take the plan issue title, strip any `Plan:` prefix, convert to kebab-case, truncate to 40 chars
+2. Branch name format: `feat/plan-<plan-issue-number>-<slug>`
+
+Example: Plan issue #42 titled "Plan: Add Widget System" → `feat/plan-42-add-widget-system`
+
 ```bash
 gh issue create \
   --title "<title from plan item>" \
   --label "<claude-ready OR blocked>" \
   --body "$(cat <<'ISSUE_EOF'
 <!-- PARENT_PLAN: #<plan-issue-number> -->
+<!-- TARGET_BRANCH: feat/plan-<plan-issue-number>-<slug> -->
 
 ### Objective
 
@@ -78,7 +85,7 @@ ISSUE_EOF
 )"
 ```
 
-**IMPORTANT:** Every child issue body MUST begin with the `<!-- PARENT_PLAN: #<plan-issue-number> -->` marker. This is used by downstream workflows to cascade approval.
+**IMPORTANT:** Every child issue body MUST begin with the `<!-- PARENT_PLAN: #<plan-issue-number> -->` marker followed by the `<!-- TARGET_BRANCH: feat/plan-<N>-<slug> -->` marker. The PARENT_PLAN marker is used by downstream workflows to cascade approval. The TARGET_BRANCH marker tells the issue-worker which branch to target.
 
 **Labeling rules:**
 - Items with NO dependencies: label `claude-ready` (auto-approved via parent plan approval)
@@ -108,7 +115,27 @@ Comment on the original plan issue with a summary table mapping position numbers
 | 2 | #102 | Add Widget API | Moderate | #101 |
 ```
 
-### 5. Close Out
+### 5. Create Feature Branch
+
+After all issues are created successfully, create and push a feature branch from `origin/main`:
+
+1. Derive the branch name using the same slug from Step 3: `feat/plan-<plan-issue-number>-<slug>`
+2. Create and push the branch:
+
+```bash
+git fetch origin && git branch feat/plan-<N>-<slug> origin/main && git push origin feat/plan-<N>-<slug>
+```
+
+3. Comment on the plan issue with the branch name marker:
+
+```
+<!-- FEATURE_BRANCH: feat/plan-<N>-<slug> -->
+Feature branch created: `feat/plan-<N>-<slug>`
+```
+
+**If branch creation fails:** Add the `claude-blocked` label to the plan issue and comment with the error. Do NOT proceed to Close Out.
+
+### 6. Close Out
 
 Remove the `claude-approved` label and add `claude-active` to the plan issue.
 
@@ -121,6 +148,6 @@ If anything fails during issue creation:
 
 ## Rules
 
-- **Do not modify any code.** You only create issues.
+- **Do not modify any code.** You only create issues and feature branches.
 - **Preserve all detail** from the plan items — don't summarize or truncate the objective, context, or acceptance criteria.
 - **Map dependencies correctly** — use actual created issue numbers, not position numbers, when writing dependency references.
