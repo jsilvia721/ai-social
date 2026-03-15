@@ -48,5 +48,8 @@ export function checkRateLimit(
 
 /** Test-only: clear all rate limit state. */
 export function _resetAllLimits(): void {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("_resetAllLimits is test-only");
+  }
   requestLog.clear();
 }
