@@ -313,11 +313,119 @@ output=$(PATH="$MOCK_BIN_DIR2:$PATH" run_status -g)
 assert_not_contains "with -g but no progress comments, no tag shown" "step_" "$output"
 rm -rf "$MOCK_BIN_DIR2"
 
-# --- Test: Usage includes -g flag ---------------------------------------------
+# --- Test: Usage includes -g and -a flags -------------------------------------
 echo ""
 echo "Usage string:"
 output=$(LOG_DIR="$TEST_LOG_DIR" DAEMON_STATE_DIR="$TEST_STATE_DIR" bash "$STATUS_SCRIPT" -x 2>&1 || true)
 assert_contains "usage shows -g flag" "[-g]" "$output"
+assert_contains "usage shows -a flag" "[-a" "$output"
+
+# --- Test: Tmux session display -----------------------------------------------
+echo ""
+echo "Tmux session display:"
+
+# Set up a worker with a mock tmux that reports a session
+echo "$$" > "$TEST_LOG_DIR/.issue-daemon.pid"
+now_epoch=$(date +%s)
+echo "$$:200:${now_epoch}:worker" > "$TEST_LOG_DIR/.active_pids"
+echo "$now_epoch" > "$TEST_LOG_DIR/heartbeat-200"
+echo "x" > "$TEST_LOG_DIR/issue-200.log"
+
+# Mock tmux that returns a session matching issue 200
+MOCK_TMUX_DIR=$(mktemp -d)
+cat > "$MOCK_TMUX_DIR/tmux" <<'MOCK_TMUX'
+#!/usr/bin/env bash
+if [[ "$1" == "list-sessions" ]]; then
+  echo "worker-200"
+  echo "worker-300"
+fi
+MOCK_TMUX
+chmod +x "$MOCK_TMUX_DIR/tmux"
+
+output=$(PATH="$MOCK_TMUX_DIR:$PATH" run_status)
+assert_contains "shows tmux session name" "tmux:worker-200" "$output"
+assert_contains "shows attach command" "tmux attach -t worker-200" "$output"
+assert_not_contains "does not show unrelated session" "worker-300" "$output"
+
+# Test with no tmux available
+MOCK_NO_TMUX_DIR=$(mktemp -d)
+# Don't put tmux in this dir, but also override PATH to exclude real tmux
+output=$(PATH="$MOCK_NO_TMUX_DIR:/usr/bin:/bin" run_status)
+assert_not_contains "no tmux info when tmux unavailable" "tmux:" "$output"
+assert_not_contains "no attach command when tmux unavailable" "tmux attach" "$output"
+
+# Mock tmux with no matching sessions
+MOCK_EMPTY_TMUX_DIR=$(mktemp -d)
+cat > "$MOCK_EMPTY_TMUX_DIR/tmux" <<'MOCK_EMPTY'
+#!/usr/bin/env bash
+if [[ "$1" == "list-sessions" ]]; then
+  echo "worker-999"
+fi
+MOCK_EMPTY
+chmod +x "$MOCK_EMPTY_TMUX_DIR/tmux"
+
+output=$(PATH="$MOCK_EMPTY_TMUX_DIR:$PATH" run_status)
+assert_not_contains "no tmux info when no session matches" "tmux:" "$output"
+assert_not_contains "no attach command when no session matches" "tmux attach" "$output"
+
+rm -rf "$MOCK_TMUX_DIR" "$MOCK_NO_TMUX_DIR" "$MOCK_EMPTY_TMUX_DIR"
+
+# --- Test: -a flag attach to session ------------------------------------------
+echo ""
+echo "Attach flag (-a):"
+
+# Mock tmux with attach support
+MOCK_ATTACH_DIR=$(mktemp -d)
+cat > "$MOCK_ATTACH_DIR/tmux" <<'MOCK_ATTACH'
+#!/usr/bin/env bash
+if [[ "$1" == "list-sessions" ]]; then
+  echo "worker-42"
+elif [[ "$1" == "attach" ]]; then
+  echo "ATTACHED:$3"
+fi
+MOCK_ATTACH
+chmod +x "$MOCK_ATTACH_DIR/tmux"
+
+# Test attach with matching session (note: exec replaces process, so we run in subshell)
+# The attach_to_session uses exec, but in the test the mock tmux just echoes
+output=$(PATH="$MOCK_ATTACH_DIR:$PATH" run_status -a 42)
+assert_contains "attach shows attaching message" "Attaching to tmux session" "$output"
+assert_contains "attach targets correct session" "worker-42" "$output"
+
+# Test attach with no matching session
+output=$(PATH="$MOCK_ATTACH_DIR:$PATH" LOG_DIR="$TEST_LOG_DIR" DAEMON_STATE_DIR="$TEST_STATE_DIR" bash "$STATUS_SCRIPT" -a 999 2>/dev/null || true)
+assert_contains "attach shows error for missing session" "No tmux session found" "$output"
+assert_contains "attach mentions issue number" "#999" "$output"
+
+# Test attach when tmux is not available
+output=$(PATH="$MOCK_NO_TMUX_DIR:/usr/bin:/bin" LOG_DIR="$TEST_LOG_DIR" DAEMON_STATE_DIR="$TEST_STATE_DIR" bash "$STATUS_SCRIPT" -a 42 2>/dev/null || true)
+assert_contains "attach shows error when tmux unavailable" "No tmux session found" "$output"
+
+rm -rf "$MOCK_ATTACH_DIR"
+
+# --- Test: find_tmux_session priority -----------------------------------------
+echo ""
+echo "Tmux session name matching priority:"
+
+# Mock tmux with both exact and partial matches
+MOCK_PRIORITY_DIR=$(mktemp -d)
+cat > "$MOCK_PRIORITY_DIR/tmux" <<'MOCK_PRIORITY'
+#!/usr/bin/env bash
+if [[ "$1" == "list-sessions" ]]; then
+  echo "some-other-session-55"
+  echo "worker-55"
+fi
+MOCK_PRIORITY
+chmod +x "$MOCK_PRIORITY_DIR/tmux"
+
+echo "$$:55:${now_epoch}:worker" > "$TEST_LOG_DIR/.active_pids"
+echo "$now_epoch" > "$TEST_LOG_DIR/heartbeat-55"
+echo "x" > "$TEST_LOG_DIR/issue-55.log"
+
+output=$(PATH="$MOCK_PRIORITY_DIR:$PATH" run_status)
+assert_contains "prefers exact worker-N session name" "tmux:worker-55" "$output"
+
+rm -rf "$MOCK_PRIORITY_DIR"
 
 # --- Test: Shellcheck ---------------------------------------------------------
 echo ""
