@@ -100,19 +100,15 @@ export default $config({
       PLAYWRIGHT_E2E: $app.stage !== "production" ? "true" : "",
     };
 
-    // ── Next.js App ───────────────────────────────────────────────
-    new sst.aws.Nextjs("Web", {
-      link: [bucket],
-      environment,
-      transform: {
-        server: {
-          logging: { retention: "1 month" },
-        },
-      },
-    });
+    // ── Crons ──────────────────────────────────────────────────────
+    // Assigned to variables so we can pass .nodes.rule.name to the
+    // Next.js Lambda for runtime EventBridge schedule management.
+    // Type helper: SST Ion Cron exposes .nodes.rule at runtime but
+    // local tsc doesn't have full SST platform types.
+    type CronWithNodes = { nodes: { rule: { name: string; arn: string } } };
 
     // ── Cron: Post Publisher (every 1 minute) ─────────────────────
-    new sst.aws.Cron("PostPublisher", {
+    const publishCron = new sst.aws.Cron("PostPublisher", {
       schedule: "rate(1 minute)",
       job: {
         handler: "src/cron/publish.handler",
@@ -124,7 +120,7 @@ export default $config({
     });
 
     // ── Cron: Metrics Refresh (every 1 hour) ──────────────────────
-    new sst.aws.Cron("MetricsRefresh", {
+    const metricsCron = new sst.aws.Cron("MetricsRefresh", {
       schedule: "rate(60 minutes)",
       job: {
         handler: "src/cron/metrics.handler",
@@ -135,7 +131,7 @@ export default $config({
     });
 
     // ── Cron: Research Pipeline (every 4 hours) ─────────────────
-    new sst.aws.Cron("ResearchPipeline", {
+    const researchCron = new sst.aws.Cron("ResearchPipeline", {
       schedule: "cron(0 */4 * * ? *)",
       job: {
         handler: "src/cron/research.handler",
@@ -146,7 +142,7 @@ export default $config({
     });
 
     // ── Cron: Brief Generator (Sunday 23:00 UTC) ────────────────
-    new sst.aws.Cron("BriefGenerator", {
+    const briefsCron = new sst.aws.Cron("BriefGenerator", {
       schedule: "cron(0 23 ? * SUN *)",
       job: {
         handler: "src/cron/briefs.handler",
@@ -157,7 +153,7 @@ export default $config({
     });
 
     // ── Cron: Brief Fulfillment (every 6 hours) ────────────────
-    new sst.aws.Cron("BriefFulfillment", {
+    const fulfillCron = new sst.aws.Cron("BriefFulfillment", {
       schedule: "rate(6 hours)",
       job: {
         handler: "src/cron/fulfill.handler",
@@ -169,7 +165,7 @@ export default $config({
     });
 
     // ── Cron: Strategy Optimizer (Sunday 02:00 UTC) ─────────────
-    new sst.aws.Cron("StrategyOptimizer", {
+    const optimizeCron = new sst.aws.Cron("StrategyOptimizer", {
       schedule: "cron(0 2 ? * SUN *)",
       job: {
         handler: "src/cron/optimize.handler",
@@ -179,8 +175,9 @@ export default $config({
         concurrency: 1,
       },
     });
+
     // ── Cron: Brainstorm Agent (every 60 minutes) ─────────────────
-    new sst.aws.Cron("BrainstormAgent", {
+    const brainstormCron = new sst.aws.Cron("BrainstormAgent", {
       schedule: "rate(60 minutes)",
       job: {
         handler: "src/cron/brainstorm.handler",
@@ -188,6 +185,46 @@ export default $config({
         timeout: "5 minutes",
         logging: { retention: "1 month" },
         concurrency: 1,
+      },
+    });
+
+    // ── Next.js App ───────────────────────────────────────────────
+    new sst.aws.Nextjs("Web", {
+      link: [bucket],
+      environment: {
+        ...environment,
+        // EventBridge rule names for runtime schedule management
+        PUBLISH_RULE_NAME:   (publishCron as unknown as CronWithNodes).nodes.rule.name,
+        METRICS_RULE_NAME:   (metricsCron as unknown as CronWithNodes).nodes.rule.name,
+        RESEARCH_RULE_NAME:  (researchCron as unknown as CronWithNodes).nodes.rule.name,
+        BRIEFS_RULE_NAME:    (briefsCron as unknown as CronWithNodes).nodes.rule.name,
+        FULFILL_RULE_NAME:   (fulfillCron as unknown as CronWithNodes).nodes.rule.name,
+        OPTIMIZE_RULE_NAME:  (optimizeCron as unknown as CronWithNodes).nodes.rule.name,
+        BRAINSTORM_RULE_NAME: (brainstormCron as unknown as CronWithNodes).nodes.rule.name,
+      },
+      permissions: [
+        {
+          actions: [
+            "events:PutRule",
+            "events:EnableRule",
+            "events:DisableRule",
+            "events:DescribeRule",
+          ],
+          resources: [
+            (publishCron as unknown as CronWithNodes).nodes.rule.arn,
+            (metricsCron as unknown as CronWithNodes).nodes.rule.arn,
+            (researchCron as unknown as CronWithNodes).nodes.rule.arn,
+            (briefsCron as unknown as CronWithNodes).nodes.rule.arn,
+            (fulfillCron as unknown as CronWithNodes).nodes.rule.arn,
+            (optimizeCron as unknown as CronWithNodes).nodes.rule.arn,
+            (brainstormCron as unknown as CronWithNodes).nodes.rule.arn,
+          ],
+        },
+      ],
+      transform: {
+        server: {
+          logging: { retention: "1 month" },
+        },
       },
     });
   },
