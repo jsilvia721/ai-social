@@ -127,6 +127,18 @@ export function mockSynthesizeResearch(): ResearchSynthesis {
   };
 }
 
+export function mockGenerateVideoStoryboard(topic: string): {
+  videoScript: string;
+  videoPrompt: string;
+  thumbnailPrompt: string;
+} {
+  return {
+    videoScript: `[MOCK] Scene 1: Open on a wide shot establishing the context of "${topic}". Scene 2: Present key insights with dynamic visuals. Scene 3: Close with a call to action and brand logo.`,
+    videoPrompt: `[MOCK] A cinematic short-form video about ${topic}, featuring smooth transitions, dynamic text overlays, and professional color grading.`,
+    thumbnailPrompt: `[MOCK] Eye-catching YouTube thumbnail for a video about ${topic}, bold text overlay, vibrant colors, professional quality.`,
+  };
+}
+
 export function mockGenerateBriefs(
   connectedPlatforms: string[],
   cadencePerPlatform: Record<string, number>,

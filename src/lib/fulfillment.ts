@@ -10,6 +10,7 @@ import { generateImage } from "@/lib/media";
 import { uploadBuffer } from "@/lib/storage";
 import { sendFailureAlert } from "@/lib/alerts";
 import { buildImagePrompt } from "@/lib/ai/prompts";
+import { generateVideoStoryboard } from "@/lib/ai/index";
 import { requiresMedia } from "@/lib/platform-rules";
 import type { BriefFormat, ContentBrief, ContentStrategy, SocialAccount } from "@prisma/client";
 
@@ -96,11 +97,41 @@ const formatHandlers = {
     console.warn("[fulfillment] CAROUSEL format not supported yet — skipping media");
     return null;
   },
-  VIDEO: async () => {
-    console.warn("[fulfillment] VIDEO format not supported yet — skipping media");
-    return null;
-  },
+  // VIDEO is handled separately in fulfillOneBrief via handleVideoStoryboard()
+  VIDEO: async () => null,
 } satisfies Record<BriefFormat, (prompt: string) => Promise<{ buffer: Buffer; mimeType: string } | null>>;
+
+// ── Video Storyboard Handler ────────────────────────────────────────────────
+
+/**
+ * Handles VIDEO format: generates storyboard (script + thumbnail) and
+ * transitions brief to STORYBOARD_REVIEW. No Post is created at this stage.
+ */
+async function handleVideoStoryboard(
+  brief: FulfillableBrief,
+  strategy: ContentStrategy
+): Promise<void> {
+  // Step 1: Generate storyboard via AI
+  const storyboard = await generateVideoStoryboard(brief, strategy);
+
+  // Step 2: Generate thumbnail image from the AI-produced prompt
+  const { buffer, mimeType } = await generateImage(storyboard.thumbnailPrompt);
+
+  // Step 3: Upload thumbnail to S3
+  const thumbKey = `media/${brief.businessId}/${brief.id}-thumb.webp`;
+  const thumbnailUrl = await uploadBuffer(buffer, thumbKey, mimeType);
+
+  // Step 4: Update brief with storyboard data and transition to STORYBOARD_REVIEW
+  await prisma.contentBrief.update({
+    where: { id: brief.id },
+    data: {
+      videoScript: storyboard.videoScript,
+      videoPrompt: storyboard.videoPrompt,
+      storyboardImageUrl: thumbnailUrl,
+      status: "STORYBOARD_REVIEW",
+    },
+  });
+}
 
 // ── Recovery ───────────────────────────────────────────────────────────────────
 
@@ -173,6 +204,12 @@ async function fulfillOneBrief(
         data: { status: "FULFILLED", postId: existingPost.id },
       });
       return "skipped";
+    }
+
+    // VIDEO format: generate storyboard → STORYBOARD_REVIEW (no Post created)
+    if (brief.recommendedFormat === "VIDEO") {
+      await handleVideoStoryboard(brief, strategy);
+      return "created"; // successfully processed
     }
 
     // Generate media based on format
