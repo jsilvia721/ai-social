@@ -900,6 +900,7 @@ while true; do
     resume_issues=$(gh issue list \
       --state open \
       --label "$LABEL_RESUME" \
+      --sort created --order asc \
       --limit "$available_slots" \
       --json number,title \
       -q '.[] | @json' 2>/dev/null || echo "")
@@ -930,6 +931,7 @@ while true; do
     interrupted_issues=$(gh issue list \
       --state open \
       --label "$LABEL_INTERRUPTED" \
+      --sort created --order asc \
       --limit "$available_slots" \
       --json number,title \
       -q '.[] | @json' 2>/dev/null || echo "")
@@ -961,6 +963,7 @@ while true; do
       approved_issues=$(gh issue list \
         --state open \
         --label "$LABEL_APPROVED" \
+        --sort created --order asc \
         --limit "$available_slots" \
         --json number,title,body \
         -q '.[] | @json' 2>/dev/null || echo "")
@@ -1002,6 +1005,7 @@ while true; do
       plan_issues=$(gh issue list \
         --state open \
         --label "$LABEL_PLAN" \
+        --sort created --order asc \
         --limit "$available_slots" \
         --json number,title,labels \
         -q '.[] | @json' 2>/dev/null || echo "")
@@ -1041,6 +1045,7 @@ while true; do
       bug_issues=$(gh issue list \
         --state open \
         --label "$LABEL_BUG_INVESTIGATE" \
+        --sort created --order asc \
         --limit "$available_slots" \
         --json number,title \
         -q '.[] | @json' 2>/dev/null || echo "")
@@ -1072,6 +1077,7 @@ while true; do
       issues=$(gh issue list \
         --state open \
         --label "$LABEL_READY" \
+        --sort created --order asc \
         --limit "$available_slots" \
         --json number,title \
         -q '.[] | @json' 2>/dev/null || echo "")
