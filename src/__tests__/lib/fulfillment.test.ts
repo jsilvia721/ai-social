@@ -665,10 +665,10 @@ describe("runFulfillment", () => {
     expect(mockGenerateImage).toHaveBeenCalledWith(
       expect.stringContaining("Eye-catching thumbnail")
     );
-    // Should upload thumbnail
+    // Should upload thumbnail with extension matching mime type
     expect(mockUploadBuffer).toHaveBeenCalledWith(
       expect.any(Buffer),
-      "media/biz-1/brief-1-thumb.webp",
+      "media/biz-1/brief-1-thumb.png",
       "image/png"
     );
     // Should update brief with storyboard data and STORYBOARD_REVIEW status

@@ -113,7 +113,8 @@ async function handleVideoStoryboard(
 ): Promise<void> {
   const storyboard = await generateVideoStoryboard(brief, strategy);
   const { buffer, mimeType } = await generateImage(storyboard.thumbnailPrompt);
-  const thumbKey = `media/${brief.businessId}/${brief.id}-thumb.webp`;
+  const ext = mimeType.split("/")[1] || "png";
+  const thumbKey = `media/${brief.businessId}/${brief.id}-thumb.${ext}`;
   const thumbnailUrl = await uploadBuffer(buffer, thumbKey, mimeType);
 
   await prisma.contentBrief.update({

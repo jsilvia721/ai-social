@@ -401,11 +401,13 @@ export async function analyzePerformance(
 
 // ── Video Storyboard Generation ──────────────────────────────────────────────
 
-export interface VideoStoryboard {
-  videoScript: string;
-  videoPrompt: string;
-  thumbnailPrompt: string;
-}
+const VideoStoryboardSchema = z.object({
+  videoScript: z.string().min(1),
+  videoPrompt: z.string().min(1),
+  thumbnailPrompt: z.string().min(1),
+});
+
+export type VideoStoryboard = z.infer<typeof VideoStoryboardSchema>;
 
 const videoStoryboardTool: Anthropic.Tool = {
   name: "save_video_storyboard",
@@ -497,12 +499,7 @@ export async function generateVideoStoryboard(
       throw new Error("Claude did not call save_video_storyboard");
     }
 
-    const input = toolUse.input as VideoStoryboard;
-    if (!input.videoScript || !input.videoPrompt || !input.thumbnailPrompt) {
-      throw new Error("Incomplete storyboard response from Claude");
-    }
-
-    return input;
+    return VideoStoryboardSchema.parse(toolUse.input);
   } catch (err) {
     errorMessage = err instanceof Error ? err.message : String(err);
     throw err;
