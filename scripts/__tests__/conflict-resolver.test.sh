@@ -455,10 +455,6 @@ gh() {
 ]
 MOCK_JSON
       ;;
-    *"pr view"*)
-      # Return commits where the daemon (app/claude-code-bot) is the author
-      echo '{"commits":[{"authors":[{"login":"app/claude-code-bot"}]}]}'
-      ;;
     *)
       echo "mock: gh $*" >> "$TEST_DIR/gh-calls.log"
       ;;
@@ -468,7 +464,7 @@ export -f gh
 
 result=$(detect_conflicting_prs)
 
-# Should include issue-100 and issue-102 (CONFLICTING + issue-* branch + daemon author)
+# Should include issue-100 and issue-102 (CONFLICTING + issue-* branch)
 # Should exclude issue-101 (MERGEABLE), manual-200 (not issue-* branch), issue-103 (UNKNOWN)
 count=$(echo "$result" | jq 'length')
 assert_eq "detect_conflicting_prs returns 2 PRs" "2" "$count"
@@ -482,32 +478,6 @@ assert_eq "second PR is #102" "102" "$second_num"
 # No non-issue branches
 non_issue=$(echo "$result" | jq '[.[] | select(.headRefName | startswith("issue-") | not)] | length')
 assert_eq "no non-issue branches in results" "0" "$non_issue"
-
-# =============================================================================
-# Test: detect_conflicting_prs — skips PRs where last commit not by daemon
-# =============================================================================
-echo ""
-echo "detect_conflicting_prs — author filter:"
-
-gh() {
-  case "$*" in
-    *"pr list"*)
-      echo '[{"number":300,"title":"feat: human PR","headRefName":"issue-300-human","mergeable":"CONFLICTING"}]'
-      ;;
-    *"pr view"*)
-      # Return commits where a human is the last author
-      echo '{"commits":[{"authors":[{"login":"some-human-user"}]}]}'
-      ;;
-    *)
-      echo "mock: gh $*" >> "$TEST_DIR/gh-calls.log"
-      ;;
-  esac
-}
-export -f gh
-
-result=$(detect_conflicting_prs)
-count=$(echo "$result" | jq 'length')
-assert_eq "excludes PRs where last commit author is not daemon" "0" "$count"
 
 # =============================================================================
 # Test: conflict_log helper
