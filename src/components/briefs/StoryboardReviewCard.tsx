@@ -11,9 +11,9 @@ export interface StoryboardBrief {
   topic: string;
   platform: Platform;
   scheduledFor: string;
-  videoScript: string | null;
-  videoPrompt: string | null;
-  storyboardImageUrl: string | null;
+  videoScript?: string | null;
+  videoPrompt?: string | null;
+  storyboardImageUrl?: string | null;
   status: StoryboardStatus;
   updatedAt: string;
 }

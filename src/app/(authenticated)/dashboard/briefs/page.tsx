@@ -39,6 +39,10 @@ const TABS: { label: string; value: TabValue }[] = [
   { label: "All", value: "ALL" },
 ];
 
+function isStoryboardBrief(b: Brief) {
+  return b.status === "STORYBOARD_REVIEW" || b.status === "RENDERING";
+}
+
 export default function BriefsPage() {
   const [briefs, setBriefs] = useState<Brief[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -115,9 +119,6 @@ export default function BriefsPage() {
     }
   }
 
-  const isStoryboardBrief = (b: Brief) =>
-    b.status === "STORYBOARD_REVIEW" || b.status === "RENDERING";
-
   const pendingCount = briefs.filter((b) => b.status === "PENDING").length;
   const reviewCount = briefs.filter(isStoryboardBrief).length;
 
@@ -183,13 +184,7 @@ export default function BriefsPage() {
                   <StoryboardReviewCard
                     key={brief.id}
                     brief={{
-                      id: brief.id,
-                      topic: brief.topic,
-                      platform: brief.platform,
-                      scheduledFor: brief.scheduledFor,
-                      videoScript: brief.videoScript ?? null,
-                      videoPrompt: brief.videoPrompt ?? null,
-                      storyboardImageUrl: brief.storyboardImageUrl ?? null,
+                      ...brief,
                       status: brief.status as "STORYBOARD_REVIEW" | "RENDERING",
                       updatedAt: brief.updatedAt ?? new Date().toISOString(),
                     }}
