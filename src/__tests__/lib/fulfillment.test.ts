@@ -433,8 +433,8 @@ describe("runFulfillment", () => {
     );
   });
 
-  it("skips CAROUSEL/VIDEO format with warning", async () => {
-    const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
+  it("generates single image as fallback for CAROUSEL format", async () => {
+    const consoleSpy = jest.spyOn(console, "info").mockImplementation();
     const brief = makeBrief({ recommendedFormat: "CAROUSEL" });
     prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
     prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
@@ -450,11 +450,21 @@ describe("runFulfillment", () => {
     await runFulfillment();
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining("CAROUSEL format not supported")
+      expect.stringContaining("CAROUSEL fallback")
+    );
+    expect(mockGenerateImage).toHaveBeenCalledWith(
+      expect.stringContaining("A futuristic marketing dashboard")
+    );
+    expect(mockUploadBuffer).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      expect.stringContaining("media/biz-1/brief-1"),
+      "image/png"
     );
     expect(prismaMock.post.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ mediaUrls: [] }),
+        data: expect.objectContaining({
+          mediaUrls: [expect.stringContaining("media/biz-1/brief-1")],
+        }),
       })
     );
     consoleSpy.mockRestore();

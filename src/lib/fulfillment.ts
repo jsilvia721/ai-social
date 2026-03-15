@@ -96,9 +96,10 @@ const formatHandlers = {
     const { buffer, mimeType } = await generateImage(prompt);
     return { buffer, mimeType };
   },
-  CAROUSEL: async () => {
-    console.warn("[fulfillment] CAROUSEL format not supported yet — skipping media");
-    return null;
+  CAROUSEL: async (prompt: string) => {
+    console.info("[fulfillment] CAROUSEL fallback — generating single image");
+    const { buffer, mimeType } = await generateImage(prompt);
+    return { buffer, mimeType };
   },
   // VIDEO is handled separately in fulfillOneBrief via handleVideoStoryboard()
   VIDEO: async () => null,
