@@ -78,7 +78,7 @@ async function parseRssXml(xml: string): Promise<ParsedFeedItem[]> {
       title: typeof entry.title === "string" ? entry.title : (entry.title as Record<string, string>)?._,
       link: typeof entry.link === "string" ? entry.link : (entry.link as Record<string, Record<string, string>>)?.$?.href,
       snippet: typeof entry.summary === "string" ? entry.summary : (entry.summary as Record<string, string>)?._,
-      pubDate: entry.updated || entry.published,
+      pubDate: (entry.updated ?? entry.published) as string | undefined,
     }));
   }
 
