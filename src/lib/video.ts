@@ -6,8 +6,11 @@
  * creates Post with review decision, marks brief FULFILLED.
  */
 
-import type { Platform } from "@prisma/client";
+import type { ContentBrief, ContentStrategy, Platform, SocialAccount } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { downloadAndUploadVideo } from "@/lib/media";
+import { computeReviewDecision, matchPillar } from "@/lib/fulfillment";
+import { reportServerError } from "@/lib/server-error-reporter";
 
 // ── Video Generation Constants ──────────────────────────────────────────────
 
@@ -31,10 +34,6 @@ export const PLATFORM_VIDEO_ASPECT_RATIO: Record<Platform, string> = {
   FACEBOOK: "16:9",
   TWITTER: "16:9",
 };
-import { downloadAndUploadVideo } from "@/lib/media";
-import { computeReviewDecision, matchPillar } from "@/lib/fulfillment";
-import { reportServerError } from "@/lib/server-error-reporter";
-import type { ContentBrief, ContentStrategy, SocialAccount } from "@prisma/client";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

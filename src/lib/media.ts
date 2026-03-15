@@ -9,7 +9,7 @@ import { Upload } from "@aws-sdk/lib-storage";
 import { env } from "@/env";
 import { s3, bucket, getPublicUrl } from "@/lib/storage";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
-import { VIDEO_DURATION_DEFAULT, VIDEO_PROMPT_MAX_LENGTH } from "@/lib/video";
+import { VIDEO_DURATION_DEFAULT, VIDEO_MODEL_DEFAULT, VIDEO_PROMPT_MAX_LENGTH } from "@/lib/video";
 
 export interface GeneratedImage {
   buffer: Buffer;
@@ -123,7 +123,7 @@ export async function generateVideo(
 
   const replicate = getReplicateClient();
   const prediction = await replicate.predictions.create({
-    model: "kwaivgi/kling-v3-omni-video",
+    model: VIDEO_MODEL_DEFAULT,
     input: {
       prompt: sanitizedPrompt,
       aspect_ratio: options.aspectRatio,
