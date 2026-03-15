@@ -11,11 +11,7 @@ jobs:
   approve:
     if: >-
       github.event.issue.pull_request == null &&
-      (
-        contains(github.event.issue.labels.*.name, 'claude-plan-review') ||
-        contains(github.event.issue.labels.*.name, 'needs-triage') ||
-        contains(github.event.issue.labels.*.name, 'claude-self-improvement')
-      ) &&
+      contains(github.event.issue.labels.*.name, 'needs-human-review') &&
       (
         contains(github.event.comment.body, '/go') ||
         contains(github.event.comment.body, '/approve') ||
@@ -31,73 +27,64 @@ jobs:
           script: |
             const issue_number = context.issue.number;
             const labels = context.payload.issue.labels.map(l => l.name);
+            const body = context.payload.issue.body || '';
 
-            if (labels.includes('claude-plan-review')) {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                name: 'claude-plan-review'
-              });
+            // Remove the review trigger label
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              name: 'needs-human-review'
+            });
 
+            if (labels.includes('plan')) {
+              // Plan issues: check for PLAN_ITEMS markers
+              if (body.includes('PLAN_ITEMS_START')) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  labels: ['claude-approved']
+                });
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  body: 'Plan approved. The issue daemon will pick this up and create work issues shortly.'
+                });
+              } else {
+                // Re-add needs-human-review since we can't route without markers
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  labels: ['needs-human-review']
+                });
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  body: '⚠️ Plan is missing `PLAN_ITEMS_START` / `PLAN_ITEMS_END` markers. Cannot approve until the plan body contains structured plan items.'
+                });
+              }
+            } else if (labels.includes('bug-report')) {
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number,
-                labels: ['claude-approved']
+                labels: ['bug-investigate']
               });
 
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number,
-                body: 'Plan approved. The issue daemon will pick this up and create work issues shortly.'
+                body: 'Bug approved for investigation. A plan will be created shortly.'
               });
-            } else if (labels.includes('needs-triage')) {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                name: 'needs-triage'
-              });
-
-              if (labels.includes('bug-report')) {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number,
-                  labels: ['bug-investigate']
-                });
-
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number,
-                  body: 'Bug approved for investigation. A plan will be created shortly.'
-                });
-              } else {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number,
-                  labels: ['claude-ready']
-                });
-
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number,
-                  body: 'Issue approved. The issue daemon will pick this up for implementation shortly.'
-                });
-              }
-            } else if (labels.includes('claude-self-improvement')) {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                name: 'claude-self-improvement'
-              });
-
+            } else {
+              // Default: any other issue type
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -109,6 +96,6 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number,
-                body: 'Self-improvement issue approved. The issue daemon will pick this up for implementation shortly.'
+                body: 'Issue approved for implementation. The issue daemon will pick this up shortly.'
               });
             }
