@@ -17,14 +17,27 @@ export type CronName = "publish" | "metrics";
 
 type TimeUnit = "minute" | "hour" | "day";
 
-export type EventBridgeSuccess = { success: true; [key: string]: unknown };
+export type UpdateScheduleSuccess = { success: true; ruleArn: string | undefined };
+export type CronActionSuccess = { success: true };
+export type DescribeCronSuccess = {
+  success: true;
+  rule: {
+    name: string | undefined;
+    arn: string | undefined;
+    state: string | undefined;
+    scheduleExpression: string | undefined;
+  };
+};
 export type EventBridgeNoOp = { success: false; reason: "no-rule-name" };
 export type EventBridgeError = {
   success: false;
   reason: "not-found" | "rate-limited" | "internal-error";
   message: string;
 };
-export type EventBridgeResult = EventBridgeSuccess | EventBridgeNoOp | EventBridgeError;
+
+export type UpdateScheduleResult = UpdateScheduleSuccess | EventBridgeNoOp | EventBridgeError;
+export type CronActionResult = CronActionSuccess | EventBridgeNoOp | EventBridgeError;
+export type DescribeCronResult = DescribeCronSuccess | EventBridgeNoOp | EventBridgeError;
 
 // ---------------------------------------------------------------------------
 // Client (lazy singleton, 3 retries)
@@ -61,6 +74,9 @@ function resolveRuleName(cronName: CronName): string | undefined {
  * AWS requires `rate(1 minute)` (singular) vs `rate(5 minutes)` (plural).
  */
 export function buildRateExpression(value: number, unit: TimeUnit): string {
+  if (value < 1 || !Number.isInteger(value)) {
+    throw new Error(`Rate value must be a positive integer, got ${value}`);
+  }
   const unitStr = value === 1 ? unit : `${unit}s`;
   return `rate(${value} ${unitStr})`;
 }
@@ -84,11 +100,12 @@ function handleError(err: unknown): EventBridgeError {
 
 /**
  * Update the schedule expression for an EventBridge rule.
+ * Throws for unexpected (non-AWS) errors.
  */
 export async function updateCronSchedule(
   cronName: CronName,
   expression: string
-): Promise<EventBridgeResult> {
+): Promise<UpdateScheduleResult> {
   const ruleName = resolveRuleName(cronName);
   if (!ruleName) return { success: false, reason: "no-rule-name" };
 
@@ -107,8 +124,9 @@ export async function updateCronSchedule(
 
 /**
  * Enable an EventBridge rule.
+ * Throws for unexpected (non-AWS) errors.
  */
-export async function enableCron(cronName: CronName): Promise<EventBridgeResult> {
+export async function enableCron(cronName: CronName): Promise<CronActionResult> {
   const ruleName = resolveRuleName(cronName);
   if (!ruleName) return { success: false, reason: "no-rule-name" };
 
@@ -122,8 +140,9 @@ export async function enableCron(cronName: CronName): Promise<EventBridgeResult>
 
 /**
  * Disable an EventBridge rule.
+ * Throws for unexpected (non-AWS) errors.
  */
-export async function disableCron(cronName: CronName): Promise<EventBridgeResult> {
+export async function disableCron(cronName: CronName): Promise<CronActionResult> {
   const ruleName = resolveRuleName(cronName);
   if (!ruleName) return { success: false, reason: "no-rule-name" };
 
@@ -137,8 +156,9 @@ export async function disableCron(cronName: CronName): Promise<EventBridgeResult
 
 /**
  * Describe an EventBridge rule (get current state and schedule).
+ * Throws for unexpected (non-AWS) errors.
  */
-export async function describeCron(cronName: CronName): Promise<EventBridgeResult> {
+export async function describeCron(cronName: CronName): Promise<DescribeCronResult> {
   const ruleName = resolveRuleName(cronName);
   if (!ruleName) return { success: false, reason: "no-rule-name" };
 

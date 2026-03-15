@@ -40,6 +40,18 @@ describe("buildRateExpression", () => {
     expect(buildRateExpression(2, "hour")).toBe("rate(2 hours)");
     expect(buildRateExpression(30, "day")).toBe("rate(30 days)");
   });
+
+  it("throws for zero", () => {
+    expect(() => buildRateExpression(0, "minute")).toThrow("positive integer");
+  });
+
+  it("throws for negative values", () => {
+    expect(() => buildRateExpression(-1, "hour")).toThrow("positive integer");
+  });
+
+  it("throws for non-integer values", () => {
+    expect(() => buildRateExpression(1.5, "day")).toThrow("positive integer");
+  });
 });
 
 describe("updateCronSchedule", () => {
