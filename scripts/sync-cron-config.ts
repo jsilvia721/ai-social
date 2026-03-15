@@ -21,10 +21,19 @@ import {
 } from "@/lib/eventbridge";
 
 // ---------------------------------------------------------------------------
+// Type guard for CronName validation (DB values are untyped strings)
+// ---------------------------------------------------------------------------
+
+function isCronName(value: string): value is CronName {
+  return value in RULE_ENV_MAP;
+}
+
+// ---------------------------------------------------------------------------
 // Default schedule expressions from sst.config.ts
 // Used to detect which configs have been customized.
 // ---------------------------------------------------------------------------
 
+// SYNC_WITH: sst.config.ts cron schedules — update here if defaults change
 const DEFAULT_SCHEDULES: Record<CronName, string> = {
   publish: "rate(1 minute)",
   metrics: "rate(60 minutes)",
@@ -64,7 +73,14 @@ export async function syncCronConfig(): Promise<SyncResult> {
   }
 
   for (const config of configs) {
-    const cronName = config.cronName as CronName;
+    if (!isCronName(config.cronName)) {
+      console.warn(
+        `[sync-cron-config] Unknown cron name "${config.cronName}" — skipping`
+      );
+      result.skipped++;
+      continue;
+    }
+    const cronName = config.cronName;
     const defaultSchedule = DEFAULT_SCHEDULES[cronName];
     const hasCustomSchedule =
       defaultSchedule !== undefined &&

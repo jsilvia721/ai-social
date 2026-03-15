@@ -236,6 +236,27 @@ describe("syncCronConfig", () => {
     expect(result1.errors).toBe(result2.errors);
   });
 
+  it("skips unknown cron names from the database", async () => {
+    const configs = [
+      {
+        id: "id-unknown",
+        cronName: "nonexistent-cron",
+        scheduleExpression: "rate(5 minutes)",
+        scheduleType: "rate",
+        enabled: true,
+        syncStatus: "SYNCED",
+        updatedAt: new Date(),
+      },
+    ];
+    mockFindMany.mockResolvedValue(configs);
+
+    const result = await syncCronConfig();
+
+    expect(result.skipped).toBe(1);
+    expect(result.synced).toBe(0);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
   it("handles mixed configs — some default, some custom, some disabled", async () => {
     const configs = [
       makeCronConfig("publish"), // default — no action
