@@ -360,6 +360,218 @@ assert_eq "all lines have 4 fields after concurrent writes" "0" "$bad_lines"
 # Clean up worker tracking temp
 rm -rf "$TEST_LOG_DIR"
 
+# --- CI Monitor State Tests ---------------------------------------------------
+echo ""
+echo "=== CI Monitor State Tests ==="
+
+# Set up CI monitor state file in a fresh temp dir
+CI_TEST_STATE_DIR=$(mktemp -d)
+export DAEMON_STATE_DIR="$CI_TEST_STATE_DIR"
+export CI_MONITOR_STATE_FILE="$CI_TEST_STATE_DIR/ci-monitor-state"
+ensure_state_dir
+
+echo ""
+echo "ci_monitor_track:"
+
+# Track a new run
+ci_monitor_track "12345" "detected" "abc123hash" "Deploy" "" ""
+if [ -f "$CI_MONITOR_STATE_FILE" ]; then
+  pass "ci_monitor_track creates state file"
+else
+  fail "ci_monitor_track creates state file" "file exists" "file missing"
+fi
+
+line=$(cat "$CI_MONITOR_STATE_FILE")
+run_field=$(echo "$line" | cut -d'|' -f1)
+status_field=$(echo "$line" | cut -d'|' -f2)
+fp_field=$(echo "$line" | cut -d'|' -f3)
+detected_field=$(echo "$line" | cut -d'|' -f4)
+rerun_field=$(echo "$line" | cut -d'|' -f5)
+issue_field=$(echo "$line" | cut -d'|' -f6)
+workflow_field=$(echo "$line" | cut -d'|' -f7)
+assert_eq "ci_monitor_track run_id field" "12345" "$run_field"
+assert_eq "ci_monitor_track status field" "detected" "$status_field"
+assert_eq "ci_monitor_track fingerprint field" "abc123hash" "$fp_field"
+assert_not_empty "ci_monitor_track detected_epoch field" "$detected_field"
+assert_eq "ci_monitor_track rerun_epoch field (empty)" "" "$rerun_field"
+assert_eq "ci_monitor_track issue_number field (empty)" "" "$issue_field"
+assert_eq "ci_monitor_track workflow_name field" "Deploy" "$workflow_field"
+
+# Track a second run
+ci_monitor_track "67890" "rerunning" "def456hash" "CI" "" ""
+line_count=$(wc -l < "$CI_MONITOR_STATE_FILE" | tr -d ' ')
+assert_eq "ci_monitor_track appends (2 entries)" "2" "$line_count"
+
+echo ""
+echo "ci_monitor_status:"
+
+# Get status of existing run
+result=$(ci_monitor_status "12345")
+assert_eq "ci_monitor_status returns correct status" "detected" "$result"
+
+result=$(ci_monitor_status "67890")
+assert_eq "ci_monitor_status returns second entry status" "rerunning" "$result"
+
+# Get status of non-existent run
+result=$(ci_monitor_status "99999")
+assert_eq "ci_monitor_status returns empty for unknown run" "" "$result"
+
+echo ""
+echo "ci_monitor_update:"
+
+# Update status of a run
+ci_monitor_update "12345" "rerunning"
+result=$(ci_monitor_status "12345")
+assert_eq "ci_monitor_update changes status" "rerunning" "$result"
+
+# Update with rerun_epoch
+ci_monitor_update "12345" "rerun_ok" "" "1700000000"
+result=$(ci_monitor_status "12345")
+assert_eq "ci_monitor_update to rerun_ok" "rerun_ok" "$result"
+# Check rerun epoch was set
+line=$(grep "^12345|" "$CI_MONITOR_STATE_FILE")
+rerun_field=$(echo "$line" | cut -d'|' -f5)
+assert_eq "ci_monitor_update sets rerun_epoch" "1700000000" "$rerun_field"
+
+# Update with issue number
+ci_monitor_update "67890" "filed" "42" ""
+result=$(ci_monitor_status "67890")
+assert_eq "ci_monitor_update to filed" "filed" "$result"
+line=$(grep "^67890|" "$CI_MONITOR_STATE_FILE")
+issue_field=$(echo "$line" | cut -d'|' -f6)
+assert_eq "ci_monitor_update sets issue_number" "42" "$issue_field"
+
+# Update non-existent run is a no-op (doesn't error)
+ci_monitor_update "99999" "filed"
+pass "ci_monitor_update on unknown run does not error"
+
+echo ""
+echo "ci_monitor_fingerprint_open:"
+
+# Reset state file for fingerprint tests
+: > "$CI_MONITOR_STATE_FILE"
+ci_monitor_track "100" "filed" "open_fp" "TestWorkflow" "" ""
+ci_monitor_track "101" "resolved" "closed_fp" "TestWorkflow" "" ""
+ci_monitor_track "102" "detected" "detected_fp" "TestWorkflow" "" ""
+
+# Fingerprint with filed status should return 0 (open)
+if ci_monitor_fingerprint_open "open_fp"; then
+  pass "ci_monitor_fingerprint_open returns 0 for filed fingerprint"
+else
+  fail "ci_monitor_fingerprint_open returns 0 for filed fingerprint" "exit 0" "exit 1"
+fi
+
+# Fingerprint with resolved status should return 1 (not open)
+if ci_monitor_fingerprint_open "closed_fp"; then
+  fail "ci_monitor_fingerprint_open returns 1 for resolved fingerprint" "exit 1" "exit 0"
+else
+  pass "ci_monitor_fingerprint_open returns 1 for resolved fingerprint"
+fi
+
+# Fingerprint with detected status should return 1 (not filed = not open)
+if ci_monitor_fingerprint_open "detected_fp"; then
+  fail "ci_monitor_fingerprint_open returns 1 for detected fingerprint" "exit 1" "exit 0"
+else
+  pass "ci_monitor_fingerprint_open returns 1 for detected fingerprint"
+fi
+
+# Unknown fingerprint should return 1 (not open)
+if ci_monitor_fingerprint_open "nonexistent_fp"; then
+  fail "ci_monitor_fingerprint_open returns 1 for unknown fingerprint" "exit 1" "exit 0"
+else
+  pass "ci_monitor_fingerprint_open returns 1 for unknown fingerprint"
+fi
+
+echo ""
+echo "ci_monitor_prune:"
+
+# Reset state file for pruning tests
+: > "$CI_MONITOR_STATE_FILE"
+now_epoch=$(date +%s)
+old_epoch=$((now_epoch - 8 * 86400))  # 8 days ago
+recent_epoch=$((now_epoch - 1 * 86400))  # 1 day ago
+
+# Add old entries (should be pruned)
+echo "OLD1|detected|fp1|${old_epoch}||0|Workflow1" >> "$CI_MONITOR_STATE_FILE"
+echo "OLD2|filed|fp2|${old_epoch}||0|Workflow2" >> "$CI_MONITOR_STATE_FILE"
+
+# Add recent entries (should be kept)
+echo "NEW1|detected|fp3|${recent_epoch}||0|Workflow3" >> "$CI_MONITOR_STATE_FILE"
+echo "NEW2|filed|fp4|${recent_epoch}||0|Workflow4" >> "$CI_MONITOR_STATE_FILE"
+
+ci_monitor_prune
+line_count=$(wc -l < "$CI_MONITOR_STATE_FILE" | tr -d ' ')
+assert_eq "ci_monitor_prune removes entries older than 7 days" "2" "$line_count"
+
+# Verify only recent entries remain
+if grep -q "^NEW1|" "$CI_MONITOR_STATE_FILE" && grep -q "^NEW2|" "$CI_MONITOR_STATE_FILE"; then
+  pass "ci_monitor_prune keeps recent entries"
+else
+  fail "ci_monitor_prune keeps recent entries" "NEW1 and NEW2 present" "$(cat "$CI_MONITOR_STATE_FILE")"
+fi
+
+if grep -q "^OLD" "$CI_MONITOR_STATE_FILE"; then
+  fail "ci_monitor_prune removed old entries" "no OLD entries" "OLD entries found"
+else
+  pass "ci_monitor_prune removed old entries"
+fi
+
+# Test 100-entry cap
+: > "$CI_MONITOR_STATE_FILE"
+for i in $(seq 1 110); do
+  echo "RUN${i}|detected|fp${i}|${recent_epoch}||0|Workflow" >> "$CI_MONITOR_STATE_FILE"
+done
+ci_monitor_prune
+line_count=$(wc -l < "$CI_MONITOR_STATE_FILE" | tr -d ' ')
+assert_eq "ci_monitor_prune caps at 100 entries" "100" "$line_count"
+
+# The oldest entries (RUN1-RUN10) should be removed, newest kept
+if grep -q "^RUN110|" "$CI_MONITOR_STATE_FILE"; then
+  pass "ci_monitor_prune keeps newest entries after cap"
+else
+  fail "ci_monitor_prune keeps newest entries after cap" "RUN110 present" "$(tail -1 "$CI_MONITOR_STATE_FILE")"
+fi
+
+if grep -q "^RUN1|" "$CI_MONITOR_STATE_FILE"; then
+  fail "ci_monitor_prune removed oldest entries after cap" "RUN1 absent" "RUN1 present"
+else
+  pass "ci_monitor_prune removed oldest entries after cap"
+fi
+
+echo ""
+echo "ci_monitor — missing/empty state file:"
+
+# Missing state file handled gracefully
+rm -f "$CI_MONITOR_STATE_FILE"
+result=$(ci_monitor_status "12345")
+assert_eq "ci_monitor_status on missing file returns empty" "" "$result"
+
+ci_monitor_prune
+pass "ci_monitor_prune on missing file does not error"
+
+if ci_monitor_fingerprint_open "any_fp"; then
+  fail "ci_monitor_fingerprint_open on missing file returns 1" "exit 1" "exit 0"
+else
+  pass "ci_monitor_fingerprint_open on missing file returns 1"
+fi
+
+# Empty state file handled gracefully
+: > "$CI_MONITOR_STATE_FILE"
+result=$(ci_monitor_status "12345")
+assert_eq "ci_monitor_status on empty file returns empty" "" "$result"
+
+ci_monitor_prune
+line_count=$(wc -l < "$CI_MONITOR_STATE_FILE" | tr -d ' ')
+# Empty file has 0 lines
+if [ "$line_count" -le 1 ]; then
+  pass "ci_monitor_prune on empty file is no-op"
+else
+  fail "ci_monitor_prune on empty file is no-op" "0 or 1 lines" "$line_count"
+fi
+
+# Clean up CI monitor temp
+rm -rf "$CI_TEST_STATE_DIR"
+
 # --- Shellcheck --------------------------------------------------------------
 echo ""
 echo "Shellcheck:"

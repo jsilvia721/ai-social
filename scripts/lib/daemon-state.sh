@@ -11,6 +11,11 @@
 #   set_drain_mode
 #   is_drain_mode              # returns 0 if draining, 1 if not
 #   clear_drain_mode
+#   ci_monitor_track <run_id> <status> <fingerprint> <workflow> [issue] [rerun_epoch]
+#   ci_monitor_status <run_id>         # outputs status or empty
+#   ci_monitor_update <run_id> <status> [issue] [rerun_epoch]
+#   ci_monitor_prune                   # removes >7d entries, caps at 100
+#   ci_monitor_fingerprint_open <fp>   # returns 0 if filed entry exists
 #
 # State directory: ./logs/daemon-shared/ (override via DAEMON_STATE_DIR)
 
@@ -143,4 +148,109 @@ get_worker_start() {
   local file="${WORKER_PID_FILE:-./logs/issue-daemon/.active_pids}"
   [ -f "$file" ] || return 0
   awk -F: -v pid="$pid" '$1 == pid { print $3 }' "$file"
+}
+
+# --- CI Monitor state tracking ------------------------------------------------
+# File format: RUN_ID|STATUS|FINGERPRINT|DETECTED_EPOCH|RERUN_EPOCH|ISSUE_NUMBER|WORKFLOW_NAME
+# Status values: detected, rerunning, rerun_ok, filed, resolved
+# Override path via CI_MONITOR_STATE_FILE env var for testing.
+
+# Helper: resolve the CI monitor state file path.
+_ci_monitor_file() {
+  echo "${CI_MONITOR_STATE_FILE:-${DAEMON_STATE_DIR}/ci-monitor-state}"
+}
+
+# Track a new CI failure run.
+# $1 — run ID, $2 — initial status, $3 — fingerprint, $4 — workflow name
+# $5 — issue number (optional), $6 — rerun epoch (optional)
+ci_monitor_track() {
+  local run_id="$1"
+  local status="$2"
+  local fingerprint="$3"
+  local workflow="$4"
+  local issue="${5:-}"
+  local rerun_epoch="${6:-}"
+  local detected_epoch
+  detected_epoch=$(date +%s)
+  ensure_state_dir
+  local file
+  file=$(_ci_monitor_file)
+  echo "${run_id}|${status}|${fingerprint}|${detected_epoch}|${rerun_epoch}|${issue}|${workflow}" >> "$file"
+}
+
+# Get the status for a given run ID.
+# $1 — run ID. Outputs status string or empty.
+ci_monitor_status() {
+  local run_id="$1"
+  local file
+  file=$(_ci_monitor_file)
+  [ -f "$file" ] || return 0
+  awk -F'|' -v rid="$run_id" '$1 == rid { print $2 }' "$file" | tail -1
+}
+
+# Update fields for a given run ID.
+# $1 — run ID, $2 — new status
+# $3 — issue number (optional, preserves existing if empty)
+# $4 — rerun epoch (optional, preserves existing if empty)
+ci_monitor_update() {
+  local run_id="$1"
+  local new_status="$2"
+  local new_issue="${3:-}"
+  local new_rerun="${4:-}"
+  local file
+  file=$(_ci_monitor_file)
+  [ -f "$file" ] || return 0
+
+  local tmp
+  tmp=$(mktemp)
+  while IFS='|' read -r rid st fp det re iss wf; do
+    if [ "$rid" = "$run_id" ]; then
+      [ -n "$new_issue" ] && iss="$new_issue"
+      [ -n "$new_rerun" ] && re="$new_rerun"
+      echo "${rid}|${new_status}|${fp}|${det}|${re}|${iss}|${wf}"
+    else
+      echo "${rid}|${st}|${fp}|${det}|${re}|${iss}|${wf}"
+    fi
+  done < "$file" > "$tmp"
+  mv "$tmp" "$file"
+}
+
+# Prune entries older than 7 days and cap at 100 entries (newest kept).
+ci_monitor_prune() {
+  local file
+  file=$(_ci_monitor_file)
+  [ -f "$file" ] || return 0
+
+  local cutoff
+  cutoff=$(( $(date +%s) - 7 * 86400 ))
+
+  local tmp
+  tmp=$(mktemp)
+  # Remove entries older than 7 days
+  while IFS='|' read -r rid st fp det re iss wf; do
+    [ -z "$rid" ] && continue
+    if [ "$det" -ge "$cutoff" ] 2>/dev/null; then
+      echo "${rid}|${st}|${fp}|${det}|${re}|${iss}|${wf}"
+    fi
+  done < "$file" > "$tmp"
+
+  # Cap at 100 entries (keep newest = last 100 lines)
+  local count
+  count=$(wc -l < "$tmp" | tr -d ' ')
+  if [ "$count" -gt 100 ]; then
+    tail -100 "$tmp" > "$file"
+    rm -f "$tmp"
+  else
+    mv "$tmp" "$file"
+  fi
+}
+
+# Check if an open (status=filed) entry exists for a given fingerprint.
+# Returns 0 if found, 1 otherwise.
+ci_monitor_fingerprint_open() {
+  local fingerprint="$1"
+  local file
+  file=$(_ci_monitor_file)
+  [ -f "$file" ] || return 1
+  grep -q "^[^|]*|filed|${fingerprint}|" "$file"
 }
