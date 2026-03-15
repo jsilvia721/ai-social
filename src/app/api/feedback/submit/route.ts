@@ -5,44 +5,24 @@ import { prisma } from "@/lib/db";
 import { createIssue } from "@/lib/github";
 import { reportServerError } from "@/lib/server-error-reporter";
 import { assertSafeMediaUrl } from "@/lib/blotato/ssrf-guard";
-import { truncateOnWordBoundary } from "@/lib/feedback-formatter";
+import { formatFeedbackIssue } from "@/lib/feedback-formatter";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
-const feedbackSchema = z.object({
-  message: z.string().min(1).max(5000),
-  pageUrl: z.string().url().optional(),
-  screenshotUrl: z.string().url().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+const messageSchema = z.object({
+  role: z.enum(["user", "assistant", "system"]),
+  content: z.string().min(1),
 });
 
-function buildIssueBody(params: {
-  userName: string;
-  pageUrl?: string;
-  message: string;
-  screenshotUrl?: string;
-}): string {
-  const lines = [
-    "## User Feedback",
-    "",
-    `**From:** ${params.userName}`,
-    `**Page:** ${params.pageUrl || "Not captured"}`,
-    `**Date:** ${new Date().toISOString()}`,
-    "",
-    "---",
-    "",
-    params.message,
-    "",
-  ];
-
-  if (params.screenshotUrl) {
-    lines.push(`![Screenshot](${params.screenshotUrl})`, "");
-  }
-
-  lines.push("---", "*Submitted via in-app feedback*");
-
-  return lines.join("\n");
-}
+const submitSchema = z.object({
+  messages: z.array(messageSchema).min(1),
+  summary: z.string().min(1).max(5000),
+  classification: z.enum(["bug", "feature", "general"]),
+  context: z.object({
+    pageUrl: z.string().url().optional(),
+    screenshotUrl: z.string().url().optional(),
+  }),
+});
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -57,7 +37,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const parsed = feedbackSchema.safeParse(rawBody);
+  const parsed = submitSchema.safeParse(rawBody);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.flatten().fieldErrors },
@@ -65,9 +45,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { message, pageUrl, screenshotUrl, metadata } = parsed.data;
+  const { messages, summary, classification, context } = parsed.data;
+  const { pageUrl, screenshotUrl } = context;
 
-  // SSRF guard: screenshotUrl must start with our S3 public URL
+  // SSRF guard: screenshotUrl must be hosted on our storage
   if (screenshotUrl) {
     try {
       assertSafeMediaUrl(screenshotUrl);
@@ -85,17 +66,17 @@ export async function POST(req: NextRequest) {
     feedback = await prisma.feedback.create({
       data: {
         userId: session.user.id,
-        message,
+        message: summary,
         pageUrl,
         screenshotUrl,
         status: "PENDING",
-        metadata: metadata as Prisma.InputJsonValue | undefined,
+        conversationHistory: messages as Prisma.InputJsonValue,
       },
     });
   } catch (error) {
     await reportServerError(
       `Failed to create feedback record: ${error instanceof Error ? error.message : String(error)}`,
-      { url: "/api/feedback" }
+      { url: "/api/feedback/submit" }
     );
     return NextResponse.json(
       { error: "Failed to save feedback" },
@@ -103,22 +84,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 2. Attempt GitHub issue creation (non-blocking)
+  // 2. Format and create GitHub issue
   let githubIssueNumber: number | undefined;
   let githubIssueUrl: string | undefined;
 
   try {
-    const title = "[Feedback] " + truncateOnWordBoundary(message, 69);
     const userName =
       session.user.name || session.user.email || "Unknown user";
-    const body = buildIssueBody({
+    const formatted = formatFeedbackIssue({
+      classification,
+      summary,
       userName,
       pageUrl,
-      message,
       screenshotUrl,
     });
 
-    const issue = await createIssue(title, body, ["needs-human-review"]);
+    const issue = await createIssue(formatted.title, formatted.body, formatted.labels);
     githubIssueNumber = issue.number;
     githubIssueUrl = issue.html_url;
 
@@ -132,8 +113,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    const errMsg =
-      error instanceof Error ? error.message : String(error);
+    const errMsg = error instanceof Error ? error.message : String(error);
 
     // If GitHub token not configured, leave as PENDING
     if (errMsg.includes("not configured")) {
@@ -150,7 +130,7 @@ export async function POST(req: NextRequest) {
       }
       await reportServerError(
         `Failed to create GitHub issue for feedback: ${errMsg}`,
-        { url: "/api/feedback" }
+        { url: "/api/feedback/submit" }
       );
     }
   }
