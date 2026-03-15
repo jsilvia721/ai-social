@@ -1098,10 +1098,9 @@ while true; do
     resume_issues=$(gh issue list \
       --state open \
       --label "$LABEL_RESUME" \
-      --sort created --order asc \
       --limit "$available_slots" \
       --json number,title \
-      -q '.[] | @json' 2>/dev/null || echo "")
+      -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
 
     if [ -n "$resume_issues" ]; then
       while IFS= read -r issue_json; do
@@ -1129,10 +1128,9 @@ while true; do
     interrupted_issues=$(gh issue list \
       --state open \
       --label "$LABEL_INTERRUPTED" \
-      --sort created --order asc \
       --limit "$available_slots" \
       --json number,title \
-      -q '.[] | @json' 2>/dev/null || echo "")
+      -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
 
     if [ -n "$interrupted_issues" ]; then
       while IFS= read -r issue_json; do
@@ -1161,10 +1159,9 @@ while true; do
       approved_issues=$(gh issue list \
         --state open \
         --label "$LABEL_APPROVED" \
-        --sort created --order asc \
         --limit "$available_slots" \
         --json number,title,body \
-        -q '.[] | @json' 2>/dev/null || echo "")
+        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
 
       if [ -n "$approved_issues" ]; then
         while IFS= read -r issue_json; do
@@ -1203,10 +1200,9 @@ while true; do
       plan_issues=$(gh issue list \
         --state open \
         --label "$LABEL_PLAN" \
-        --sort created --order asc \
         --limit "$available_slots" \
         --json number,title,labels \
-        -q '.[] | @json' 2>/dev/null || echo "")
+        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
 
       if [ -n "$plan_issues" ]; then
         while IFS= read -r issue_json; do
@@ -1243,10 +1239,9 @@ while true; do
       bug_issues=$(gh issue list \
         --state open \
         --label "$LABEL_BUG_INVESTIGATE" \
-        --sort created --order asc \
         --limit "$available_slots" \
         --json number,title \
-        -q '.[] | @json' 2>/dev/null || echo "")
+        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
 
       if [ -n "$bug_issues" ]; then
         while IFS= read -r issue_json; do
@@ -1275,10 +1270,9 @@ while true; do
       issues=$(gh issue list \
         --state open \
         --label "$LABEL_READY" \
-        --sort created --order asc \
         --limit "$available_slots" \
         --json number,title \
-        -q '.[] | @json' 2>/dev/null || echo "")
+        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
 
       if [ -n "$issues" ]; then
         while IFS= read -r issue_json; do
