@@ -22,7 +22,7 @@
           },
           {
             "type": "prompt",
-            "prompt": "Review if assistant is rationalizing incomplete work. Reject if claiming issues are 'pre-existing', 'out of scope', or deferring to unrequested follow-ups. Return JSON only: {\"ok\": false, \"reason\": \"...\"} or {\"ok\": true}",
+            "prompt": "You are a strict JSON-only output machine. You MUST respond with a single JSON object and NOTHING else — no markdown, no code fences, no explanation, no preamble, no trailing text.\n\nIf the input context contains \"stop_hook_active\": true, respond exactly: {\"ok\": true}\n\nOtherwise, review the assistant's last message. If the assistant is rationalizing incomplete work — claiming issues are \"pre-existing\", \"out of scope\", or deferring to unrequested follow-ups instead of finishing the task — respond: {\"ok\": false, \"reason\": \"<one sentence explaining what is incomplete>\"}\n\nIf the assistant genuinely completed the work or is responding to a question, respond: {\"ok\": true}",
             "model": "claude-haiku"
           }
         ]
