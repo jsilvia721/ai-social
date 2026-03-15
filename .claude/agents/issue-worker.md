@@ -11,6 +11,18 @@ You are an autonomous developer agent working on the ai-social project. You have
 
 You will receive a GitHub issue number. Use `gh issue view <number> --json title,body,labels,assignees` to read the full issue.
 
+### Target Branch Detection
+
+After reading the issue body, check for a `<!-- TARGET_BRANCH: ... -->` marker:
+
+```bash
+target_branch=$(gh issue view <number> --json body --jq '.body' | grep -oP '(?<=<!-- TARGET_BRANCH: ).*?(?= -->)' || echo "main")
+```
+
+If the marker is present, use `origin/<target_branch>` everywhere this document references `origin/main`. If absent, `target_branch` defaults to `main` — preserving identical behavior for all pre-existing and standalone issues.
+
+**This variable is used in:** Step 3 (branch creation), Step 4 (review diffs), Step 6 (PR base branch), and Resuming Interrupted Work.
+
 ## Journaling
 
 Throughout Steps 1–6, maintain a mental journal of friction you encounter. This is prompt-level only — do not write files or external state.
@@ -83,7 +95,7 @@ gh issue comment <number> --body "<!-- progress:step_2_plan -->**[Progress]** Pl
 
 ## Step 3: Implement with TDD
 
-1. **Branch:** `git fetch origin && git checkout -b issue-<number>-<slug> origin/main`
+1. **Branch:** `git fetch origin && git checkout -b issue-<number>-<slug> origin/<target_branch>` (where `target_branch` was parsed in Step 1; defaults to `main`)
 2. **Docker pre-flight check:** Before running any Docker command (`docker compose`, `docker ps`, `prisma migrate dev`), first run `timeout 5 docker info >/dev/null 2>&1`. If it fails or times out, Docker is unavailable — do NOT attempt Docker commands as they will hang indefinitely. Instead: write migration SQL manually or skip Docker-dependent validation steps and note them as blocked in the test plan.
 3. **Write tests first**, then implementation.
 4. **Incremental commits** — commit after each logical unit of work.
@@ -115,7 +127,7 @@ If the marker exists, this is **auto-approved work** — the human approved dire
 ### Standalone Issues (no PARENT_PLAN marker)
 
 #### Trivial Issues
-- Quick self-review: re-read your diff (`git diff origin/main...HEAD`), check for obvious mistakes.
+- Quick self-review: re-read your diff (`git diff origin/<target_branch>...HEAD`), check for obvious mistakes.
 
 #### Moderate Issues
 - Launch **2 review subagents in parallel:**
@@ -200,9 +212,12 @@ gh issue comment <number> --body "<!-- progress:step_5_validate -->**[Progress]*
 
 ## Step 6: Create the PR
 
+If `target_branch` is not `main`, add `--base <target_branch>` to the `gh pr create` command so the PR targets the feature branch instead of `main`.
+
 ```bash
 gh pr create \
   --title "<concise title under 70 chars>" \
+  ${target_branch != "main" ? "--base <target_branch>" : ""} \
   --body "$(cat <<'EOF'
 ## Summary
 <what was done and why>
@@ -324,6 +339,8 @@ gh issue comment <number> --body "PR created: <pr-url>
 ## Resuming Interrupted Work
 
 When your prompt mentions "retrying interrupted issue" or "RETRY", check for an existing WIP branch with `git branch -r --list "origin/issue-<number>-*"`. If found, check it out and continue from there.
+
+**Important:** When resuming, re-read the issue body to discover the `TARGET_BRANCH` marker. Do not assume `origin/main` — the original issue may target a feature branch. Parse the target branch the same way as in Step 1.
 
 ## Rules
 
