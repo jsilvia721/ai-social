@@ -58,20 +58,22 @@ describe("checkRateLimit", () => {
   });
 
   it("uses sliding window - oldest requests expire individually", () => {
-    // Make 5 requests at time 0
-    for (let i = 0; i < 5; i++) {
-      checkRateLimit("user-1", { maxRequests: 5, windowMs: 3600000 });
-    }
+    // Spread 3 requests across time
+    checkRateLimit("user-1", { maxRequests: 3, windowMs: 3000 }); // t=0
+    jest.advanceTimersByTime(1000);
+    checkRateLimit("user-1", { maxRequests: 3, windowMs: 3000 }); // t=1000
+    jest.advanceTimersByTime(1000);
+    checkRateLimit("user-1", { maxRequests: 3, windowMs: 3000 }); // t=2000
 
-    // At limit - should be rejected
-    let result = checkRateLimit("user-1", { maxRequests: 5, windowMs: 3600000 });
+    // At limit at t=2000 — should be rejected
+    let result = checkRateLimit("user-1", { maxRequests: 3, windowMs: 3000 });
     expect(result.allowed).toBe(false);
 
-    // Advance past window so old requests expire
-    jest.advanceTimersByTime(3600001);
+    // Advance so only the first request (t=0) expires, not the others
+    jest.advanceTimersByTime(1001); // now at t=3001
 
-    // Should be allowed again
-    result = checkRateLimit("user-1", { maxRequests: 5, windowMs: 3600000 });
+    // One slot freed — should be allowed
+    result = checkRateLimit("user-1", { maxRequests: 3, windowMs: 3000 });
     expect(result.allowed).toBe(true);
   });
 

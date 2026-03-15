@@ -9,7 +9,7 @@
 /** Maximum number of user message exchanges per feedback conversation. */
 export const EXCHANGE_CAP = 10;
 
-interface FeedbackSystemPromptParams {
+export interface FeedbackSystemPromptParams {
   pageUrl: string;
   userName: string;
   features: string[];
@@ -78,12 +78,12 @@ ${features.map((f) => `- ${escapeXml(f)}`).join("\n")}
 6. **Stay on topic.** If the user tries to go off-topic, gently redirect to feedback collection.`;
 }
 
-interface Message {
-  role: "user" | "assistant" | string;
+export interface FeedbackMessage {
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
 /** Count messages with role "user" in a conversation history. */
-export function countUserMessages(messages: Message[]): number {
+export function countUserMessages(messages: FeedbackMessage[]): number {
   return messages.filter((m) => m.role === "user").length;
 }

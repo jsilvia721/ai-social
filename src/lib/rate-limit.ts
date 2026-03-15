@@ -5,17 +5,18 @@
  * the window, then checks whether the user has remaining capacity.
  */
 
-interface RateLimitOptions {
+export interface RateLimitOptions {
   maxRequests: number;
   windowMs: number;
 }
 
-interface RateLimitResult {
+export interface RateLimitResult {
   allowed: boolean;
   retryAfterMs: number;
 }
 
 // userId → array of request timestamps (ms)
+// Acceptable for low-user-count deployments; add eviction if user base grows.
 const requestLog = new Map<string, number[]>();
 
 export function checkRateLimit(
