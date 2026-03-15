@@ -229,12 +229,12 @@ model ContentBrief {
   sortOrder         Int         @default(0)
   retryCount        Int         @default(0)
   errorMessage      String?     @db.Text
-  videoScript            String?     @db.Text
-  videoPrompt            String?     @db.Text
-  storyboardImageUrl     String?
-  replicatePredictionId  String?     @unique
-  videoModel             String?
-  videoAspectRatio       String?
+  videoScript           String?     @db.Text
+  videoPrompt           String?     @db.Text
+  storyboardImageUrl    String?
+  replicatePredictionId String?     @unique
+  videoModel            String?
+  videoAspectRatio      String?
   postId            String?     @unique
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
