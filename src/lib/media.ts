@@ -4,11 +4,11 @@
  */
 
 import { Readable } from "stream";
-import Replicate from "replicate";
 import { Upload } from "@aws-sdk/lib-storage";
 import { env } from "@/env";
 import { s3, bucket, getPublicUrl } from "@/lib/storage";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
+import { getReplicateClient } from "@/lib/replicate-client";
 import { VIDEO_DURATION_DEFAULT, VIDEO_MODEL_DEFAULT, VIDEO_PROMPT_MAX_LENGTH } from "@/lib/video";
 
 export interface GeneratedImage {
@@ -28,17 +28,6 @@ export interface GenerateVideoResult {
 }
 
 const REPLICATE_TIMEOUT_MS = 60_000;
-
-// Lazy init to ensure .env.local is loaded by Next.js before we read the token.
-// We read from env (Zod-parsed) to get the .env.local value, which takes
-// precedence over any stale shell env var that process.env might have.
-let _replicate: Replicate | null = null;
-function getReplicateClient(): Replicate {
-  if (!_replicate) {
-    _replicate = new Replicate({ auth: env.REPLICATE_API_TOKEN });
-  }
-  return _replicate;
-}
 
 /**
  * Generate an image from a text prompt using Flux 1.1 Pro via Replicate.
