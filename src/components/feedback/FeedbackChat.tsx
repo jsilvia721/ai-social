@@ -12,9 +12,10 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "./ChatMessage";
-import { ChatSummary, type SummaryData } from "./ChatSummary";
+import { ChatSummary, type SummaryData, type FeedbackPriority } from "./ChatSummary";
 import { TypingIndicator } from "./TypingIndicator";
 import { EXCHANGE_CAP } from "@/lib/feedback-agent";
+import type { FeedbackClassification } from "@/lib/feedback-formatter";
 
 interface Message {
   role: "user" | "assistant";
@@ -25,25 +26,35 @@ interface Message {
 type StreamingState = "idle" | "waiting" | "streaming" | "error";
 
 const MIN_MESSAGE_LENGTH = 2;
+const VALID_CLASSIFICATIONS: FeedbackClassification[] = ["bug", "feature", "general"];
+const VALID_PRIORITIES: FeedbackPriority[] = ["low", "medium", "high", "critical"];
 
 /**
  * Try to parse a summary JSON from assistant message content.
  * The AI may wrap the summary in a JSON block with type: "summary".
+ * Performs runtime validation of all fields.
  */
 function tryParseSummary(content: string): SummaryData | null {
   try {
     const parsed = JSON.parse(content);
     if (
       parsed?.type === "summary" &&
-      parsed.classification &&
-      parsed.title &&
-      parsed.description
+      typeof parsed.classification === "string" &&
+      typeof parsed.title === "string" &&
+      typeof parsed.description === "string" &&
+      VALID_CLASSIFICATIONS.includes(parsed.classification)
     ) {
+      const priority: FeedbackPriority =
+        typeof parsed.priority === "string" &&
+        VALID_PRIORITIES.includes(parsed.priority)
+          ? parsed.priority
+          : "medium";
+
       return {
         classification: parsed.classification,
         title: parsed.title,
         description: parsed.description,
-        priority: parsed.priority || "medium",
+        priority,
       };
     }
   } catch {
@@ -442,7 +453,7 @@ export function FeedbackChat() {
                 <p className="text-sm text-emerald-400 font-medium">
                   Thank you for your feedback!
                 </p>
-                {success.issueUrl && (
+                {success.issueUrl?.startsWith("https://github.com/") && (
                   <a
                     href={success.issueUrl}
                     target="_blank"

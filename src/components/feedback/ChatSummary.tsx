@@ -4,11 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import type { FeedbackClassification } from "@/lib/feedback-formatter";
 
+export type FeedbackPriority = "low" | "medium" | "high" | "critical";
+
 export interface SummaryData {
   classification: FeedbackClassification;
   title: string;
   description: string;
-  priority: string;
+  priority: FeedbackPriority;
 }
 
 interface ChatSummaryProps {
