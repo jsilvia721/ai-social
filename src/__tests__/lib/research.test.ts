@@ -13,18 +13,6 @@ jest.mock("@anthropic-ai/sdk", () => {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { _mockCreate: anthropicCreate } = require("@anthropic-ai/sdk");
 
-// Mock rss-parser — define mock inside factory (jest.mock is hoisted above const declarations)
-jest.mock("rss-parser", () => {
-  const parseURL = jest.fn();
-  return Object.assign(
-    jest.fn().mockImplementation(() => ({ parseURL })),
-    { _mockParseURL: parseURL }
-  );
-});
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { _mockParseURL: rssMockParseURL } = require("rss-parser");
-
 // Mock error reporter
 const mockReportServerError = jest.fn().mockResolvedValue(undefined);
 jest.mock("@/lib/server-error-reporter", () => ({
@@ -40,7 +28,6 @@ import { synthesizeResearch } from "@/lib/ai/research";
 beforeEach(() => {
   resetPrismaMock();
   anthropicCreate.mockReset();
-  rssMockParseURL.mockReset();
   mockReportServerError.mockReset().mockResolvedValue(undefined);
   jest.restoreAllMocks();
 });
@@ -137,6 +124,37 @@ describe("synthesizeResearch", () => {
   });
 });
 
+// ── XML fixtures ────────────────────────────────────────────────────────────
+
+function rss20Xml(items: { title: string; link: string; description: string; pubDate?: string }[]): string {
+  const itemsXml = items.map(i => `
+    <item>
+      <title>${i.title}</title>
+      <link>${i.link}</link>
+      <description>${i.description}</description>
+      ${i.pubDate ? `<pubDate>${i.pubDate}</pubDate>` : ""}
+    </item>`).join("");
+  return `<?xml version="1.0"?><rss version="2.0"><channel><title>Test Feed</title>${itemsXml}</channel></rss>`;
+}
+
+function atomXml(entries: { title: string; link: string; summary: string; updated?: string }[]): string {
+  const entriesXml = entries.map(e => `
+    <entry>
+      <title>${e.title}</title>
+      <link href="${e.link}" />
+      <summary>${e.summary}</summary>
+      ${e.updated ? `<updated>${e.updated}</updated>` : ""}
+    </entry>`).join("");
+  return `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Test Feed</title>${entriesXml}</feed>`;
+}
+
+function mockFetchXml(xml: string) {
+  return {
+    ok: true,
+    text: async () => xml,
+  };
+}
+
 // ── runResearchPipeline tests ───────────────────────────────────────────────
 
 describe("runResearchPipeline", () => {
@@ -182,15 +200,14 @@ describe("runResearchPipeline", () => {
     expect(result).toEqual({ processed: 0 });
   });
 
-  it("processes workspace with RSS feeds", async () => {
+  it("processes workspace with RSS 2.0 feeds", async () => {
     prismaMock.business.findMany.mockResolvedValue([mockWorkspace] as any);
 
-    rssMockParseURL.mockResolvedValue({
-      items: [
-        { title: "Article 1", link: "https://example.com/1", contentSnippet: "Snippet 1", pubDate: "2026-03-01" },
-        { title: "Article 2", link: "https://example.com/2", contentSnippet: "Snippet 2", pubDate: "2026-03-02" },
-      ],
-    });
+    const xml = rss20Xml([
+      { title: "Article 1", link: "https://example.com/1", description: "Snippet 1", pubDate: "Sat, 01 Mar 2026 00:00:00 GMT" },
+      { title: "Article 2", link: "https://example.com/2", description: "Snippet 2", pubDate: "Mon, 02 Mar 2026 00:00:00 GMT" },
+    ]);
+    (global.fetch as jest.Mock).mockResolvedValueOnce(mockFetchXml(xml));
 
     // Mock Claude synthesis
     anthropicCreate.mockResolvedValue({
@@ -208,6 +225,28 @@ describe("runResearchPipeline", () => {
         sourcesUsed: expect.arrayContaining(["rss"]),
       }),
     });
+  });
+
+  it("processes workspace with Atom feeds", async () => {
+    prismaMock.business.findMany.mockResolvedValue([mockWorkspace] as any);
+
+    const xml = atomXml([
+      { title: "Atom Article 1", link: "https://example.com/atom/1", summary: "Atom snippet", updated: "2026-03-01T00:00:00Z" },
+    ]);
+    (global.fetch as jest.Mock).mockResolvedValueOnce(mockFetchXml(xml));
+
+    anthropicCreate.mockResolvedValue({
+      content: [{ type: "tool_use", name: "synthesize_themes", input: validSynthesis }],
+    });
+    prismaMock.researchSummary.create.mockResolvedValue({ id: "rs-1" } as any);
+
+    const result = await runResearchPipeline(Date.now() + 60_000);
+
+    expect(result).toEqual({ processed: 1 });
+    const createCall = prismaMock.researchSummary.create.mock.calls[0][0];
+    const sourceItems = createCall.data.sourceItems as any[];
+    expect(sourceItems[0].title).toBe("Atom Article 1");
+    expect(sourceItems[0].url).toBe("https://example.com/atom/1");
   });
 
   it("skips unsafe RSS URLs", async () => {
@@ -231,7 +270,8 @@ describe("runResearchPipeline", () => {
     const result = await runResearchPipeline(Date.now() + 60_000);
 
     expect(result).toEqual({ processed: 0 });
-    expect(rssMockParseURL).not.toHaveBeenCalled();
+    // fetch should not have been called for unsafe URLs
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it("skips workspace when no research items are found", async () => {
@@ -274,12 +314,12 @@ describe("runResearchPipeline", () => {
     };
     prismaMock.business.findMany.mockResolvedValue([mockWorkspace, workspace2] as any);
 
-    // First workspace: RSS fails, second: RSS succeeds
-    rssMockParseURL
+    // First workspace: fetch fails, second: fetch succeeds
+    (global.fetch as jest.Mock)
       .mockRejectedValueOnce(new Error("network error"))
-      .mockResolvedValueOnce({
-        items: [{ title: "Article", link: "https://example.com/a", contentSnippet: "text" }],
-      });
+      .mockResolvedValueOnce(mockFetchXml(rss20Xml([
+        { title: "Article", link: "https://example.com/a", description: "text" },
+      ])));
 
     anthropicCreate.mockResolvedValue({
       content: [{ type: "tool_use", name: "synthesize_themes", input: validSynthesis }],
@@ -360,11 +400,9 @@ describe("runResearchPipeline", () => {
   it("calls reportServerError when research pipeline fails for a workspace", async () => {
     prismaMock.business.findMany.mockResolvedValue([mockWorkspace] as any);
 
-    rssMockParseURL.mockResolvedValue({
-      items: [
-        { title: "Article 1", link: "https://example.com/1", contentSnippet: "Snippet 1" },
-      ],
-    });
+    (global.fetch as jest.Mock).mockResolvedValueOnce(mockFetchXml(rss20Xml([
+      { title: "Article 1", link: "https://example.com/1", description: "Snippet 1" },
+    ])));
 
     anthropicCreate.mockResolvedValue({
       content: [{ type: "tool_use", name: "synthesize_themes", input: validSynthesis }],
@@ -392,15 +430,15 @@ describe("runResearchPipeline", () => {
   it("sanitizes HTML from RSS content", async () => {
     prismaMock.business.findMany.mockResolvedValue([mockWorkspace] as any);
 
-    rssMockParseURL.mockResolvedValue({
-      items: [
-        {
-          title: "<script>alert('xss')</script>Clean Title",
-          link: "https://example.com/1",
-          contentSnippet: "<b>Bold</b> text with <a href='#'>link</a>",
-        },
-      ],
-    });
+    // Use CDATA to embed HTML in XML, as real RSS feeds do
+    const xmlWithHtml = `<?xml version="1.0"?><rss version="2.0"><channel><title>Test</title>
+      <item>
+        <title><![CDATA[<script>alert('xss')</script>Clean Title]]></title>
+        <link>https://example.com/1</link>
+        <description><![CDATA[<b>Bold</b> text with <a href='#'>link</a>]]></description>
+      </item>
+    </channel></rss>`;
+    (global.fetch as jest.Mock).mockResolvedValueOnce(mockFetchXml(xmlWithHtml));
 
     anthropicCreate.mockResolvedValue({
       content: [{ type: "tool_use", name: "synthesize_themes", input: validSynthesis }],

@@ -6,7 +6,7 @@
  *   2. Send to Claude for thematic synthesis
  *   3. Store ResearchSummary record
  */
-import Parser from "rss-parser";
+import { parseStringPromise } from "xml2js";
 import { prisma } from "@/lib/db";
 import { env } from "@/env";
 import { synthesizeResearch } from "@/lib/ai/research";
@@ -44,10 +44,46 @@ const WALL_CLOCK_BUFFER_MS = 30_000; // bail if < 30s remaining
 
 // ── RSS fetching ─────────────────────────────────────────────────────────────
 
-const rssParser = new Parser({
-  timeout: RSS_TIMEOUT_MS,
-  headers: { "User-Agent": "AISocial/1.0 (content-research-bot)" },
-});
+const RSS_USER_AGENT = "AISocial/1.0 (content-research-bot)";
+
+interface ParsedFeedItem {
+  title?: string;
+  link?: string;
+  snippet?: string;
+  pubDate?: string;
+}
+
+/** Parse RSS 2.0 or Atom XML into a uniform item list */
+async function parseRssXml(xml: string): Promise<ParsedFeedItem[]> {
+  const result = await parseStringPromise(xml, { explicitArray: false, trim: true });
+
+  // RSS 2.0: result.rss.channel.item
+  if (result.rss?.channel) {
+    const channel = result.rss.channel;
+    const rawItems = channel.item
+      ? Array.isArray(channel.item) ? channel.item : [channel.item]
+      : [];
+    return rawItems.map((item: Record<string, string>) => ({
+      title: item.title,
+      link: item.link,
+      snippet: item.description || item["content:encoded"],
+      pubDate: item.pubDate,
+    }));
+  }
+
+  // Atom: result.feed.entry
+  if (result.feed?.entry) {
+    const rawEntries = Array.isArray(result.feed.entry) ? result.feed.entry : [result.feed.entry];
+    return rawEntries.map((entry: Record<string, unknown>) => ({
+      title: typeof entry.title === "string" ? entry.title : (entry.title as Record<string, string>)?._,
+      link: typeof entry.link === "string" ? entry.link : (entry.link as Record<string, Record<string, string>>)?.$?.href,
+      snippet: typeof entry.summary === "string" ? entry.summary : (entry.summary as Record<string, string>)?._,
+      pubDate: entry.updated || entry.published,
+    }));
+  }
+
+  return [];
+}
 
 /** Block private IPs + localhost to prevent SSRF via user-configured RSS feeds */
 function isSafeUrl(url: string): boolean {
@@ -92,13 +128,22 @@ async function fetchRssFeeds(feeds: string[]): Promise<ResearchItem[]> {
       continue;
     }
     try {
-      const feed = await rssParser.parseURL(feedUrl);
-      for (const item of (feed.items ?? []).slice(0, MAX_ITEMS_PER_SOURCE)) {
+      const response = await fetch(feedUrl, {
+        headers: { "User-Agent": RSS_USER_AGENT },
+        signal: AbortSignal.timeout(RSS_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        console.error(`RSS feed returned ${response.status}: ${feedUrl}`);
+        continue;
+      }
+      const xml = await response.text();
+      const feedItems = await parseRssXml(xml);
+      for (const item of feedItems.slice(0, MAX_ITEMS_PER_SOURCE)) {
         items.push({
           source: "rss",
           title: sanitizeText(item.title),
           url: item.link,
-          snippet: sanitizeText(item.contentSnippet || item.content)?.slice(0, 500),
+          snippet: sanitizeText(item.snippet)?.slice(0, 500),
           publishedAt: item.pubDate,
         });
       }

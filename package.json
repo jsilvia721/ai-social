@@ -31,6 +31,7 @@
     "@prisma/adapter-neon": "^7.4.2",
     "@prisma/adapter-pg": "^7.4.2",
     "@prisma/client": "^7.4.2",
+    "@types/xml2js": "^0.4.14",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.575.0",
@@ -44,10 +45,10 @@
     "react-dom": "19.2.3",
     "recharts": "^3.8.0",
     "replicate": "^1.4.0",
-    "rss-parser": "^3.13.0",
     "sharp": "^0.33.5",
     "tailwind-merge": "^3.5.0",
     "ws": "^8.19.0",
+    "xml2js": "^0.6.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
