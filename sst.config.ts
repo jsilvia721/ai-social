@@ -23,8 +23,8 @@ export default $config({
       metaAppSecret:       new sst.Secret("MetaAppSecret"),
       anthropicKey:        new sst.Secret("AnthropicApiKey"),
       // Replicate: optional — set ReplicateApiToken + ReplicateWebhookSecret secrets to enable video generation
-      replicateApiToken:      new sst.Secret("ReplicateApiToken"),
-      replicateWebhookSecret: new sst.Secret("ReplicateWebhookSecret"),
+      replicateApiToken:      null,
+      replicateWebhookSecret: null,
       tiktokClientId:      new sst.Secret("TiktokClientId"),
       tiktokClientSecret:  new sst.Secret("TiktokClientSecret"),
       tokenEncryptionKey:  new sst.Secret("TokenEncryptionKey"),
@@ -76,7 +76,8 @@ export default $config({
       META_APP_ID:           secrets.metaAppId.value,
       META_APP_SECRET:       secrets.metaAppSecret.value,
       ANTHROPIC_API_KEY:     secrets.anthropicKey.value,
-      // Replicate: video generation disabled until secrets are configured
+      // Replicate: video generation disabled until secrets are configured via `npx sst secret set`
+      // To enable: set ReplicateApiToken and ReplicateWebhookSecret, then change null → new sst.Secret(...) above
       ...(secrets.replicateApiToken ? { REPLICATE_API_TOKEN: secrets.replicateApiToken.value } : {}),
       ...(secrets.replicateWebhookSecret ? { REPLICATE_WEBHOOK_SECRET: secrets.replicateWebhookSecret.value } : {}),
       TIKTOK_CLIENT_ID:      secrets.tiktokClientId.value,
