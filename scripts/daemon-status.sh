@@ -223,7 +223,7 @@ show_status() {
       case "$pid" in *[!0-9]*) continue ;; esac
       case "$issue" in *[!0-9]*|"") continue ;; esac
       case "$start_epoch" in *[!0-9]*|"") continue ;; esac
-      case "$type" in worker|plan) ;; *) continue ;; esac
+      case "$type" in worker|plan|plan-writer|bug-investigate|conflict-resolver) ;; *) continue ;; esac
       # Check if PID is alive
       if kill -0 "$pid" 2>/dev/null; then
         active_count=$((active_count + 1))
@@ -258,8 +258,14 @@ show_status() {
     local hb_str
     hb_str=$(heartbeat_indicator "$issue")
 
-    local log_name="issue-${issue}.log"
-    [ "$type" = "plan" ] && log_name="plan-${issue}.log"
+    local log_name
+    case "$type" in
+      plan) log_name="plan-${issue}.log" ;;
+      plan-writer) log_name="plan-writer-${issue}.log" ;;
+      bug-investigate) log_name="bug-investigate-${issue}.log" ;;
+      conflict-resolver) log_name="conflict-pr-${issue}.log" ;;
+      *) log_name="issue-${issue}.log" ;;
+    esac
     local log_path="$LOG_DIR/$log_name"
 
     local size_str="(missing)"
