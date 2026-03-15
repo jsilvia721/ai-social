@@ -37,6 +37,14 @@ const DAY_LABELS: Record<DayOfWeek, string> = {
 
 const ALL_DAYS: DayOfWeek[] = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 
+function isIntervalUnit(v: string): v is IntervalUnit {
+  return v === "minutes" || v === "hours";
+}
+
+function isDayOfWeek(v: string): v is DayOfWeek {
+  return ALL_DAYS.includes(v as DayOfWeek);
+}
+
 function formatSchedule(config: CronConfigItem): string {
   if (config.scheduleType === "rate" && config.intervalValue && config.intervalUnit) {
     const unit = config.intervalUnit === "hours" && config.intervalValue === 1
@@ -55,7 +63,7 @@ function formatSchedule(config: CronConfigItem): string {
 function formatRelativeTime(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
   const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return "just now";
+  if (minutes < 1) return "just now"; // handles future dates too
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
@@ -245,8 +253,10 @@ function CronCard({ config, onToggle, onSave }: CronCardProps) {
               <Select
                 value={editUnit}
                 onValueChange={(v) => {
-                  setEditUnit(v as IntervalUnit);
-                  setValidationError(null);
+                  if (isIntervalUnit(v)) {
+                    setEditUnit(v);
+                    setValidationError(null);
+                  }
                 }}
               >
                 <SelectTrigger className="w-28 border-zinc-600 bg-zinc-900 text-zinc-200">
@@ -267,7 +277,7 @@ function CronCard({ config, onToggle, onSave }: CronCardProps) {
               </label>
               <Select
                 value={editDay}
-                onValueChange={(v) => setEditDay(v as DayOfWeek)}
+                onValueChange={(v) => { if (isDayOfWeek(v)) setEditDay(v); }}
               >
                 <SelectTrigger className="w-32 border-zinc-600 bg-zinc-900 text-zinc-200">
                   <SelectValue />
@@ -492,10 +502,11 @@ export function CronScheduleManager() {
     }
   }
 
-  function handleConfirmDisable() {
+  async function handleConfirmDisable() {
     if (confirmDialog) {
-      executeToggle(confirmDialog.cronName, false);
+      const cronName = confirmDialog.cronName;
       setConfirmDialog(null);
+      await executeToggle(cronName, false);
     }
   }
 

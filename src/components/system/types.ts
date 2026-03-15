@@ -65,7 +65,7 @@ export interface CronConfigItem {
   syncStatus: SyncStatus;
   updatedAt: string;
   lastRunAt: string | null;
-  lastStatus: string | null;
+  lastStatus: "SUCCESS" | "FAILED" | "RUNNING" | null;
 }
 
 export const CRON_DESCRIPTIONS: Record<CronName, { label: string; description: string }> = {
