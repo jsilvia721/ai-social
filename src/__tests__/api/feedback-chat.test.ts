@@ -378,7 +378,10 @@ describe("POST /api/feedback/chat", () => {
 
     const errorEvents = events.filter((e) => e.type === "error");
     expect(errorEvents).toHaveLength(1);
-    expect(JSON.parse(errorEvents[0].data).error).toBe("API overloaded");
+    // Error message should be generic (not leak Anthropic SDK details)
+    expect(JSON.parse(errorEvents[0].data).error).toBe(
+      "An error occurred processing your request"
+    );
 
     // trackApiCall should record the error
     expect(mockTrackApiCall).toHaveBeenCalledWith(

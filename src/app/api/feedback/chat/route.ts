@@ -43,8 +43,7 @@ const chatRequestSchema = z
         message: "Last message must be from user",
       }),
     context: z.object({
-      pageUrl: z.string().min(1),
-      screenshotUrl: z.string().url().optional(),
+      pageUrl: z.string().url(),
     }),
   });
 
@@ -130,10 +129,14 @@ function createAnthropicStream(
         errorMessage =
           err instanceof Error ? err.message : "Unknown error";
         try {
+          // Send generic error to client; real error logged via trackApiCall
           controller.enqueue(
             encoder.encode(
               formatSSEEvent(
-                JSON.stringify({ type: "error", error: errorMessage })
+                JSON.stringify({
+                  type: "error",
+                  error: "An error occurred processing your request",
+                })
               )
             )
           );
