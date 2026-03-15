@@ -40,7 +40,6 @@ HEARTBEAT_INTERVAL=30      # seconds between heartbeat writes
 STALE_THRESHOLD=300        # seconds before a heartbeat is considered stale (5 min)
 TMUX_MODE="auto"           # "auto" (detect), "on" (force), "off" (disable)
 LABEL_NEEDS_REBASE="needs-manual-rebase"
-CONFLICT_RESOLVER_TIMEOUT=15  # wall-clock timeout in minutes for conflict resolver agent
 
 # --- Parse flags --------------------------------------------------------------
 while getopts "w:i:b:T:t:" opt; do
@@ -764,6 +763,28 @@ EOF
   remove_worker "$self_pid"
 }
 
+# Push a rebased conflict branch and verify CI passes.
+# Handles success/failure via library functions. No worker slot consumed.
+# $1 — PR number
+push_and_verify_conflict() {
+  local pr_number="$1"
+  if push_rebased_branch "$pr_number"; then
+    log "Push succeeded for PR #${pr_number}, polling CI..."
+    local ci_result=0
+    poll_ci_status "$pr_number" 900 || ci_result=$?
+    if [ "$ci_result" -eq 0 ]; then
+      handle_resolution_success "$pr_number"
+      log "Conflict resolved for PR #${pr_number} — CI passed"
+    else
+      handle_resolution_failure "$pr_number" "CI checks failed after rebase"
+      log "CI failed after rebase for PR #${pr_number}"
+    fi
+  else
+    handle_resolution_failure "$pr_number" "Push --force-with-lease failed"
+    log "Push failed for PR #${pr_number}"
+  fi
+}
+
 # --- Conflict resolver agent function -----------------------------------------
 run_conflict_resolver() {
   local pr_number="$1"
@@ -804,21 +825,8 @@ EOF
   local hb_pid
   hb_pid=$(start_heartbeat "$pr_number" "$claude_pid")
 
-  # Wait for Claude to finish (with wall-clock timeout)
-  local timeout_secs=$(( CONFLICT_RESOLVER_TIMEOUT * 60 ))
-  local waited=0
-  while kill -0 "$claude_pid" 2>/dev/null; do
-    if [ "$waited" -ge "$timeout_secs" ]; then
-      conflict_log "$pr_number" "Conflict resolver timed out after ${CONFLICT_RESOLVER_TIMEOUT}m"
-      kill -TERM "$claude_pid" 2>/dev/null || true
-      sleep 5
-      kill -9 "$claude_pid" 2>/dev/null || true
-      break
-    fi
-    sleep 5
-    waited=$((waited + 5))
-  done
-  wait "$claude_pid" 2>/dev/null
+  # Wait for Claude to finish
+  wait "$claude_pid"
   local exit_code=$?
 
   # Stop heartbeat
@@ -1336,55 +1344,37 @@ while true; do
       if [ "$rebase_result" -eq 0 ]; then
         # Clean rebase succeeded — push and poll CI in-process (no worker slot)
         log "Clean rebase succeeded for PR #${conflict_pr}, pushing..."
-        if push_rebased_branch "$conflict_pr"; then
-          log "Push succeeded for PR #${conflict_pr}, polling CI..."
-          ci_result=0
-          poll_ci_status "$conflict_pr" 900 || ci_result=$?
-          if [ "$ci_result" -eq 0 ]; then
-            handle_resolution_success "$conflict_pr"
-            log "Conflict resolved for PR #${conflict_pr} — CI passed"
-          else
-            handle_resolution_failure "$conflict_pr" "CI checks failed after clean rebase"
-            log "CI failed after clean rebase for PR #${conflict_pr}"
-          fi
-        else
-          handle_resolution_failure "$conflict_pr" "Push --force-with-lease failed"
-          log "Push failed for PR #${conflict_pr}"
-        fi
+        push_and_verify_conflict "$conflict_pr"
         cleanup_conflict_worktree "$conflict_pr"
 
       elif [ "$rebase_result" -eq 1 ]; then
-        # Rebase has conflicts
-        worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${conflict_pr}"
+        # Rebase has conflicts — attempt_clean_rebase aborted the rebase, so we
+        # need to go through handle_mechanical_conflicts which re-runs the rebase
+        # to get back into conflicted state and can properly classify conflicts.
+        # handle_mechanical_conflicts checks is_mechanical_conflict internally;
+        # if non-mechanical conflicts exist it aborts and returns 1.
+        mechanical_result=0
+        handle_mechanical_conflicts "$conflict_pr" || mechanical_result=$?
 
-        # Check for excluded files first
-        if is_excluded_conflict "$conflict_pr" "$worktree_path"; then
-          log "PR #${conflict_pr} has excluded file conflicts — labeling for manual rebase"
-          handle_resolution_failure "$conflict_pr" "Conflicts in excluded files (prisma migrations, sst.config.ts, etc.)"
+        if [ "$mechanical_result" -eq 0 ]; then
+          # Mechanical resolution succeeded — push and poll CI in-process
+          log "Mechanical conflict resolution succeeded for PR #${conflict_pr}, pushing..."
+          push_and_verify_conflict "$conflict_pr"
           cleanup_conflict_worktree "$conflict_pr"
         else
-          # Try mechanical (lockfile-only) resolution
-          mechanical_result=0
-          handle_mechanical_conflicts "$conflict_pr" || mechanical_result=$?
+          # Non-mechanical conflicts — check for excluded files before spawning agent.
+          # Re-run rebase to get into conflicted state for is_excluded_conflict check.
+          worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${conflict_pr}"
+          git -C "$worktree_path" rebase origin/main 2>/dev/null || true
 
-          if [ "$mechanical_result" -eq 0 ]; then
-            # Mechanical resolution succeeded — push and poll CI in-process
-            log "Mechanical conflict resolution succeeded for PR #${conflict_pr}, pushing..."
-            if push_rebased_branch "$conflict_pr"; then
-              ci_result=0
-              poll_ci_status "$conflict_pr" 900 || ci_result=$?
-              if [ "$ci_result" -eq 0 ]; then
-                handle_resolution_success "$conflict_pr"
-                log "Mechanical conflict resolved for PR #${conflict_pr} — CI passed"
-              else
-                handle_resolution_failure "$conflict_pr" "CI checks failed after mechanical resolution"
-              fi
-            else
-              handle_resolution_failure "$conflict_pr" "Push --force-with-lease failed after mechanical resolution"
-            fi
+          if is_excluded_conflict "$conflict_pr" "$worktree_path"; then
+            log "PR #${conflict_pr} has excluded file conflicts — labeling for manual rebase"
+            git -C "$worktree_path" rebase --abort 2>/dev/null || true
+            handle_resolution_failure "$conflict_pr" "Conflicts in excluded files (prisma migrations, sst.config.ts, etc.)"
             cleanup_conflict_worktree "$conflict_pr"
           else
-            # Mechanical resolution failed — spawn agent if slot available
+            git -C "$worktree_path" rebase --abort 2>/dev/null || true
+            # Spawn agent if slot available
             active=$(active_worker_count)
             available_slots=$(( MAX_WORKERS - active ))
             if [ "$available_slots" -gt 0 ]; then
