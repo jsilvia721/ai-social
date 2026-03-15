@@ -13,7 +13,14 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-export type CronName = "publish" | "metrics";
+export type CronName =
+  | "publish"
+  | "metrics"
+  | "research"
+  | "briefs"
+  | "fulfill"
+  | "optimize"
+  | "brainstorm";
 
 type TimeUnit = "minute" | "hour" | "day";
 
@@ -59,9 +66,14 @@ function getClient(): EventBridgeClient {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const RULE_ENV_MAP: Record<CronName, string> = {
+export const RULE_ENV_MAP: Record<CronName, string> = {
   publish: "PUBLISH_RULE_NAME",
   metrics: "METRICS_RULE_NAME",
+  research: "RESEARCH_RULE_NAME",
+  briefs: "BRIEFS_RULE_NAME",
+  fulfill: "FULFILL_RULE_NAME",
+  optimize: "OPTIMIZE_RULE_NAME",
+  brainstorm: "BRAINSTORM_RULE_NAME",
 };
 
 function resolveRuleName(cronName: CronName): string | undefined {
