@@ -42,6 +42,30 @@ LOCKFILE_PATTERNS="^package-lock\.json$"
 # Excluded file patterns (should skip to label).
 EXCLUDED_PATTERNS="^(prisma/migrations/|prisma/schema\.prisma|sst\.config\.ts)"
 
+# --- Input validation ---------------------------------------------------------
+
+# Validate that a PR number is a positive integer.
+# $1 — value to check
+# Returns: 0 if valid, 1 if not
+_validate_pr_number() {
+  local val="$1"
+  if ! [[ "$val" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: invalid pr_number: $val" >&2
+    return 1
+  fi
+}
+
+# Validate that a branch name contains only safe characters.
+# $1 — branch name to check
+# Returns: 0 if valid, 1 if not
+_validate_branch_name() {
+  local val="$1"
+  if ! [[ "$val" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+    echo "ERROR: invalid branch name: $val" >&2
+    return 1
+  fi
+}
+
 # --- Logging ------------------------------------------------------------------
 
 # Log a message to the per-PR log file.
@@ -108,6 +132,8 @@ detect_conflicting_prs() {
 attempt_clean_rebase() {
   local pr_number="$1"
   local head_branch="$2"
+  _validate_pr_number "$pr_number" || return 2
+  _validate_branch_name "$head_branch" || return 2
   local worktree_path="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
 
   conflict_log "$pr_number" "Starting clean rebase of $head_branch onto origin/main"
@@ -163,6 +189,7 @@ attempt_clean_rebase() {
 # Returns: 0 = success, 1 = lease rejection or other failure
 push_rebased_branch() {
   local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
   local worktree_path="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
 
   # Determine the branch name from the worktree
@@ -193,6 +220,7 @@ push_rebased_branch() {
 # Returns: 0 = all pass, 1 = any fail, 2 = timeout
 poll_ci_status() {
   local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 2
   local timeout="${2:-900}"
   local poll_interval=30
   local start_time
@@ -290,6 +318,7 @@ is_excluded_conflict() {
 # Returns: 0 = resolved, 1 = non-mechanical conflicts remain
 handle_mechanical_conflicts() {
   local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
   local worktree_path="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
 
   conflict_log "$pr_number" "Attempting mechanical conflict resolution"
@@ -326,7 +355,7 @@ handle_mechanical_conflicts() {
     # Delete the conflicted lockfile and regenerate
     rm -f "${worktree_path}/${file}"
     git -C "$worktree_path" add "$file" 2>/dev/null || true
-    (cd "$worktree_path" && npm install --package-lock-only 2>/dev/null) || true
+    (cd "$worktree_path" && npm install --package-lock-only --ignore-scripts 2>/dev/null) || true
     git -C "$worktree_path" add "$file" 2>/dev/null || true
   done <<< "$conflicted_files"
 
@@ -348,6 +377,7 @@ handle_mechanical_conflicts() {
 # $1 — PR number
 handle_resolution_success() {
   local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
 
   conflict_log "$pr_number" "Resolution succeeded — commenting and cleaning up"
 
@@ -376,6 +406,7 @@ EOF
 handle_resolution_failure() {
   local pr_number="$1"
   local reason="$2"
+  _validate_pr_number "$pr_number" || return 1
 
   ensure_conflict_state_dir
   conflict_log "$pr_number" "Resolution failed: $reason"
@@ -386,6 +417,7 @@ handle_resolution_failure() {
 
   if [ -f "$state_file" ]; then
     attempt_count=$(grep '^attempt_count=' "$state_file" | cut -d= -f2 || echo "0")
+    [[ "$attempt_count" =~ ^[0-9]+$ ]] || attempt_count=0
   fi
 
   attempt_count=$((attempt_count + 1))
@@ -426,6 +458,7 @@ EOF
 # $1 — PR number
 should_retry() {
   local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
   local state_file="$LOG_DIR/conflict-state/pr-${pr_number}.state"
 
   # No state file => first attempt, should try
@@ -435,6 +468,7 @@ should_retry() {
 
   local attempt_count
   attempt_count=$(grep '^attempt_count=' "$state_file" | cut -d= -f2 || echo "0")
+  [[ "$attempt_count" =~ ^[0-9]+$ ]] || attempt_count=0
 
   # Max retries reached
   if [ "$attempt_count" -ge "$CONFLICT_MAX_RETRIES" ]; then
@@ -461,6 +495,7 @@ should_retry() {
 # $1 — PR number
 cleanup_conflict_worktree() {
   local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
   local worktree_path="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
 
   if [ -d "$worktree_path" ]; then
