@@ -9,25 +9,8 @@ export interface UseDropZoneOptions {
   disabled?: boolean;
 }
 
-export interface UseDropZoneReturn {
-  /** Whether a drag is currently over the drop zone. */
-  isDragOver: boolean;
-  /** Props to spread onto the drop zone element. */
-  dropZoneProps: {
-    onDragEnter: (e: DragEvent) => void;
-    onDragOver: (e: DragEvent) => void;
-    onDragLeave: (e: DragEvent) => void;
-    onDrop: (e: DragEvent) => void;
-  };
-}
-
-/**
- * Reusable hook for drag-and-drop file uploads.
- *
- * Handles drag enter/leave/over/drop events, tracks visual state (`isDragOver`),
- * and extracts files from the DataTransfer, calling `onDrop` with them.
- */
-export function useDropZone({ onDrop, disabled = false }: UseDropZoneOptions): UseDropZoneReturn {
+/** Drag-and-drop file upload hook. */
+export function useDropZone({ onDrop, disabled = false }: UseDropZoneOptions) {
   const [dragCounter, setDragCounter] = useState(0);
 
   const handleDragEnter = useCallback(

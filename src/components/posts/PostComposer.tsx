@@ -19,6 +19,7 @@ import type { Platform } from "@/types";
 import { reportError } from "@/lib/error-reporter";
 import { isVideoUrl, isVideoFile, isMovUrl, getFilenameFromUrl, VIDEO_EXTENSIONS } from "@/lib/media-utils";
 import { useDropZone } from "@/hooks/useDropZone";
+import { cn } from "@/lib/utils";
 
 const CHAR_LIMITS: Partial<Record<Platform, number>> = {
   TWITTER: 280,
@@ -538,7 +539,7 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
 
       {/* Media */}
       <Card
-        className={`bg-zinc-900 border-zinc-700 transition-colors ${isDragOver ? "border-violet-500 bg-violet-950/20" : ""}`}
+        className={cn("bg-zinc-900 border-zinc-700 transition-colors", isDragOver && "border-violet-500 bg-violet-950/20")}
         {...dropZoneProps}
       >
         <CardContent className="pt-4 space-y-3">
