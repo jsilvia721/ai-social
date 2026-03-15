@@ -79,6 +79,33 @@ done
 DAEMON_PID_FILE="$LOG_DIR/.issue-daemon.pid"
 echo $$ > "$DAEMON_PID_FILE"
 
+# Kill a tmux session for a given issue number (if it exists).
+# $1 — issue_number
+kill_worker_tmux_session() {
+  local issue_number="$1"
+  if [ "$TMUX_ENABLED" = "true" ] && command -v tmux >/dev/null 2>&1; then
+    local tmux_session="worker-${issue_number}"
+    if tmux has-session -t "$tmux_session" 2>/dev/null; then
+      log "Killing tmux session $tmux_session"
+      tmux kill-session -t "$tmux_session" 2>/dev/null || true
+    fi
+  fi
+}
+
+# Kill all worker tmux sessions by scanning the PID file for issue numbers.
+kill_all_worker_tmux_sessions() {
+  if [ "$TMUX_ENABLED" = "true" ] && command -v tmux >/dev/null 2>&1; then
+    while IFS=: read -r _pid issue _epoch _type; do
+      [ -n "$issue" ] || continue
+      local tmux_session="worker-${issue}"
+      if tmux has-session -t "$tmux_session" 2>/dev/null; then
+        echo "[daemon] Killing tmux session $tmux_session"
+        tmux kill-session -t "$tmux_session" 2>/dev/null || true
+      fi
+    done < "$PID_FILE"
+  fi
+}
+
 cleanup() {
   echo "[daemon] Shutting down..."
   while IFS=: read -r pid _issue _epoch _type; do
@@ -87,6 +114,8 @@ cleanup() {
       kill "$pid" 2>/dev/null || true
     fi
   done < "$PID_FILE"
+  # Kill any orphaned tmux sessions
+  kill_all_worker_tmux_sessions
   # Remove all heartbeat and stale-notified files
   for hb_file in "$LOG_DIR"/heartbeat-* "$LOG_DIR"/.stale-notified-*; do
     [ -f "$hb_file" ] && rm -f "$hb_file"
@@ -446,6 +475,7 @@ EOF
   if detect_rate_limit "$exit_code" "$log_file"; then
     commit_wip_if_needed "$issue_number"
     handle_rate_limit_exit "$issue_number" "$runtime" "Worker" "$log_file"
+    kill_worker_tmux_session "$issue_number"
     clean_worktree "$issue_number"
     remove_worker "$self_pid"
     return
@@ -494,6 +524,7 @@ EOF
     fi
   fi
 
+  kill_worker_tmux_session "$issue_number"
   clean_worktree "$issue_number"
   remove_worker "$self_pid"
 }
@@ -556,6 +587,7 @@ EOF
   # Check for rate limit first
   if detect_rate_limit "$exit_code" "$log_file"; then
     handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor" "$log_file"
+    kill_worker_tmux_session "$issue_number"
     clean_worktree "$issue_number"
     remove_worker "$self_pid"
     return
@@ -577,6 +609,7 @@ EOF
     fi
   fi
 
+  kill_worker_tmux_session "$issue_number"
   clean_worktree "$issue_number"
   remove_worker "$self_pid"
 }
@@ -639,6 +672,7 @@ EOF
   # Check for rate limit first
   if detect_rate_limit "$exit_code" "$log_file"; then
     handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator" "$log_file"
+    kill_worker_tmux_session "$issue_number"
     remove_worker "$self_pid"
     return
   fi
@@ -659,6 +693,7 @@ EOF
     fi
   fi
 
+  kill_worker_tmux_session "$issue_number"
   remove_worker "$self_pid"
 }
 
@@ -720,6 +755,7 @@ EOF
   # Check for rate limit first
   if detect_rate_limit "$exit_code" "$log_file"; then
     handle_rate_limit_exit "$issue_number" "$runtime" "Plan-writer" "$log_file"
+    kill_worker_tmux_session "$issue_number"
     remove_worker "$self_pid"
     return
   fi
@@ -739,6 +775,7 @@ EOF
     fi
   fi
 
+  kill_worker_tmux_session "$issue_number"
   remove_worker "$self_pid"
 }
 
@@ -768,6 +805,7 @@ while true; do
     active=$(active_worker_count)
     if [ "$active" -eq 0 ]; then
       clear_drain_mode
+      kill_all_worker_tmux_sessions
       log "All workers finished. Drain complete, exiting."
       rm -f "$PID_FILE" "$DAEMON_PID_FILE"
       exit 0
@@ -822,6 +860,7 @@ while true; do
       if kill -0 "$w_pid" 2>/dev/null; then
         kill -KILL "$w_pid" 2>/dev/null || true
       fi
+      kill_worker_tmux_session "$w_issue"
       gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
       gh issue comment "$w_issue" --body "Worker timed out after ${elapsed_min} minutes (wall-clock limit: ${WALL_TIMEOUT}m). Check logs at \`$LOG_DIR/issue-${w_issue}.log\`." 2>/dev/null || true
       rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"

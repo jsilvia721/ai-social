@@ -231,7 +231,80 @@ assert_grep "TMUX_ENABLED check in worker spawns" \
   'TMUX_ENABLED' "$DAEMON_SCRIPT"
 
 # ==============================================================================
-# Part 10: Syntax and shellcheck
+# Part 10: Tmux session cleanup
+# ==============================================================================
+echo ""
+echo "Tmux session cleanup:"
+
+# kill_worker_tmux_session helper exists
+assert_grep "kill_worker_tmux_session helper exists" \
+  '^kill_worker_tmux_session\(\)' "$DAEMON_SCRIPT"
+
+# kill_all_worker_tmux_sessions helper exists
+assert_grep "kill_all_worker_tmux_sessions helper exists" \
+  '^kill_all_worker_tmux_sessions\(\)' "$DAEMON_SCRIPT"
+
+# kill_worker_tmux_session checks TMUX_ENABLED
+kill_single_body=$(extract_function 'kill_worker_tmux_session' "$DAEMON_SCRIPT")
+if echo "$kill_single_body" | grep -q 'TMUX_ENABLED'; then
+  pass "kill_worker_tmux_session checks TMUX_ENABLED"
+else
+  fail "kill_worker_tmux_session checks TMUX_ENABLED" "found" "not found"
+fi
+
+# kill_worker_tmux_session uses tmux has-session + kill-session
+if echo "$kill_single_body" | grep -q 'tmux has-session' && echo "$kill_single_body" | grep -q 'tmux kill-session'; then
+  pass "kill_worker_tmux_session uses has-session + kill-session"
+else
+  fail "kill_worker_tmux_session uses has-session + kill-session" "both found" "missing"
+fi
+
+# cleanup() calls kill_all_worker_tmux_sessions
+cleanup_body=$(extract_function 'cleanup' "$DAEMON_SCRIPT")
+if echo "$cleanup_body" | grep -q 'kill_all_worker_tmux_sessions'; then
+  pass "cleanup() calls kill_all_worker_tmux_sessions"
+else
+  fail "cleanup() calls kill_all_worker_tmux_sessions" "found" "not found"
+fi
+
+# run_worker calls kill_worker_tmux_session
+if echo "$run_worker_body" | grep -q 'kill_worker_tmux_session'; then
+  pass "run_worker calls kill_worker_tmux_session"
+else
+  fail "run_worker calls kill_worker_tmux_session" "found" "not found"
+fi
+
+# run_plan_executor calls kill_worker_tmux_session
+if echo "$plan_executor_body" | grep -q 'kill_worker_tmux_session'; then
+  pass "run_plan_executor calls kill_worker_tmux_session"
+else
+  fail "run_plan_executor calls kill_worker_tmux_session" "found" "not found"
+fi
+
+# run_bug_investigator calls kill_worker_tmux_session
+if echo "$bug_investigator_body" | grep -q 'kill_worker_tmux_session'; then
+  pass "run_bug_investigator calls kill_worker_tmux_session"
+else
+  fail "run_bug_investigator calls kill_worker_tmux_session" "found" "not found"
+fi
+
+# run_plan_writer calls kill_worker_tmux_session
+if echo "$plan_writer_body" | grep -q 'kill_worker_tmux_session'; then
+  pass "run_plan_writer calls kill_worker_tmux_session"
+else
+  fail "run_plan_writer calls kill_worker_tmux_session" "found" "not found"
+fi
+
+# Wall-clock timeout handler calls kill_worker_tmux_session
+assert_grep "wall-clock timeout calls kill_worker_tmux_session" \
+  'kill_worker_tmux_session.*w_issue' "$DAEMON_SCRIPT"
+
+# Drain mode exit calls kill_all_worker_tmux_sessions
+assert_grep "drain mode exit calls kill_all_worker_tmux_sessions" \
+  'kill_all_worker_tmux_sessions' "$DAEMON_SCRIPT"
+
+# ==============================================================================
+# Part 11: Syntax and shellcheck
 # ==============================================================================
 echo ""
 echo "Syntax:"
