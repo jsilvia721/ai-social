@@ -63,6 +63,10 @@ mkdir -p "$LOG_DIR"
 source "scripts/lib/daemon-state.sh"
 ensure_state_dir
 
+# Source conflict resolver early — cleanup_stale_conflict_worktrees is called during init
+# shellcheck source=scripts/lib/conflict-resolver.sh
+source "scripts/lib/conflict-resolver.sh"
+
 # Clear stale drain mode from a previous run (drain is runtime-only)
 if is_drain_mode; then
   clear_drain_mode
@@ -247,10 +251,7 @@ fi
 # shellcheck source=scripts/lib/rate-limit-helpers.sh
 source "scripts/lib/rate-limit-helpers.sh"
 
-# Source conflict resolver library (detect_conflicting_prs, attempt_clean_rebase,
-# push_rebased_branch, poll_ci_status, handle_mechanical_conflicts, etc.)
-# shellcheck source=scripts/lib/conflict-resolver.sh
-source "scripts/lib/conflict-resolver.sh"
+# conflict-resolver.sh already sourced during init (before cleanup_stale_conflict_worktrees)
 
 # --- Rate limit exit handler --------------------------------------------------
 # Shared handler for when a worker/executor hits a rate limit.
