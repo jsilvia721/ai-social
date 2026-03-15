@@ -46,6 +46,15 @@ test -f .git/hooks/pre-push && echo "hooks installed" || echo "MISSING — insta
 
 Start with the lower bound. If the loop completes early, that's ideal. If it hits the cap, review what's left before adding more iterations.
 
+## Feature Branch Awareness
+
+When a loop works on a plan-based task, check the issue body for a `<!-- TARGET_BRANCH: ... -->` marker. If present, branch from and push to `origin/<target_branch>` instead of `origin/main`. The default remains `origin/main` when no marker is present. Include the target branch in the loop prompt so it doesn't default to `main`:
+
+```
+Ralph prompt: "This task targets the feature branch <target_branch>.
+Branch from origin/<target_branch>, not origin/main."
+```
+
 ## Two-Phase Workflow (Recommended)
 
 ### Phase 1: Plan in Conversation

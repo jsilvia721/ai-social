@@ -43,6 +43,7 @@ Applies when working with the `/swarm` skill or Agent Teams feature.
 3. **Require architect plan approval** for implementation swarms — never skip this gate
 4. **Define interface contracts first** — workers code to contracts, not to each other's implementations
 5. **Workers report to leader only** — no direct worker-to-worker communication
+6. **Respect `TARGET_BRANCH` markers** — when working on plan-based tasks, each worker's issue may contain a `<!-- TARGET_BRANCH: ... -->` marker. Workers must branch from and target that branch instead of `origin/main`. The default remains `origin/main` when no marker is present.
 
 ## Cleanup Procedures
 
