@@ -5,17 +5,25 @@ jest.mock("@/lib/media");
 jest.mock("@/lib/storage");
 jest.mock("@/lib/alerts");
 jest.mock("@/lib/ai/index");
+jest.mock("@/lib/video");
 
-import { runFulfillment, computeReviewDecision } from "@/lib/fulfillment";
+const mockReplicateGet = jest.fn();
+jest.mock("@/lib/replicate-client", () => ({
+  getReplicateClient: () => ({ predictions: { get: mockReplicateGet } }),
+}));
+
+import { runFulfillment, computeReviewDecision, reconcileStuckRendering } from "@/lib/fulfillment";
 import { generateImage } from "@/lib/media";
 import { uploadBuffer } from "@/lib/storage";
 import { sendFailureAlert } from "@/lib/alerts";
 import { generateVideoStoryboard } from "@/lib/ai/index";
+import { processCompletedPrediction } from "@/lib/video";
 
 const mockGenerateImage = generateImage as jest.MockedFunction<typeof generateImage>;
 const mockUploadBuffer = uploadBuffer as jest.MockedFunction<typeof uploadBuffer>;
 const mockSendFailureAlert = sendFailureAlert as jest.MockedFunction<typeof sendFailureAlert>;
 const mockGenerateVideoStoryboard = generateVideoStoryboard as jest.MockedFunction<typeof generateVideoStoryboard>;
+const mockProcessCompletedPrediction = processCompletedPrediction as jest.MockedFunction<typeof processCompletedPrediction>;
 
 // ── Test helpers ────────────────────────────────────────────────────────────────
 
@@ -766,5 +774,299 @@ describe("runFulfillment", () => {
     // Verify it does NOT include STORYBOARD_REVIEW or RENDERING in the query
     const whereClause = recoveryCall[0]?.where;
     expect(whereClause?.status).toBe("FULFILLING");
+  });
+});
+
+// ── reconcileStuckRendering ──────────────────────────────────────────────────
+
+describe("reconcileStuckRendering", () => {
+  function makeRenderingBrief(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "brief-render-1",
+      businessId: "biz-1",
+      researchSummaryId: null,
+      topic: "Video about AI",
+      rationale: "Trending",
+      suggestedCaption: "Watch this AI video!",
+      aiImagePrompt: null,
+      contentGuidance: null,
+      recommendedFormat: "VIDEO" as const,
+      platform: "YOUTUBE" as const,
+      scheduledFor: new Date("2026-03-09T12:00:00Z"),
+      status: "RENDERING" as const,
+      weekOf: new Date("2026-03-08T00:00:00Z"),
+      sortOrder: 0,
+      retryCount: 0,
+      errorMessage: null,
+      postId: null,
+      videoScript: "Scene 1: ...",
+      videoPrompt: "A cinematic video",
+      storyboardImageUrl: "https://cdn.example.com/thumb.png",
+      replicatePredictionId: "pred-123",
+      createdAt: new Date(),
+      updatedAt: new Date("2026-03-08T11:30:00Z"), // 30 min ago from NOW
+      business: {
+        contentStrategy: {
+          id: "cs-1",
+          businessId: "biz-1",
+          industry: "Marketing",
+          targetAudience: "Marketers",
+          contentPillars: ["AI"],
+          brandVoice: "Professional",
+          optimizationGoal: "ENGAGEMENT",
+          reviewWindowEnabled: false,
+          reviewWindowHours: 24,
+          postingCadence: null,
+          researchSources: null,
+          formatMix: null,
+          optimalTimeWindows: null,
+          accountType: "BUSINESS",
+          visualStyle: null,
+          lastOptimizedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        socialAccounts: [
+          {
+            id: "sa-yt",
+            businessId: "biz-1",
+            platform: "YOUTUBE" as const,
+            platformId: "yt-123",
+            username: "@acme_yt",
+            blotatoAccountId: "blotato-yt",
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      },
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    mockReplicateGet.mockReset();
+    mockProcessCompletedPrediction.mockReset();
+  });
+
+  it("queries RENDERING briefs older than 15 minutes", async () => {
+    prismaMock.contentBrief.findMany.mockResolvedValue([]);
+
+    await reconcileStuckRendering();
+
+    expect(prismaMock.contentBrief.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "RENDERING",
+          updatedAt: { lt: expect.any(Date) },
+        }),
+      })
+    );
+
+    // Verify the threshold is ~15 minutes ago
+    const call = prismaMock.contentBrief.findMany.mock.calls[0][0] as {
+      where: { updatedAt: { lt: Date } };
+    };
+    const threshold = call.where.updatedAt.lt;
+    const expectedThreshold = new Date(NOW.getTime() - 15 * 60 * 1000);
+    expect(threshold.getTime()).toBe(expectedThreshold.getTime());
+  });
+
+  it("calls processCompletedPrediction for succeeded predictions", async () => {
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    mockReplicateGet.mockResolvedValue({
+      id: "pred-123",
+      status: "succeeded",
+      output: "https://replicate.delivery/video.mp4",
+    });
+    mockProcessCompletedPrediction.mockResolvedValue({
+      outcome: "created",
+      postId: "post-1",
+    });
+
+    const result = await reconcileStuckRendering();
+
+    expect(mockReplicateGet).toHaveBeenCalledWith("pred-123");
+    // Atomic claim: RENDERING → FULFILLING
+    expect(prismaMock.contentBrief.updateMany).toHaveBeenCalledWith({
+      where: { id: "brief-render-1", status: "RENDERING" },
+      data: { status: "FULFILLING" },
+    });
+    expect(mockProcessCompletedPrediction).toHaveBeenCalledWith(
+      brief,
+      "https://replicate.delivery/video.mp4"
+    );
+    expect(result).toEqual({ reconciled: 1, failed: 0, skipped: 0 });
+  });
+
+  it("skips succeeded prediction if already claimed by webhook", async () => {
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 0 }); // claim fails
+    mockReplicateGet.mockResolvedValue({
+      id: "pred-123",
+      status: "succeeded",
+      output: "https://replicate.delivery/video.mp4",
+    });
+
+    const result = await reconcileStuckRendering();
+
+    expect(mockProcessCompletedPrediction).not.toHaveBeenCalled();
+    expect(result).toEqual({ reconciled: 0, failed: 0, skipped: 1 });
+  });
+
+  it("counts as failed when processCompletedPrediction returns failed", async () => {
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    mockReplicateGet.mockResolvedValue({
+      id: "pred-123",
+      status: "succeeded",
+      output: "https://replicate.delivery/video.mp4",
+    });
+    mockProcessCompletedPrediction.mockResolvedValue({
+      outcome: "failed",
+      error: "Download failed",
+    });
+
+    const result = await reconcileStuckRendering();
+
+    expect(result).toEqual({ reconciled: 0, failed: 1, skipped: 0 });
+  });
+
+  it("handles array output from succeeded predictions", async () => {
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    mockReplicateGet.mockResolvedValue({
+      id: "pred-123",
+      status: "succeeded",
+      output: ["https://replicate.delivery/video.mp4"],
+    });
+    mockProcessCompletedPrediction.mockResolvedValue({
+      outcome: "created",
+      postId: "post-1",
+    });
+
+    await reconcileStuckRendering();
+
+    expect(mockProcessCompletedPrediction).toHaveBeenCalledWith(
+      brief,
+      "https://replicate.delivery/video.mp4"
+    );
+  });
+
+  it("marks FAILED for failed predictions", async () => {
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    mockReplicateGet.mockResolvedValue({
+      id: "pred-123",
+      status: "failed",
+      error: "GPU out of memory",
+    });
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+
+    const result = await reconcileStuckRendering();
+
+    expect(prismaMock.contentBrief.update).toHaveBeenCalledWith({
+      where: { id: "brief-render-1" },
+      data: {
+        status: "FAILED",
+        errorMessage: "GPU out of memory",
+      },
+    });
+    expect(mockProcessCompletedPrediction).not.toHaveBeenCalled();
+    expect(result).toEqual({ reconciled: 0, failed: 1, skipped: 0 });
+  });
+
+  it("marks FAILED for canceled predictions", async () => {
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    mockReplicateGet.mockResolvedValue({
+      id: "pred-123",
+      status: "canceled",
+      error: null,
+    });
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+
+    const result = await reconcileStuckRendering();
+
+    expect(prismaMock.contentBrief.update).toHaveBeenCalledWith({
+      where: { id: "brief-render-1" },
+      data: {
+        status: "FAILED",
+        errorMessage: "Prediction canceled",
+      },
+    });
+    expect(result).toEqual({ reconciled: 0, failed: 1, skipped: 0 });
+  });
+
+  it("leaves still-processing predictions alone", async () => {
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    mockReplicateGet.mockResolvedValue({
+      id: "pred-123",
+      status: "processing",
+    });
+
+    const result = await reconcileStuckRendering();
+
+    expect(prismaMock.contentBrief.update).not.toHaveBeenCalled();
+    expect(mockProcessCompletedPrediction).not.toHaveBeenCalled();
+    expect(result).toEqual({ reconciled: 0, failed: 0, skipped: 1 });
+  });
+
+  it("leaves starting predictions alone", async () => {
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    mockReplicateGet.mockResolvedValue({
+      id: "pred-123",
+      status: "starting",
+    });
+
+    const result = await reconcileStuckRendering();
+
+    expect(prismaMock.contentBrief.update).not.toHaveBeenCalled();
+    expect(mockProcessCompletedPrediction).not.toHaveBeenCalled();
+    expect(result).toEqual({ reconciled: 0, failed: 0, skipped: 1 });
+  });
+
+  it("skips briefs without replicatePredictionId", async () => {
+    const brief = makeRenderingBrief({ replicatePredictionId: null });
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+
+    const result = await reconcileStuckRendering();
+
+    expect(mockReplicateGet).not.toHaveBeenCalled();
+    // Should mark as FAILED since we can't poll without a prediction ID
+    expect(prismaMock.contentBrief.update).toHaveBeenCalledWith({
+      where: { id: "brief-render-1" },
+      data: {
+        status: "FAILED",
+        errorMessage: "No Replicate prediction ID — cannot reconcile",
+      },
+    });
+    expect(result).toEqual({ reconciled: 0, failed: 1, skipped: 0 });
+  });
+
+  it("handles Replicate API errors gracefully", async () => {
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    mockReplicateGet.mockRejectedValue(new Error("API rate limit"));
+
+    const result = await reconcileStuckRendering();
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("reconcile"),
+      expect.any(Error)
+    );
+    expect(result).toEqual({ reconciled: 0, failed: 0, skipped: 1 });
+    consoleSpy.mockRestore();
   });
 });

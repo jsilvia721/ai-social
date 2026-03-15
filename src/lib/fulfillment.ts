@@ -12,6 +12,8 @@ import { sendFailureAlert } from "@/lib/alerts";
 import { buildImagePrompt } from "@/lib/ai/prompts";
 import { generateVideoStoryboard } from "@/lib/ai/index";
 import { requiresMedia } from "@/lib/platform-rules";
+import { getReplicateClient } from "@/lib/replicate-client";
+import { processCompletedPrediction } from "@/lib/video";
 import type { BriefFormat, ContentBrief, ContentStrategy, SocialAccount } from "@prisma/client";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -39,6 +41,7 @@ type FulfillableBrief = ContentBrief & {
 
 const LOOKAHEAD_MS = 48 * 60 * 60_000; // 48 hours
 const STUCK_THRESHOLD_MS = 10 * 60_000; // 10 minutes
+const RENDERING_STUCK_MS = 15 * 60_000; // 15 minutes
 const WALL_CLOCK_BUDGET_MS = 4.5 * 60_000; // 4.5 minutes (Lambda timeout = 5 min)
 const WALL_CLOCK_BUFFER_MS = 90_000; // reserve for one media gen + upload + tx
 const MAX_RETRIES = 2;
@@ -126,6 +129,121 @@ async function handleVideoStoryboard(
       status: "STORYBOARD_REVIEW",
     },
   });
+}
+
+// ── Rendering Reconciliation ────────────────────────────────────────────────
+
+export interface ReconcileResult {
+  reconciled: number;
+  failed: number;
+  skipped: number;
+}
+
+/**
+ * Poll Replicate for RENDERING briefs stuck > 15 minutes.
+ * Handles succeeded (process video), failed/canceled (mark FAILED),
+ * and still-processing (leave alone).
+ */
+export async function reconcileStuckRendering(): Promise<ReconcileResult> {
+  const stuckBefore = new Date(Date.now() - RENDERING_STUCK_MS);
+  const briefs = await prisma.contentBrief.findMany({
+    where: {
+      status: "RENDERING",
+      updatedAt: { lt: stuckBefore },
+    },
+    include: {
+      business: {
+        include: {
+          contentStrategy: true,
+          socialAccounts: true,
+        },
+      },
+    },
+  });
+
+  const result: ReconcileResult = { reconciled: 0, failed: 0, skipped: 0 };
+
+  for (const brief of briefs) {
+    // No prediction ID — can't poll, mark failed
+    if (!brief.replicatePredictionId) {
+      await prisma.contentBrief.update({
+        where: { id: brief.id },
+        data: {
+          status: "FAILED",
+          errorMessage: "No Replicate prediction ID — cannot reconcile",
+        },
+      });
+      result.failed++;
+      continue;
+    }
+
+    let prediction: { status: string; output?: unknown; error?: unknown };
+    try {
+      prediction = await getReplicateClient().predictions.get(brief.replicatePredictionId);
+    } catch (err) {
+      // API error — skip this brief, try again next cycle
+      console.error(`[fulfillment] Failed to reconcile brief ${brief.id}:`, err);
+      result.skipped++;
+      continue;
+    }
+
+    if (prediction.status === "succeeded") {
+      // Extract output URL — same logic as webhook handler
+      const rawOutput = prediction.output;
+      const outputUrl = Array.isArray(rawOutput) ? rawOutput[0] : rawOutput;
+
+      if (outputUrl && typeof outputUrl === "string") {
+        // Atomic claim: RENDERING → FULFILLING (same pattern as webhook handler)
+        const claimed = await prisma.contentBrief.updateMany({
+          where: { id: brief.id, status: "RENDERING" },
+          data: { status: "FULFILLING" },
+        });
+        if (claimed.count === 0) {
+          result.skipped++; // webhook already processed it
+          continue;
+        }
+        const processResult = await processCompletedPrediction(brief as FulfillableBrief, outputUrl);
+        if (processResult.outcome === "created") {
+          result.reconciled++;
+        } else {
+          result.failed++;
+        }
+      } else {
+        await prisma.contentBrief.update({
+          where: { id: brief.id },
+          data: {
+            status: "FAILED",
+            errorMessage: "Prediction succeeded but no output URL",
+          },
+        });
+        result.failed++;
+      }
+    } else if (
+      prediction.status === "failed" ||
+      prediction.status === "canceled"
+    ) {
+      const errorMsg = typeof prediction.error === "string"
+        ? prediction.error
+        : `Prediction ${prediction.status}`;
+      await prisma.contentBrief.update({
+        where: { id: brief.id },
+        data: {
+          status: "FAILED",
+          errorMessage: errorMsg,
+        },
+      });
+      result.failed++;
+    } else {
+      // Still starting or processing — leave alone
+      result.skipped++;
+    }
+  }
+
+  if (result.reconciled + result.failed > 0) {
+    console.log(`[fulfillment] Rendering reconciliation: ${JSON.stringify(result)}`);
+  }
+
+  return result;
 }
 
 // ── Recovery ───────────────────────────────────────────────────────────────────
@@ -324,7 +442,10 @@ export async function runFulfillment(businessId?: string): Promise<FulfillmentRe
   const now = new Date();
   const lookaheadEnd = new Date(now.getTime() + LOOKAHEAD_MS);
 
-  // Step 0: Recover stuck FULFILLING briefs (> 10 min)
+  // Step 0a: Reconcile stuck RENDERING briefs (> 15 min) — poll Replicate
+  await reconcileStuckRendering();
+
+  // Step 0b: Recover stuck FULFILLING briefs (> 10 min)
   await recoverStuckBriefs();
 
   // Step 1: Query PENDING briefs within 48h window
