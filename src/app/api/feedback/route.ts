@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
   let githubIssueUrl: string | undefined;
 
   try {
-    const title = truncateOnWordBoundary(message, 80);
+    const title = "[Feedback] " + truncateOnWordBoundary(message, 69);
     const userName =
       session.user.name || session.user.email || "Unknown user";
     const body = buildIssueBody({

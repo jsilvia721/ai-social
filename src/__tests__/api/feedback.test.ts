@@ -162,9 +162,9 @@ describe("POST /api/feedback", () => {
       }),
     });
 
-    // Verify createIssue was called with needs-triage label
+    // Verify createIssue was called with [Feedback] prefix and needs-triage label
     expect(mockCreateIssue).toHaveBeenCalledWith(
-      expect.any(String),
+      expect.stringMatching(/^\[Feedback\] /),
       expect.stringContaining("User Feedback"),
       ["needs-triage"]
     );
@@ -324,6 +324,7 @@ describe("POST /api/feedback", () => {
 
     const titleArg = mockCreateIssue.mock.calls[0][0];
     expect(titleArg.length).toBeLessThanOrEqual(80);
+    expect(titleArg).toMatch(/^\[Feedback\] /);
     expect(titleArg).toMatch(/…$/);
   });
 
