@@ -47,7 +47,6 @@ export function buildVideoPrompt(
 ): string {
   const parts = [basePrompt];
 
-  // Account type–specific motion/editing style
   if (creative.accountType === "MEME") {
     parts.push("Motion style: fast cuts, bold visuals, high energy.");
   } else if (creative.accountType === "INFLUENCER") {
@@ -57,7 +56,6 @@ export function buildVideoPrompt(
     parts.push("Motion style: clean transitions, professional, polished.");
   }
 
-  // Visual direction from creative profile
   if (creative.visualStyle) {
     const safe = creative.visualStyle
       .replace(/[\x00-\x1F\x7F]/g, "")
@@ -67,10 +65,7 @@ export function buildVideoPrompt(
     }
   }
 
-  // Platform and aspect ratio hint
   parts.push(`Optimized for ${platform} at ${aspectRatio}.`);
-
-  // Text overlay directive
   parts.push("Leave clear negative space in upper third for text overlay.");
 
   return parts.join(" ");
