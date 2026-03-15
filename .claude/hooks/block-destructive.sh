@@ -26,8 +26,19 @@ fi
 # Use jq to test all destructive patterns against the command.
 # Each pattern is tested with regex inside jq's test() function.
 # Returns "block:<reason>" if any match, "allow" otherwise.
+#
+# Before matching, strip quoted strings and heredoc bodies so that
+# text inside arguments (e.g., PR body mentioning "git push --force")
+# does not trigger false positives.
 RESULT=$(echo "$INPUT" | jq -r '
-  .tool_input.command as $cmd |
+  .tool_input.command
+  # Strip heredoc bodies (everything from <<DELIM to end — content is not commands)
+  | gsub("\\$\\(cat\\s+<<[^)]*\\)"; " ")
+  # Strip double-quoted strings
+  | gsub("\"[^\"]*\""; "\"\"")
+  # Strip single-quoted strings
+  | gsub("'"'"'[^'"'"']*'"'"'"; "'"'"''"'"'")
+  | . as $cmd |
 
   # git push --force (but allow --force-with-lease)
   if ($cmd | test("git\\s+push\\s.*--force(?!-with-lease)")) then "block:git push --force is blocked. Use --force-with-lease instead."
