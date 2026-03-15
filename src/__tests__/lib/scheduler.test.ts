@@ -650,6 +650,35 @@ describe("runMetricsRefresh", () => {
     consoleSpy.mockRestore();
   });
 
+  it("logs a warning when Prisma cleanup of blotatoPostId fails after 404", async () => {
+    const { BlotatoApiError } = await import("@/lib/blotato/client");
+    const publishedPost = {
+      ...makePost({ status: "PUBLISHED" }),
+      blotatoPostId: "blotato-post-abc",
+    };
+    prismaMock.post.findMany.mockResolvedValue([publishedPost] as any);
+    mockGetPostMetrics.mockRejectedValue(
+      new BlotatoApiError("Not found", 404)
+    );
+    prismaMock.post.update.mockRejectedValue(new Error("DB connection lost"));
+
+    const consoleSpy = jest.spyOn(console, "info").mockImplementation();
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+
+    await runMetricsRefresh();
+
+    // Should log a warning about the failed cleanup
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to clear blotatoPostId for post post-1"),
+      expect.stringContaining("DB connection lost")
+    );
+    // Should not crash the batch
+    expect(mockReportServerError).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
   it("updates metricsUpdatedAt for non-404 errors to rotate post to back of queue", async () => {
     const { BlotatoApiError } = await import("@/lib/blotato/client");
     const publishedPost = {

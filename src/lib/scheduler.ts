@@ -268,8 +268,9 @@ export async function runMetricsRefresh(): Promise<{ processed: number }> {
               where: { id: post.id },
               data: { blotatoPostId: null },
             });
-          } catch {
-            // Swallow — DB update must not crash the batch
+          } catch (cleanupErr) {
+            const msg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+            console.warn(`[metrics-refresh] Failed to clear blotatoPostId for post ${post.id}:`, msg);
           }
           return;
         }
