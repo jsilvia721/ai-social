@@ -84,19 +84,20 @@ gh issue comment <number> --body "<!-- progress:step_2_plan -->**[Progress]** Pl
 ## Step 3: Implement with TDD
 
 1. **Branch:** `git fetch origin && git checkout -b issue-<number>-<slug> origin/main`
-2. **Write tests first**, then implementation.
-3. **Incremental commits** — commit after each logical unit of work.
-4. **Wall-clock budget (~50 minutes).** The daemon enforces a 60-minute timeout. Note your start time and check elapsed time after each major step. **Partial progress with commits is infinitely more valuable than complete progress with no commits.** If you reach minute 40–45 and work remains:
+2. **Docker pre-flight check:** Before running any Docker command (`docker compose`, `docker ps`, `prisma migrate dev`), first run `timeout 5 docker info >/dev/null 2>&1`. If it fails or times out, Docker is unavailable — do NOT attempt Docker commands as they will hang indefinitely. Instead: write migration SQL manually or skip Docker-dependent validation steps and note them as blocked in the test plan.
+3. **Write tests first**, then implementation.
+4. **Incremental commits** — commit after each logical unit of work.
+5. **Wall-clock budget (~50 minutes).** The daemon enforces a 60-minute timeout. Note your start time and check elapsed time after each major step. **Partial progress with commits is infinitely more valuable than complete progress with no commits.** If you reach minute 40–45 and work remains:
    - Stage everything including new files: `git add .`
    - Commit with a WIP message describing what's done and what's left.
    - Push the branch: `git push -u origin HEAD`
    - Comment on the issue with a progress summary (what's done, what's remaining, where to pick up).
    - Stop gracefully — do not attempt to rush remaining work.
-5. **Verify:** Run `npm run ci:check`. Fix failures, then post progress:
+6. **Verify:** Run `npm run ci:check`. Fix failures, then post progress:
    ```bash
    gh issue comment <number> --body "<!-- progress:step_3_implement -->**[Progress]** Implementation complete, ci:check passing. Starting review."
    ```
-6. **E2E tests** if you changed UI or API routes: `npx playwright test`
+7. **E2E tests** if you changed UI or API routes: `npx playwright test`
 
 ## Step 4: Review Gate (Complexity-Dependent)
 
@@ -168,7 +169,9 @@ Execute every test plan item before creating the PR.
 
 ### 1. Infrastructure Setup
 
-Start local services if needed: database (`docker compose up -d db`, wait for `pg_isready -h localhost -p 5432`), dev server (`npm run dev`).
+Before starting any Docker-dependent services, run `timeout 5 docker info >/dev/null 2>&1` to verify Docker is available. If it fails or times out, Docker is unavailable — do NOT attempt `docker compose`, `docker ps`, or `prisma migrate dev` commands as they will hang indefinitely. Instead, skip Docker-dependent validation steps and note them as blocked in the test plan.
+
+If Docker is available, start local services if needed: database (`docker compose up -d db`, wait for `pg_isready -h localhost -p 5432`), dev server (`npm run dev`).
 
 ### 2. Execute Each Test Plan Item
 

@@ -76,6 +76,33 @@ for hb_file in "$LOG_DIR"/heartbeat-* "$LOG_DIR"/.stale-notified-*; do
   [ -f "$hb_file" ] && rm -f "$hb_file"
 done
 
+# Clean up PR-check marker files from a previous run
+for pr_file in "$LOG_DIR"/.pr-check-*; do
+  [ -f "$pr_file" ] && rm -f "$pr_file"
+done
+
+# Reap orphaned Docker processes (ppid=1, indicating parent daemon died)
+for orphan_pid in $(pgrep -f "docker (compose|ps|info)" 2>/dev/null || true); do
+  [ -z "$orphan_pid" ] && continue
+  orphan_ppid=$(ps -o ppid= -p "$orphan_pid" 2>/dev/null | tr -d ' ')
+  if [ "$orphan_ppid" = "1" ]; then
+    orphan_cmd=$(ps -o args= -p "$orphan_pid" 2>/dev/null || echo "unknown")
+    echo "[daemon] Killing orphaned Docker process PID $orphan_pid: $orphan_cmd"
+    kill -TERM "$orphan_pid" 2>/dev/null || true
+  fi
+done
+
+# Reap orphaned Claude shell wrappers (ppid=1)
+for orphan_pid in $(pgrep -f "shell-snapshots/snapshot-zsh" 2>/dev/null || true); do
+  [ -z "$orphan_pid" ] && continue
+  orphan_ppid=$(ps -o ppid= -p "$orphan_pid" 2>/dev/null | tr -d ' ')
+  if [ "$orphan_ppid" = "1" ]; then
+    orphan_cmd=$(ps -o args= -p "$orphan_pid" 2>/dev/null || echo "unknown")
+    echo "[daemon] Killing orphaned Claude shell wrapper PID $orphan_pid: $orphan_cmd"
+    kill -TERM "$orphan_pid" 2>/dev/null || true
+  fi
+done
+
 DAEMON_PID_FILE="$LOG_DIR/.issue-daemon.pid"
 echo $$ > "$DAEMON_PID_FILE"
 
@@ -88,6 +115,29 @@ kill_worker_tmux_session() {
     if tmux has-session -t "$tmux_session" 2>/dev/null; then
       log "Killing tmux session $tmux_session"
       tmux kill-session -t "$tmux_session" 2>/dev/null || true
+    fi
+  fi
+}
+
+# Kill an entire process group (SIGTERM, wait 10s, SIGKILL fallback).
+# $1 — PID of the process group leader
+kill_process_group() {
+  local pid="$1"
+  # Attempt process group kill first; fall back to regular kill
+  if ! kill -TERM -- -"$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
+  fi
+  # Poll for exit (10s max, 1s intervals)
+  local i=0
+  while [ "$i" -lt 10 ]; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 1
+    i=$((i + 1))
+  done
+  # Still alive — SIGKILL
+  if kill -0 "$pid" 2>/dev/null; then
+    if ! kill -KILL -- -"$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
     fi
   fi
 }
@@ -110,8 +160,8 @@ cleanup() {
   echo "[daemon] Shutting down..."
   while IFS=: read -r pid _issue _epoch _type; do
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      echo "[daemon] Stopping worker PID $pid"
-      kill "$pid" 2>/dev/null || true
+      echo "[daemon] Stopping worker PID $pid (process group kill)"
+      kill_process_group "$pid"
     fi
   done < "$PID_FILE"
   # Kill any orphaned tmux sessions
@@ -119,6 +169,10 @@ cleanup() {
   # Remove all heartbeat and stale-notified files
   for hb_file in "$LOG_DIR"/heartbeat-* "$LOG_DIR"/.stale-notified-*; do
     [ -f "$hb_file" ] && rm -f "$hb_file"
+  done
+  # Remove PR-check and PR-discovery marker files
+  for pr_file in "$LOG_DIR"/.pr-check-* "$LOG_DIR"/.pr-discovered-*; do
+    [ -f "$pr_file" ] && rm -f "$pr_file"
   done
   rm -f "$PID_FILE" "$DAEMON_PID_FILE" "$CIRCUIT_BREAKER_FILE"
   exit 0
@@ -401,7 +455,8 @@ run_worker() {
       local claude_pid
       claude_pid=$(tmux list-panes -t "$tmux_session" -F '#{pane_pid}' 2>/dev/null | head -1)
     else
-      (cd "$worktree_path" && $STDBUF_PREFIX claude -p "$resume_prompt" \
+      (cd "$worktree_path" && perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
+        $STDBUF_PREFIX claude -p "$resume_prompt" \
         --agent "issue-worker" \
         --resume "$session_id" \
         --max-budget-usd "$MAX_BUDGET" \
@@ -441,7 +496,8 @@ EOF
 )"
 
     # shellcheck disable=SC2086
-    $STDBUF_PREFIX claude -p "$prompt" \
+    perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
+      $STDBUF_PREFIX claude -p "$prompt" \
       --agent "issue-worker" \
       --worktree \
       $TMUX_FLAGS \
@@ -546,7 +602,8 @@ run_plan_executor() {
 
   # Run Claude in background so heartbeat can run concurrently
   # shellcheck disable=SC2086
-  $STDBUF_PREFIX claude -p "$(cat <<EOF
+  perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
+    $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the plan-executor agent. Process approved plan issue #${issue_number}.
 
 Read the full issue with: gh issue view ${issue_number} --json title,body,labels
@@ -631,7 +688,8 @@ run_bug_investigator() {
 
   # Run Claude in background so heartbeat can run concurrently
   # shellcheck disable=SC2086
-  $STDBUF_PREFIX claude -p "$(cat <<EOF
+  perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
+    $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the bug-investigator agent. Investigate bug issue #${issue_number}.
 
 Read the full issue with: gh issue view ${issue_number} --json title,body,labels
@@ -714,7 +772,8 @@ run_plan_writer() {
 
   # Run Claude in background so heartbeat can run concurrently
   # shellcheck disable=SC2086
-  $STDBUF_PREFIX claude -p "$(cat <<EOF
+  perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
+    $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the plan-writer agent. Write a full plan for stub plan issue #${issue_number}.
 
 Read the full issue with: gh issue view ${issue_number} --json title,body,labels
@@ -851,21 +910,53 @@ while true; do
       elapsed_min=$(( elapsed / 60 ))
       log "Worker PID $w_pid for issue #${w_issue} exceeded wall-clock timeout (${elapsed_min}m > ${WALL_TIMEOUT}m)"
       commit_wip_if_needed "$w_issue"
-      kill -TERM "$w_pid" 2>/dev/null || true
-      # Poll for graceful exit (10s max, 1s intervals to stay responsive to signals)
-      for _ in 1 2 3 4 5 6 7 8 9 10; do
-        kill -0 "$w_pid" 2>/dev/null || break
-        sleep 1
-      done
-      if kill -0 "$w_pid" 2>/dev/null; then
-        kill -KILL "$w_pid" 2>/dev/null || true
-      fi
+      kill_process_group "$w_pid"
       kill_worker_tmux_session "$w_issue"
       gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
       gh issue comment "$w_issue" --body "Worker timed out after ${elapsed_min} minutes (wall-clock limit: ${WALL_TIMEOUT}m). Check logs at \`$LOG_DIR/issue-${w_issue}.log\`." 2>/dev/null || true
-      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
+      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}" "$LOG_DIR/.pr-check-${w_issue}" "$LOG_DIR/.pr-discovered-${w_issue}"
       remove_worker "$w_pid"
       continue
+    fi
+
+    # Completion detection: check if a PR already exists for workers running >5 min
+    if [ "$w_type" = "worker" ] && [ "$elapsed" -ge 300 ]; then
+      pr_check_file="$LOG_DIR/.pr-check-${w_issue}"
+      do_pr_check=false
+      if [ ! -f "$pr_check_file" ]; then
+        do_pr_check=true
+      else
+        last_pr_check=$(cat "$pr_check_file" 2>/dev/null || echo "0")
+        pr_check_age=$(( now_epoch - last_pr_check ))
+        if [ "$pr_check_age" -ge 300 ]; then
+          do_pr_check=true
+        fi
+      fi
+      if [ "$do_pr_check" = "true" ]; then
+        echo "$now_epoch" > "$pr_check_file"
+        existing_pr=$(gh pr list --search "Closes #${w_issue}" --state all --json url -q '.[0].url' 2>/dev/null || echo "")
+        if [ -n "$existing_pr" ]; then
+          # PR exists — check if discovery marker exists
+          pr_discovery_file="$LOG_DIR/.pr-discovered-${w_issue}"
+          if [ ! -f "$pr_discovery_file" ]; then
+            # First discovery — record the epoch
+            echo "$now_epoch" > "$pr_discovery_file"
+            log "PR discovered for issue #${w_issue}: $existing_pr (will force-kill in 5 min if still running)"
+          else
+            discovery_epoch=$(cat "$pr_discovery_file" 2>/dev/null || echo "$now_epoch")
+            since_discovery=$(( now_epoch - discovery_epoch ))
+            if [ "$since_discovery" -ge 300 ]; then
+              log "Worker PID $w_pid for issue #${w_issue} still running >5 min after PR discovered — force-killing"
+              kill_process_group "$w_pid"
+              kill_worker_tmux_session "$w_issue"
+              gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_DONE" 2>/dev/null || true
+              rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}" "$pr_check_file" "$pr_discovery_file"
+              remove_worker "$w_pid"
+              continue
+            fi
+          fi
+        fi
+      fi
     fi
 
     # Stale heartbeat check (only notify once per worker via marker file)
