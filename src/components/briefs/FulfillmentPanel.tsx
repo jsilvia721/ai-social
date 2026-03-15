@@ -5,10 +5,11 @@ import { X, Copy, Check, Upload, Calendar, Loader2, Film } from "lucide-react";
 import { isVideoUrl, isMovUrl, getFilenameFromUrl } from "@/lib/media-utils";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { PLATFORM_COLORS, PLATFORM_LABELS } from "@/lib/platforms";
 import { reportError } from "@/lib/error-reporter";
 import { useDropZone } from "@/hooks/useDropZone";
+import type { Platform } from "@/types";
 
-type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK" | "TIKTOK" | "YOUTUBE";
 type BriefFormat = "TEXT" | "IMAGE" | "CAROUSEL" | "VIDEO";
 
 interface Brief {
@@ -29,22 +30,6 @@ interface SocialAccount {
   platform: Platform;
   username: string;
 }
-
-const PLATFORM_LABELS: Record<Platform, string> = {
-  TWITTER: "Twitter",
-  INSTAGRAM: "Instagram",
-  FACEBOOK: "Facebook",
-  TIKTOK: "TikTok",
-  YOUTUBE: "YouTube",
-};
-
-const PLATFORM_COLORS: Record<Platform, string> = {
-  TWITTER: "text-sky-400",
-  INSTAGRAM: "text-pink-500",
-  FACEBOOK: "text-blue-500",
-  TIKTOK: "text-zinc-100",
-  YOUTUBE: "text-red-500",
-};
 
 interface FulfillmentPanelProps {
   brief: Brief;
