@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
 const messageSchema = z.object({
-  role: z.string().min(1),
+  role: z.enum(["user", "assistant", "system"]),
   content: z.string().min(1),
 });
 

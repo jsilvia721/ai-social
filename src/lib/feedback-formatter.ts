@@ -24,7 +24,7 @@ export interface FormattedIssue {
 /**
  * Truncate text to maxLen on a word boundary, appending "…" if truncated.
  */
-function truncateOnWordBoundary(text: string, maxLen: number): string {
+export function truncateOnWordBoundary(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
   const truncated = text.slice(0, maxLen - 1);
   const lastSpace = truncated.lastIndexOf(" ");

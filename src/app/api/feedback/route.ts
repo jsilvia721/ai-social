@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { createIssue } from "@/lib/github";
 import { reportServerError } from "@/lib/server-error-reporter";
 import { assertSafeMediaUrl } from "@/lib/blotato/ssrf-guard";
+import { truncateOnWordBoundary } from "@/lib/feedback-formatter";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
@@ -14,19 +15,6 @@ const feedbackSchema = z.object({
   screenshotUrl: z.string().url().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
-
-/**
- * Truncate text to maxLen on a word boundary, appending "…" if truncated.
- */
-function truncateOnWordBoundary(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text;
-  const truncated = text.slice(0, maxLen - 1);
-  const lastSpace = truncated.lastIndexOf(" ");
-  if (lastSpace > 0) {
-    return truncated.slice(0, lastSpace) + "…";
-  }
-  return truncated + "…";
-}
 
 function buildIssueBody(params: {
   userName: string;
