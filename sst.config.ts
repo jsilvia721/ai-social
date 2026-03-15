@@ -105,7 +105,7 @@ export default $config({
     // Next.js Lambda for runtime EventBridge schedule management.
     // Type helper: SST Ion Cron exposes .nodes.rule at runtime but
     // local tsc doesn't have full SST platform types.
-    type CronWithNodes = { nodes: { rule: { name: string } } };
+    type CronWithNodes = { nodes: { rule: { name: string; arn: string } } };
 
     // ── Cron: Post Publisher (every 1 minute) ─────────────────────
     const publishCron = new sst.aws.Cron("PostPublisher", {
@@ -210,7 +210,15 @@ export default $config({
             "events:DisableRule",
             "events:DescribeRule",
           ],
-          resources: ["arn:aws:events:*:*:rule/*"],
+          resources: [
+            (publishCron as unknown as CronWithNodes).nodes.rule.arn,
+            (metricsCron as unknown as CronWithNodes).nodes.rule.arn,
+            (researchCron as unknown as CronWithNodes).nodes.rule.arn,
+            (briefsCron as unknown as CronWithNodes).nodes.rule.arn,
+            (fulfillCron as unknown as CronWithNodes).nodes.rule.arn,
+            (optimizeCron as unknown as CronWithNodes).nodes.rule.arn,
+            (brainstormCron as unknown as CronWithNodes).nodes.rule.arn,
+          ],
         },
       ],
       transform: {
