@@ -165,11 +165,20 @@ async function fetchCronRuns(
       };
     });
 
+    // Query CronConfig for enabled flags
+    const cronConfigs = await prisma.cronConfig.findMany({
+      select: { cronName: true, enabled: true },
+    });
+    const enabledMap = new Map(
+      cronConfigs.map((c) => [c.cronName, c.enabled])
+    );
+
     const cronStatuses: CronStatusInfo[] = Object.entries(cronMap).map(
       ([cronName, data]) => ({
         cronName,
         lastRunAt: data.lastRunAt,
         successRate: data.total > 0 ? data.successCount / data.total : 0,
+        enabled: enabledMap.get(cronName) ?? true,
       })
     );
 
