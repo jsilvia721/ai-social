@@ -1,10 +1,10 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { PLATFORM_COLORS, PLATFORM_LABELS } from "@/lib/platforms";
+import type { Platform, BriefStatus } from "@/types";
 
-type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK" | "TIKTOK" | "YOUTUBE";
 type BriefFormat = "TEXT" | "IMAGE" | "CAROUSEL" | "VIDEO";
-type BriefStatus = "PENDING" | "FULFILLED" | "EXPIRED" | "CANCELLED";
 
 interface Brief {
   id: string;
@@ -15,22 +15,6 @@ interface Brief {
   status: BriefStatus;
   suggestedCaption: string;
 }
-
-const PLATFORM_COLORS: Record<Platform, string> = {
-  TWITTER: "text-sky-400",
-  INSTAGRAM: "text-pink-500",
-  FACEBOOK: "text-blue-500",
-  TIKTOK: "text-zinc-100",
-  YOUTUBE: "text-red-500",
-};
-
-const PLATFORM_LABELS: Record<Platform, string> = {
-  TWITTER: "Twitter",
-  INSTAGRAM: "Instagram",
-  FACEBOOK: "Facebook",
-  TIKTOK: "TikTok",
-  YOUTUBE: "YouTube",
-};
 
 const FORMAT_BADGE: Record<BriefFormat, { label: string; className: string }> = {
   TEXT: { label: "Text", className: "bg-zinc-700 text-zinc-300" },
@@ -44,6 +28,8 @@ const STATUS_BADGE: Record<BriefStatus, { label: string; className: string }> = 
   FULFILLED: { label: "Fulfilled", className: "bg-emerald-900/50 text-emerald-300" },
   EXPIRED: { label: "Expired", className: "bg-zinc-700 text-zinc-400" },
   CANCELLED: { label: "Cancelled", className: "bg-zinc-700 text-zinc-400" },
+  STORYBOARD_REVIEW: { label: "Storyboard Review", className: "bg-violet-900/50 text-violet-300" },
+  RENDERING: { label: "Rendering", className: "bg-blue-900/50 text-blue-300" },
 };
 
 function getUrgency(scheduledFor: string): { label: string; className: string } | null {

@@ -6,9 +6,9 @@ import { FulfillmentPanel } from "@/components/briefs/FulfillmentPanel";
 import { StoryboardReviewCard } from "@/components/briefs/StoryboardReviewCard";
 import { ClipboardList, CheckCircle2, ListFilter } from "lucide-react";
 
-type BriefStatus = "PENDING" | "FULFILLED" | "EXPIRED" | "CANCELLED" | "STORYBOARD_REVIEW" | "RENDERING";
+import type { Platform, BriefStatus } from "@/types";
+
 type BriefFormat = "TEXT" | "IMAGE" | "CAROUSEL" | "VIDEO";
-type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK" | "TIKTOK" | "YOUTUBE";
 
 interface Brief {
   id: string;

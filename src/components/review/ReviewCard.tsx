@@ -6,14 +6,7 @@ import { Check, X, Save, Clock, Image as ImageIcon, Film } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isVideoUrl, isMovUrl, getFilenameFromUrl } from "@/lib/media-utils";
 import type { Platform } from "@/types";
-
-const PLATFORM_COLORS: Record<Platform, string> = {
-  TWITTER: "bg-sky-400/10 text-sky-400 border-sky-400/20",
-  INSTAGRAM: "bg-pink-500/10 text-pink-500 border-pink-500/20",
-  FACEBOOK: "bg-blue-500/10 text-blue-500 border-blue-500/20",
-  TIKTOK: "bg-zinc-100/10 text-zinc-100 border-zinc-100/20",
-  YOUTUBE: "bg-red-500/10 text-red-500 border-red-500/20",
-};
+import { PLATFORM_BADGE_COLORS } from "@/lib/platforms";
 
 export interface ReviewPost {
   id: string;
@@ -142,7 +135,7 @@ export function ReviewCard({ post }: { post: ReviewPost }) {
         <span
           className={cn(
             "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium w-fit",
-            PLATFORM_COLORS[post.socialAccount.platform]
+            PLATFORM_BADGE_COLORS[post.socialAccount.platform]
           )}
         >
           {post.socialAccount.platform}

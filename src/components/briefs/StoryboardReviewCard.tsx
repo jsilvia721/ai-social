@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { PLATFORM_COLORS, PLATFORM_LABELS } from "@/lib/platforms";
+import type { Platform } from "@/types";
 
-type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK" | "TIKTOK" | "YOUTUBE";
 type StoryboardStatus = "STORYBOARD_REVIEW" | "RENDERING";
 
 export interface StoryboardBrief {
@@ -17,22 +18,6 @@ export interface StoryboardBrief {
   status: StoryboardStatus;
   updatedAt: string;
 }
-
-const PLATFORM_LABELS: Record<Platform, string> = {
-  TWITTER: "Twitter",
-  INSTAGRAM: "Instagram",
-  FACEBOOK: "Facebook",
-  TIKTOK: "TikTok",
-  YOUTUBE: "YouTube",
-};
-
-const PLATFORM_COLORS: Record<Platform, string> = {
-  TWITTER: "text-sky-400",
-  INSTAGRAM: "text-pink-500",
-  FACEBOOK: "text-blue-500",
-  TIKTOK: "text-zinc-100",
-  YOUTUBE: "text-red-500",
-};
 
 function formatElapsed(updatedAt: string): string {
   const diffMs = Date.now() - new Date(updatedAt).getTime();

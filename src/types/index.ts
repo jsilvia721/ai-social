@@ -1,5 +1,6 @@
 export type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK" | "TIKTOK" | "YOUTUBE";
 export type PostStatus = "DRAFT" | "SCHEDULED" | "PUBLISHING" | "PUBLISHED" | "FAILED" | "PENDING_REVIEW" | "RETRYING";
+export type BriefStatus = "PENDING" | "FULFILLED" | "EXPIRED" | "CANCELLED" | "STORYBOARD_REVIEW" | "RENDERING";
 
 export interface SocialAccount {
   id: string;
