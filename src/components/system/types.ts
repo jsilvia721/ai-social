@@ -10,6 +10,7 @@ export interface CronStatusInfo {
   cronName: string;
   lastRunAt: string | null;
   successRate: number;
+  enabled: boolean;
 }
 
 export interface CronRunRow {

@@ -13,8 +13,8 @@ describe("SystemStatusCards", () => {
 
   it("renders a card per cron", () => {
     const crons = [
-      { cronName: "publish", lastRunAt: new Date().toISOString(), successRate: 1 },
-      { cronName: "metrics", lastRunAt: new Date().toISOString(), successRate: 0.9 },
+      { cronName: "publish", lastRunAt: new Date().toISOString(), successRate: 1, enabled: true },
+      { cronName: "metrics", lastRunAt: new Date().toISOString(), successRate: 0.9, enabled: true },
     ];
     render(<SystemStatusCards crons={crons} />);
     expect(screen.getByText("publish")).toBeInTheDocument();
@@ -23,7 +23,7 @@ describe("SystemStatusCards", () => {
 
   it("shows success rate as percentage", () => {
     const crons = [
-      { cronName: "publish", lastRunAt: new Date().toISOString(), successRate: 0.85 },
+      { cronName: "publish", lastRunAt: new Date().toISOString(), successRate: 0.85, enabled: true },
     ];
     render(<SystemStatusCards crons={crons} />);
     expect(screen.getByText("Success rate: 85%")).toBeInTheDocument();
@@ -31,11 +31,38 @@ describe("SystemStatusCards", () => {
 
   it("shows Unknown when lastRunAt is null", () => {
     const crons = [
-      { cronName: "publish", lastRunAt: null, successRate: 0 },
+      { cronName: "publish", lastRunAt: null, successRate: 0, enabled: true },
     ];
     render(<SystemStatusCards crons={crons} />);
     expect(screen.getByText("Unknown")).toBeInTheDocument();
     expect(screen.getByText("Last run: Never")).toBeInTheDocument();
+  });
+
+  it("shows Paused for disabled crons", () => {
+    const crons = [
+      { cronName: "metrics", lastRunAt: new Date().toISOString(), successRate: 1, enabled: false },
+    ];
+    render(<SystemStatusCards crons={crons} />);
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+  });
+
+  it("shows Paused instead of Unknown for disabled cron with no runs", () => {
+    const crons = [
+      { cronName: "publish", lastRunAt: null, successRate: 0, enabled: false },
+    ];
+    render(<SystemStatusCards crons={crons} />);
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
+    expect(screen.queryByText("Down")).not.toBeInTheDocument();
+  });
+
+  it("shows normal health status for enabled crons", () => {
+    const crons = [
+      { cronName: "publish", lastRunAt: new Date().toISOString(), successRate: 1, enabled: true },
+    ];
+    render(<SystemStatusCards crons={crons} />);
+    expect(screen.getByText("Healthy")).toBeInTheDocument();
+    expect(screen.queryByText("Paused")).not.toBeInTheDocument();
   });
 });
 

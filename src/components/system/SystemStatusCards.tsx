@@ -8,13 +8,14 @@ interface SystemStatusCardsProps {
   crons: CronStatusInfo[];
 }
 
-type HealthLevel = "healthy" | "degraded" | "down" | "unknown";
+type HealthLevel = "healthy" | "degraded" | "down" | "unknown" | "paused";
 
 const HEALTH_STYLES: Record<HealthLevel, string> = {
   healthy: "bg-emerald-500/10 text-emerald-400 border-emerald-700",
   degraded: "bg-amber-500/10 text-amber-400 border-amber-700",
   down: "bg-red-500/10 text-red-400 border-red-700",
   unknown: "bg-zinc-500/10 text-zinc-400 border-zinc-700",
+  paused: "bg-blue-500/10 text-blue-400 border-blue-700",
 };
 
 const HEALTH_LABELS: Record<HealthLevel, string> = {
@@ -22,6 +23,7 @@ const HEALTH_LABELS: Record<HealthLevel, string> = {
   degraded: "Degraded",
   down: "Down",
   unknown: "Unknown",
+  paused: "Paused",
 };
 
 // Thresholds in ms
@@ -75,7 +77,7 @@ export function SystemStatusCards({ crons }: SystemStatusCardsProps) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {crons.map((cron) => {
-        const health = getHealthLevel(cron.cronName, cron.lastRunAt);
+        const health = cron.enabled === false ? "paused" : getHealthLevel(cron.cronName, cron.lastRunAt);
         return (
           <Card
             key={cron.cronName}
