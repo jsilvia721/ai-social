@@ -1,5 +1,4 @@
 ---
-# Always-loaded: no paths filter — applies to all autonomous loop usage
 ---
 
 # Autonomous Loops (Ralph Wiggum)
@@ -76,7 +75,7 @@ Write prompts with **measurable exit criteria** and **explicit constraints**:
 - **Measurable criteria:** "All tests in `src/__tests__/api/posts.test.ts` pass" — not "fix the posts API"
 - **Explicit constraints:** "Do not modify files outside `src/lib/blotato/`" — prevents scope creep
 - **TDD-first:** "Write the test first, verify it fails, then implement" — matches project convention
-- **XML completion promise:** Include a clear done condition the loop can recognize:
+- **Clear done condition:** Include an explicit completion signal the loop can recognize:
   ```
   When ci:check passes and all acceptance criteria are met,
   commit with message "feat: <description>" and stop.
@@ -108,7 +107,7 @@ After every autonomous loop session, verify:
   - Suppressed lint rules or skipped tests
   - Hardcoded values that should be configurable
   - Removed code that shouldn't have been removed
-- [ ] **Visual check** — if UI was touched, open the page in a browser
+- [ ] **Visual check** — if UI was incidentally touched, open the page in a browser (UI-heavy work should not use loops)
 - [ ] **Regression check** — run the full test suite, not just the files the loop touched
 
 ## Common Failure Modes
