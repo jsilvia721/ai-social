@@ -51,3 +51,9 @@ jobs:
 
       - name: Deploy with SST
         run: npx sst deploy --stage ${{ inputs.stage }}
+
+      - name: Sync cron config to EventBridge
+        env:
+          DATABASE_URL: ${{ inputs.stage == 'production' && secrets.PROD_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+        run: npx tsx scripts/sync-cron-config.ts
+        continue-on-error: true
