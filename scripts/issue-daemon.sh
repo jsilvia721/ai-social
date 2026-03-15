@@ -81,27 +81,21 @@ for pr_file in "$LOG_DIR"/.pr-check-*; do
   [ -f "$pr_file" ] && rm -f "$pr_file"
 done
 
-# Reap orphaned Docker processes (ppid=1, indicating parent daemon died)
-for orphan_pid in $(pgrep -f "docker (compose|ps|info)" 2>/dev/null || true); do
-  [ -z "$orphan_pid" ] && continue
-  orphan_ppid=$(ps -o ppid= -p "$orphan_pid" 2>/dev/null | tr -d ' ')
-  if [ "$orphan_ppid" = "1" ]; then
-    orphan_cmd=$(ps -o args= -p "$orphan_pid" 2>/dev/null || echo "unknown")
-    echo "[daemon] Killing orphaned Docker process PID $orphan_pid: $orphan_cmd"
-    kill -TERM "$orphan_pid" 2>/dev/null || true
-  fi
-done
-
-# Reap orphaned Claude shell wrappers (ppid=1)
-for orphan_pid in $(pgrep -f "shell-snapshots/snapshot-zsh" 2>/dev/null || true); do
-  [ -z "$orphan_pid" ] && continue
-  orphan_ppid=$(ps -o ppid= -p "$orphan_pid" 2>/dev/null | tr -d ' ')
-  if [ "$orphan_ppid" = "1" ]; then
-    orphan_cmd=$(ps -o args= -p "$orphan_pid" 2>/dev/null || echo "unknown")
-    echo "[daemon] Killing orphaned Claude shell wrapper PID $orphan_pid: $orphan_cmd"
-    kill -TERM "$orphan_pid" 2>/dev/null || true
-  fi
-done
+# Reap orphaned processes matching a pattern with ppid=1 (parent daemon died).
+# $1 — pgrep pattern, $2 — label for log messages
+reap_orphans() {
+  local pattern="$1" label="$2"
+  for orphan_pid in $(pgrep -f "$pattern" 2>/dev/null || true); do
+    [ -z "$orphan_pid" ] && continue
+    orphan_ppid=$(ps -o ppid= -p "$orphan_pid" 2>/dev/null | tr -d ' ')
+    if [ "$orphan_ppid" = "1" ]; then
+      echo "[daemon] Killing orphaned $label PID $orphan_pid: $(ps -o args= -p "$orphan_pid" 2>/dev/null || echo unknown)"
+      kill -TERM "$orphan_pid" 2>/dev/null || true
+    fi
+  done
+}
+reap_orphans "docker (compose|ps|info)" "Docker process"
+reap_orphans "shell-snapshots/snapshot-zsh" "Claude shell wrapper"
 
 DAEMON_PID_FILE="$LOG_DIR/.issue-daemon.pid"
 echo $$ > "$DAEMON_PID_FILE"
