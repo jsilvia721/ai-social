@@ -56,6 +56,7 @@ function mockFeedback(overrides: Partial<Feedback> = {}): Feedback {
     status: "PENDING",
     githubIssueNumber: null,
     githubIssueUrl: null,
+    conversationHistory: null,
     metadata: null,
     createdAt: new Date("2026-03-14T00:00:00Z"),
     updatedAt: new Date("2026-03-14T00:00:00Z"),
