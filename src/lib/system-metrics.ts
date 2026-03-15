@@ -92,8 +92,12 @@ export async function checkCronEnabled(
     });
     // Fail open if config row doesn't exist
     return { enabled: config?.enabled ?? true };
-  } catch {
-    // Fail open on DB error
+  } catch (err) {
+    // Fail open on DB error — log for observability
+    console.warn(
+      `[checkCronEnabled] DB error for "${cronName}", failing open:`,
+      err
+    );
     return { enabled: true };
   }
 }

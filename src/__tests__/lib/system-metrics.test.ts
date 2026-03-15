@@ -209,6 +209,7 @@ describe("withCronTracking", () => {
   });
 
   it("executes handler when checkCronEnabled fails open (DB error)", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation();
     prismaMock.cronConfig.findUnique.mockRejectedValue(
       new Error("DB down")
     );
@@ -218,5 +219,6 @@ describe("withCronTracking", () => {
     await withCronTracking("publish", handler);
 
     expect(handler).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });

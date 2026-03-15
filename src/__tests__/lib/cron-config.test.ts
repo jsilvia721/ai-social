@@ -59,12 +59,18 @@ describe("checkCronEnabled", () => {
     expect(result).toEqual({ enabled: true });
   });
 
-  it("returns enabled: true on DB error (fail open)", async () => {
+  it("returns enabled: true on DB error (fail open) and logs warning", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation();
     prismaMock.cronConfig.findUnique.mockRejectedValue(
       new Error("DB connection lost")
     );
 
     const result = await checkCronEnabled("publish");
     expect(result).toEqual({ enabled: true });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[checkCronEnabled]"),
+      expect.any(Error)
+    );
+    warnSpy.mockRestore();
   });
 });
