@@ -3,8 +3,11 @@
  * Mock with jest.mock("@/lib/media") in tests, or shouldMockExternalApis() for dev/staging.
  */
 
+import { Readable } from "stream";
 import Replicate from "replicate";
+import { Upload } from "@aws-sdk/lib-storage";
 import { env } from "@/env";
+import { s3, bucket, getPublicUrl } from "@/lib/storage";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
 
 export interface GeneratedImage {
@@ -85,6 +88,59 @@ export async function generateImage(prompt: string): Promise<GeneratedImage> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// ── Allowed hostnames for video download ────────────────────────────────────
+
+const ALLOWED_VIDEO_HOSTNAMES = new Set([
+  "replicate.delivery",
+  "pbxt.replicate.delivery",
+]);
+
+/**
+ * Download a video from Replicate and stream-upload it to S3 via multipart.
+ * Uses @aws-sdk/lib-storage Upload for ~16MB memory footprint (8MB parts, queue of 2).
+ *
+ * @param sourceUrl — URL to the video file (must be on replicate.delivery)
+ * @param s3Key    — destination key in S3
+ * @returns public URL of the uploaded video
+ */
+export async function downloadAndUploadVideo(
+  sourceUrl: string,
+  s3Key: string
+): Promise<string> {
+  // Validate source URL hostname
+  const parsed = new URL(sourceUrl);
+  if (!ALLOWED_VIDEO_HOSTNAMES.has(parsed.hostname)) {
+    throw new Error(`Untrusted video source hostname: ${parsed.hostname}`);
+  }
+
+  const response = await fetch(sourceUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to download video: HTTP ${response.status}`);
+  }
+
+  if (!response.body) {
+    throw new Error("Video response has no body");
+  }
+
+  // Stream the response body to S3 via multipart upload
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Node.js ReadableStream type mismatch with Web Streams API
+  const nodeStream = Readable.fromWeb(response.body as any);
+  const upload = new Upload({
+    client: s3,
+    params: {
+      Bucket: bucket,
+      Key: s3Key,
+      Body: nodeStream,
+      ContentType: "video/mp4",
+    },
+    partSize: 8 * 1024 * 1024, // 8MB
+    queueSize: 2,
+  });
+
+  await upload.done();
+  return getPublicUrl(s3Key);
 }
 
 /** Deterministic mock image for dev/staging/testing */
