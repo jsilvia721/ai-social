@@ -118,8 +118,17 @@ jobs:
               );
 
               if (featureBranchComment) {
-                const branchMatch = featureBranchComment.body.match(/<!-- FEATURE_BRANCH: (.+?) -->/);
-                if (branchMatch) {
+                // Only trust markers from repo members (not arbitrary commenters)
+                const trustedAssociations = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+                const authorAssoc = featureBranchComment.author_association;
+                // Strict branch name: alphanumeric, hyphens, slashes, dots, underscores
+                const branchMatch = trustedAssociations.includes(authorAssoc)
+                  ? featureBranchComment.body.match(/<!-- FEATURE_BRANCH: ([\w\-\/.]+) -->/)
+                  : null;
+
+                if (!trustedAssociations.includes(authorAssoc)) {
+                  console.log(`#${planIssue.number}: FEATURE_BRANCH marker from untrusted author (${authorAssoc}), skipping.`);
+                } else if (branchMatch) {
                   const featureBranch = branchMatch[1].trim();
                   console.log(`#${planIssue.number}: found FEATURE_BRANCH marker: ${featureBranch}`);
 
@@ -137,10 +146,13 @@ jobs:
                     console.log(`  Failed to fetch PRs: ${err.message}`);
                   }
 
+                  // Sanitize text for safe Markdown table embedding
+                  const sanitizeMd = (str) => str.replace(/[|[\]]/g, '\\$&');
+
                   const taskRows = [];
                   for (const workNum of workIssueNumbers) {
                     const cached = workIssueData.get(workNum);
-                    const workTitle = cached ? cached.title : `(issue #${workNum})`;
+                    const workTitle = cached ? sanitizeMd(cached.title) : `(issue #${workNum})`;
 
                     const closesPattern = new RegExp(`(?:closes|fixes|resolves)\\s+#${workNum}\\b`, 'i');
                     const linkedPr = mergedPrs.find(pr =>
