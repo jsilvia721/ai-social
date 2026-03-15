@@ -1,0 +1,243 @@
+name: Auto-merge Feature Branch PRs
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.repository.id == github.event.repository.id
+    concurrency:
+      group: auto-merge-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Find PR for workflow run
+        id: find-pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const headBranch = context.payload.workflow_run.head_branch;
+            const headSha = context.payload.workflow_run.head_sha;
+
+            console.log(`Looking for PR from branch: ${headBranch} with SHA: ${headSha}`);
+
+            // Find PRs matching this workflow run
+            const { data: prs } = await github.rest.pulls.list({
+              owner, repo,
+              state: 'open',
+              head: `${owner}:${headBranch}`,
+              per_page: 5
+            });
+
+            if (prs.length === 0) {
+              console.log('No open PR found for this workflow run.');
+              core.setOutput('found', 'false');
+              return;
+            }
+
+            // Verify SHA matches to avoid acting on stale workflow runs
+            const pr = prs.find(p => p.head.sha === headSha) || null;
+            if (!pr) {
+              console.log(`No open PR found with HEAD SHA ${headSha}. The branch may have moved. Skipping.`);
+              core.setOutput('found', 'false');
+              return;
+            }
+
+            if (prs.length > 1) {
+              console.log(`WARNING: Found ${prs.length} open PRs for branch ${headBranch}. Using PR #${pr.number} (SHA match).`);
+            }
+
+            const baseBranch = pr.base.ref;
+
+            console.log(`Found PR #${pr.number}: "${pr.title}" targeting ${baseBranch}`);
+
+            // CRITICAL GUARD: Only act on PRs targeting feat/plan-* branches
+            if (!baseBranch.startsWith('feat/plan-')) {
+              console.log(`Base branch "${baseBranch}" does not match feat/plan-* pattern. Skipping.`);
+              core.setOutput('found', 'false');
+              return;
+            }
+
+            // Security: Only auto-merge PRs from trusted authors (not forks)
+            const trustedAssociations = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+            if (!trustedAssociations.includes(pr.author_association)) {
+              console.log(`PR author association "${pr.author_association}" is not trusted. Skipping auto-merge.`);
+              core.setOutput('found', 'false');
+              return;
+            }
+
+            // Security: Reject PRs from forks
+            if (pr.head.repo && pr.head.repo.fork) {
+              console.log('PR is from a fork. Skipping auto-merge.');
+              core.setOutput('found', 'false');
+              return;
+            }
+
+            // Validate branch name contains only safe characters (prevent injection)
+            if (!/^[a-zA-Z0-9_\-\/\.]+$/.test(baseBranch)) {
+              console.log(`Base branch "${baseBranch}" contains unsafe characters. Skipping.`);
+              core.setOutput('found', 'false');
+              return;
+            }
+
+            core.setOutput('found', 'true');
+            core.setOutput('pr_number', pr.number.toString());
+            core.setOutput('base_branch', baseBranch);
+
+      - name: Checkout repository
+        if: steps.find-pr.outputs.found == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.find-pr.outputs.base_branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync main into feature branch
+        if: steps.find-pr.outputs.found == 'true'
+        id: sync-main
+        env:
+          BASE_BRANCH: ${{ steps.find-pr.outputs.base_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "Syncing origin/main into ${BASE_BRANCH}..."
+
+          git fetch origin main
+          PRE_MERGE_SHA=$(git rev-parse HEAD)
+          git merge origin/main --no-edit || {
+            echo "merge_conflict=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Failed to merge origin/main into ${BASE_BRANCH}. Continuing with PR merge attempt."
+            git merge --abort
+            exit 0
+          }
+
+          # Push the sync if there were changes
+          if [ "$(git rev-parse HEAD)" != "$PRE_MERGE_SHA" ]; then
+            git push origin "${BASE_BRANCH}"
+            echo "Pushed main sync to ${BASE_BRANCH}"
+          else
+            echo "Feature branch already up to date with main"
+          fi
+
+          echo "merge_conflict=false" >> "$GITHUB_OUTPUT"
+
+      - name: Merge PR
+        if: steps.find-pr.outputs.found == 'true'
+        id: merge-pr
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+        run: |
+          echo "Merging PR #${PR_NUMBER} with merge commit strategy..."
+          gh pr merge "${PR_NUMBER}" --merge
+          echo "PR #${PR_NUMBER} merged successfully."
+
+      - name: Handle merge failure
+        if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+        run: |
+          gh pr comment "${PR_NUMBER}" --body "$(cat <<'EOF'
+⚠️ **Auto-merge failed** — this PR has merge conflicts with the base branch.
+
+The daemon conflict resolver will attempt to resolve this automatically. If not resolved, manual intervention is needed:
+
+1. Check out the PR branch locally
+2. Merge or rebase against the base branch
+3. Resolve conflicts and push
+
+_This comment was posted by the auto-merge workflow._
+EOF
+          )"
+
+          gh pr edit "${PR_NUMBER}" --add-label "merge-conflict"
+          exit 1
+
+      - name: Close referenced issues
+        if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outcome == 'success'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = process.env.PR_NUMBER;
+
+            const prNum = parseInt(prNumber, 10);
+            if (isNaN(prNum)) {
+              core.setFailed('PR_NUMBER environment variable is missing or invalid.');
+              return;
+            }
+
+            // Fetch the PR to get the latest body
+            const { data: pr } = await github.rest.pulls.get({
+              owner, repo,
+              pull_number: prNum
+            });
+
+            const text = `${pr.title}\n${pr.body || ''}`;
+
+            // Parse "Closes #N", "Fixes #N", "Resolves #N" from PR body and title
+            const closingPattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
+            const issueNumbers = new Set();
+            let match;
+            while ((match = closingPattern.exec(text)) !== null) {
+              issueNumbers.add(parseInt(match[1], 10));
+            }
+
+            if (issueNumbers.size === 0) {
+              console.log('No issue references found in PR body. Skipping issue closure.');
+              return;
+            }
+
+            console.log(`Found issue references: ${[...issueNumbers].map(n => '#' + n).join(', ')}`);
+
+            for (const issueNum of issueNumbers) {
+              try {
+                // Check if the issue is already closed
+                const { data: issue } = await github.rest.issues.get({
+                  owner, repo,
+                  issue_number: issueNum
+                });
+
+                if (issue.state === 'closed') {
+                  console.log(`Issue #${issueNum} is already closed. Skipping.`);
+                  continue;
+                }
+
+                await github.rest.issues.update({
+                  owner, repo,
+                  issue_number: issueNum,
+                  state: 'closed',
+                  state_reason: 'completed'
+                });
+
+                await github.rest.issues.createComment({
+                  owner, repo,
+                  issue_number: issueNum,
+                  body: `Closed via auto-merge of PR #${prNumber} into feature branch.`
+                });
+
+                console.log(`Closed issue #${issueNum}`);
+              } catch (error) {
+                console.log(`Failed to close issue #${issueNum}: ${error.message}`);
+              }
+            }
