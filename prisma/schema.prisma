@@ -340,7 +340,7 @@ model ApiCall {
 model CronRun {
   id             String    @id @default(cuid())
   cronName       String    // "publish"|"metrics"|"research"|"briefs"|"fulfill"|"optimize"|"brainstorm"
-  status         String    // "RUNNING"|"SUCCESS"|"FAILED"
+  status         String    // "RUNNING"|"SUCCESS"|"FAILED"|"SKIPPED"
   itemsProcessed Int?
   durationMs     Int?
   error          String?   @db.Text
