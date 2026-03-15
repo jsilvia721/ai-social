@@ -1,6 +1,5 @@
 ---
-paths:
-  - ".claude/skills/swarm/**"
+description: Agent Teams usage guide — when to use, coordination, cleanup, rollback
 ---
 
 # Agent Teams Usage Guide
@@ -20,30 +19,13 @@ Applies when working with the `/swarm` skill or Agent Teams feature.
 - Standard research, review, or code generation
 - Any task where a single agent can hold all context
 
-## Decision Matrix
+## Quick Reference
 
-| Situation | Tool | Why |
-|-----------|------|-----|
-| Single issue, clear approach | `issue-worker` | Minimal overhead, full context |
-| Multiple independent issues from a plan | `/batch-work` | Parallel execution, no coordination needed |
-| Coordinated multi-stream feature (shared interfaces) | `/swarm implement` | Architect designs contracts, workers implement in parallel |
-| Multi-perspective code review | `/swarm review` | Security + TypeScript + simplicity in parallel |
-| External + internal research | `/swarm research` | Best practices + codebase patterns in parallel |
-
-## Team Size Guidelines
-
-- **Research:** 2-3 agents (one external, one internal, optionally one domain-specific)
-- **Implementation:** 3-4 agents (one architect + 2-3 workers). Max 4.
-- **Review:** 2-3 agents (each with a different review focus)
-
-**Start small.** 3 focused teammates outperform 5 scattered ones. Each teammate should have 5-6 well-defined tasks.
-
-## Task Sizing
-
-Aim for **5-6 tasks per teammate** with clear file ownership boundaries. Tasks should be:
-- Independently testable (each passes `ci:check` alone)
-- Non-overlapping in file ownership (no two workers editing the same file)
-- Completable in a single session (~30-60 minutes each)
+- Single issue → `issue-worker`
+- Multiple independent issues → `/batch-work`
+- Coordinated multi-stream feature → `/swarm implement`
+- Multi-perspective review → `/swarm review`
+- External + internal research → `/swarm research`
 
 ## Known Limitations
 

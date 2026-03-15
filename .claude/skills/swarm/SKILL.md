@@ -27,8 +27,6 @@ Before spawning any agents, run these checks:
 
 **When to use:** Gathering external best practices and internal codebase patterns for a feature or decision.
 
-**Cost estimate:** ~$5-10 (haiku model, 2 agents, short sessions)
-
 **Team composition:**
 - `researcher-1`: `best-practices-researcher` subagent — external docs, framework patterns, community conventions
 - `researcher-2`: `repo-research-analyst` subagent — internal codebase patterns, `docs/solutions/`, existing conventions
@@ -46,8 +44,6 @@ Before spawning any agents, run these checks:
 ### 2. Implementation Swarm (3-4 agents, with plan approval gate)
 
 **When to use:** Coordinated multi-stream feature where 3+ implementation streams need to agree on interfaces.
-
-**Cost estimate:** ~$15-40 (sonnet model, 3-4 agents, longer sessions)
 
 **Team composition:**
 - `architect`: Plan subagent — designs interface contracts and file ownership boundaries
@@ -73,8 +69,6 @@ Before spawning any agents, run these checks:
 
 **When to use:** Multi-perspective code review where security, type safety, and simplicity all matter.
 
-**Cost estimate:** ~$5-15 (sonnet model, 3 agents, focused review sessions)
-
 **Team composition:**
 - `security`: `security-sentinel` subagent
 - `typescript`: `kieran-typescript-reviewer` subagent
@@ -91,48 +85,6 @@ Before spawning any agents, run these checks:
 4. Synthesize and deduplicate findings into a unified review report
 5. Group by severity: Critical > High > Medium > Low
 
-## Shutdown Sequence
+## Governance
 
-After all agents complete (or on abort):
-
-1. Request shutdown of all active agents
-2. Wait for agent completion confirmation
-3. Verify team directory is cleaned up: `ls ~/.claude/teams/ 2>/dev/null`
-4. If cleanup incomplete, run emergency cleanup (see below)
-
-## Emergency Cleanup
-
-If a swarm crashes or hangs:
-
-```bash
-tmux kill-session -t claude-swarm 2>/dev/null
-rm -rf ~/.claude/teams/<team-name> ~/.claude/tasks/<team-name>
-```
-
-Replace `<team-name>` with the actual team name, or use `*` to clean all:
-
-```bash
-rm -rf ~/.claude/teams/* ~/.claude/tasks/*
-```
-
-## Anti-Patterns
-
-**Do not do these:**
-
-- **Single-stream swarms:** If work is sequential or fits in one session, use `issue-worker` directly. Swarms add overhead.
-- **Worker broadcasting:** Workers report to the leader only. Never have workers communicate directly with each other.
-- **Spawning without a task list:** Workers without a defined task list will explore aimlessly and burn tokens. Always have the architect create a plan first.
-- **Skipping the architect gate:** For implementation swarms, the architect's plan MUST be approved before workers start. Unapproved plans lead to wasted parallel work.
-- **Nesting swarms:** Never launch a swarm from within a swarm. Never mix `/swarm` with `/batch-work` in the same session. One team per session.
-
-## Disabling Agent Teams
-
-To disable, remove the env var from `.claude/settings.json`:
-
-```json
-{
-  "env": {}
-}
-```
-
-No other cleanup needed — the skill and rules file are inert without the feature flag.
+For coordination best practices, cleanup/emergency procedures, rollback instructions, and when to use Agent Teams vs CE sub-agents, see `.claude/rules/agent-teams.md`.
