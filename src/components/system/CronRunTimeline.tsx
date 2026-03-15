@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Pagination } from "@/components/ui/pagination";
 import { cn } from "@/lib/utils";
@@ -31,16 +31,15 @@ function formatDate(iso: string): string {
 
 export function CronRunTimeline({ runs }: CronRunTimelineProps) {
   const [page, setPage] = useState(1);
-  const totalPages = Math.ceil(runs.length / PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(runs.length / PAGE_SIZE));
 
-  // Reset to last valid page when runs array shrinks (e.g., time range change)
-  useEffect(() => {
-    if (page > totalPages && totalPages > 0) {
-      setPage(totalPages);
-    }
-  }, [page, totalPages]);
+  // Clamp page to valid range when runs array shrinks (e.g., time range change)
+  const effectivePage = Math.min(page, totalPages);
 
-  const paginatedRuns = runs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const paginatedRuns = useMemo(
+    () => runs.slice((effectivePage - 1) * PAGE_SIZE, effectivePage * PAGE_SIZE),
+    [runs, effectivePage]
+  );
 
   if (runs.length === 0) {
     return (
@@ -96,7 +95,7 @@ export function CronRunTimeline({ runs }: CronRunTimelineProps) {
       {totalPages > 1 && (
         <div className="flex items-center justify-between pt-4">
           <span className="text-sm text-zinc-500">{runs.length} total runs</span>
-          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+          <Pagination page={effectivePage} totalPages={totalPages} onPageChange={setPage} />
         </div>
       )}
     </div>
