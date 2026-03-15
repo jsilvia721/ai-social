@@ -47,6 +47,7 @@ See `.claude/rules/visual-testing.md` for Playwright MCP, design-iterator, desig
 - **Always use `/create-issue` skill for GitHub issues** — never use `gh issue create` directly.
 - **Workspace hygiene** — clean up temp files before finishing. Run `git status` to verify no stray files remain.
 - **After any correction** — update auto-memory with the pattern to prevent recurrence.
+- **Auto-compound after non-trivial work** — after completing any bug fix or Moderate+ feature, run `/ce:compound` to document the solution in `docs/solutions/` before declaring done.
 
 ### Core Principles
 - **Simplicity first** — minimal code impact.
@@ -78,6 +79,9 @@ Unified publishing via `src/lib/blotato/`. Connect flows in `src/app/api/connect
 
 ### AI
 `src/lib/ai/index.ts` uses `claude-sonnet-4-6`. `generatePostContent()` generates platform-aware post copy.
+
+### Hooks
+`.claude/hooks/` contains bash scripts that enforce Hard Rules as gates. Wired via `.claude/settings.json`. Hook scripts parse stdin JSON with `jq` and exit 2 to block dangerous operations. See individual scripts for blocked patterns.
 
 ### Infrastructure (SST v3 Ion)
 `sst.config.ts`: Next.js on Lambda/CloudFront, S3 bucket, two EventBridge crons, 14 SST secrets from SSM Parameter Store. Secrets mapped to Lambda env vars explicitly (not via `link`).
