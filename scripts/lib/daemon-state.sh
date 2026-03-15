@@ -155,11 +155,6 @@ get_worker_start() {
 # Status values: detected, rerunning, rerun_ok, filed, resolved
 # Override path via CI_MONITOR_STATE_FILE env var for testing.
 
-# Helper: resolve the CI monitor state file path.
-_ci_monitor_file() {
-  echo "${CI_MONITOR_STATE_FILE:-${DAEMON_STATE_DIR}/ci-monitor-state}"
-}
-
 # Track a new CI failure run.
 # $1 — run ID, $2 — initial status, $3 — fingerprint, $4 — workflow name
 # $5 — issue number (optional), $6 — rerun epoch (optional)
@@ -173,8 +168,7 @@ ci_monitor_track() {
   local detected_epoch
   detected_epoch=$(date +%s)
   ensure_state_dir
-  local file
-  file=$(_ci_monitor_file)
+  local file="${CI_MONITOR_STATE_FILE:-${DAEMON_STATE_DIR}/ci-monitor-state}"
   echo "${run_id}|${status}|${fingerprint}|${detected_epoch}|${rerun_epoch}|${issue}|${workflow}" >> "$file"
 }
 
@@ -182,8 +176,7 @@ ci_monitor_track() {
 # $1 — run ID. Outputs status string or empty.
 ci_monitor_status() {
   local run_id="$1"
-  local file
-  file=$(_ci_monitor_file)
+  local file="${CI_MONITOR_STATE_FILE:-${DAEMON_STATE_DIR}/ci-monitor-state}"
   [ -f "$file" ] || return 0
   awk -F'|' -v rid="$run_id" '$1 == rid { print $2 }' "$file" | tail -1
 }
@@ -197,28 +190,25 @@ ci_monitor_update() {
   local new_status="$2"
   local new_issue="${3:-}"
   local new_rerun="${4:-}"
-  local file
-  file=$(_ci_monitor_file)
+  local file="${CI_MONITOR_STATE_FILE:-${DAEMON_STATE_DIR}/ci-monitor-state}"
   [ -f "$file" ] || return 0
 
   local tmp
   tmp=$(mktemp)
   while IFS='|' read -r rid st fp det re iss wf; do
     if [ "$rid" = "$run_id" ]; then
+      st="$new_status"
       [ -n "$new_issue" ] && iss="$new_issue"
       [ -n "$new_rerun" ] && re="$new_rerun"
-      echo "${rid}|${new_status}|${fp}|${det}|${re}|${iss}|${wf}"
-    else
-      echo "${rid}|${st}|${fp}|${det}|${re}|${iss}|${wf}"
     fi
+    echo "${rid}|${st}|${fp}|${det}|${re}|${iss}|${wf}"
   done < "$file" > "$tmp"
   mv "$tmp" "$file"
 }
 
 # Prune entries older than 7 days and cap at 100 entries (newest kept).
 ci_monitor_prune() {
-  local file
-  file=$(_ci_monitor_file)
+  local file="${CI_MONITOR_STATE_FILE:-${DAEMON_STATE_DIR}/ci-monitor-state}"
   [ -f "$file" ] || return 0
 
   local cutoff
@@ -249,8 +239,7 @@ ci_monitor_prune() {
 # Returns 0 if found, 1 otherwise.
 ci_monitor_fingerprint_open() {
   local fingerprint="$1"
-  local file
-  file=$(_ci_monitor_file)
+  local file="${CI_MONITOR_STATE_FILE:-${DAEMON_STATE_DIR}/ci-monitor-state}"
   [ -f "$file" ] || return 1
   awk -F'|' -v fp="$fingerprint" '$2 == "filed" && $3 == fp { found=1; exit } END { exit !found }' "$file"
 }
