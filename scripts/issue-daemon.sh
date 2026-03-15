@@ -403,9 +403,22 @@ EOF
     pr_url=$(gh pr list --search "${issue_number}" --json url,body -q ".[] | select(.body | test(\"#${issue_number}\")) | .url" 2>/dev/null | head -1 || echo "")
   fi
 
+  # Fetch current labels and state to detect already-complete issues
+  local issue_info
+  issue_info=$(gh issue view "$issue_number" --json labels,state -q '{labels: [.labels[].name], state: .state}' 2>/dev/null || echo '{"labels":[],"state":""}')
+  local current_labels
+  current_labels=$(echo "$issue_info" | jq -r '.labels[]' 2>/dev/null || echo "")
+  local issue_state
+  issue_state=$(echo "$issue_info" | jq -r '.state' 2>/dev/null || echo "")
+
   if [ $exit_code -eq 0 ] && [ -n "$pr_url" ]; then
     log "Worker for issue #${issue_number} completed successfully (PR: ${pr_url})"
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_DONE" 2>/dev/null || true
+    clear_session_id "$issue_number"
+  elif echo "$current_labels" | grep -q "$LABEL_DONE" || [ "$issue_state" = "CLOSED" ]; then
+    # Worker already handled the issue (e.g., Step 1b: acceptance criteria already met)
+    log "Worker for issue #${issue_number} completed — no PR needed (issue already marked done/closed)"
+    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
     clear_session_id "$issue_number"
   else
     record_failure
@@ -415,9 +428,7 @@ EOF
       log "Worker for issue #${issue_number} failed (exit code: $exit_code)"
     fi
     # Check if Claude already labeled it as blocked
-    local labels
-    labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
-    if ! echo "$labels" | grep -q "$LABEL_BLOCKED"; then
+    if ! echo "$current_labels" | grep -q "$LABEL_BLOCKED"; then
       gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
       local fail_reason="exit code $exit_code"
       if [ $exit_code -eq 0 ] && [ -z "$pr_url" ]; then
