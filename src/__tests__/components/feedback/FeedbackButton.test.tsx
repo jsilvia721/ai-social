@@ -28,7 +28,6 @@ import {
   screen,
   fireEvent,
   waitFor,
-  act,
 } from "@testing-library/react";
 
 // Mock Dialog components from radix — minimal inline rendering
