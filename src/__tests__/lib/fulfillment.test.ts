@@ -4,15 +4,18 @@ jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("@/lib/media");
 jest.mock("@/lib/storage");
 jest.mock("@/lib/alerts");
+jest.mock("@/lib/ai/index");
 
 import { runFulfillment, computeReviewDecision } from "@/lib/fulfillment";
 import { generateImage } from "@/lib/media";
 import { uploadBuffer } from "@/lib/storage";
 import { sendFailureAlert } from "@/lib/alerts";
+import { generateVideoStoryboard } from "@/lib/ai/index";
 
 const mockGenerateImage = generateImage as jest.MockedFunction<typeof generateImage>;
 const mockUploadBuffer = uploadBuffer as jest.MockedFunction<typeof uploadBuffer>;
 const mockSendFailureAlert = sendFailureAlert as jest.MockedFunction<typeof sendFailureAlert>;
+const mockGenerateVideoStoryboard = generateVideoStoryboard as jest.MockedFunction<typeof generateVideoStoryboard>;
 
 // ── Test helpers ────────────────────────────────────────────────────────────────
 
@@ -95,6 +98,12 @@ beforeEach(() => {
 
   // Default: no stuck briefs to recover
   prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 0 });
+
+  mockGenerateVideoStoryboard.mockResolvedValue({
+    videoScript: "Scene 1: Open on a wide shot...",
+    videoPrompt: "A cinematic video about AI in marketing",
+    thumbnailPrompt: "Eye-catching thumbnail of AI dashboard",
+  });
 });
 
 afterEach(() => {
@@ -613,5 +622,149 @@ describe("runFulfillment", () => {
         where: expect.objectContaining({ businessId: "biz-42" }),
       })
     );
+  });
+
+  // ── VIDEO storyboard generation ─────────────────────────────────────────────
+
+  it("generates storyboard for VIDEO brief and transitions to STORYBOARD_REVIEW", async () => {
+    const brief = makeBrief({
+      recommendedFormat: "VIDEO",
+      platform: "YOUTUBE",
+      business: {
+        contentStrategy: makeBrief().business.contentStrategy,
+        socialAccounts: [
+          {
+            id: "sa-yt",
+            businessId: "biz-1",
+            platform: "YOUTUBE" as const,
+            platformId: "yt-123",
+            username: "@acme_yt",
+            blotatoAccountId: "blotato-yt",
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      },
+    });
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.findUnique.mockResolvedValue(null);
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+
+    const result = await runFulfillment();
+
+    // Should call generateVideoStoryboard
+    expect(mockGenerateVideoStoryboard).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "brief-1" }),
+      expect.objectContaining({ id: "cs-1" })
+    );
+    // Should generate thumbnail via generateImage
+    expect(mockGenerateImage).toHaveBeenCalledWith(
+      expect.stringContaining("Eye-catching thumbnail")
+    );
+    // Should upload thumbnail with extension matching mime type
+    expect(mockUploadBuffer).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      "media/biz-1/brief-1-thumb.png",
+      "image/png"
+    );
+    // Should update brief with storyboard data and STORYBOARD_REVIEW status
+    expect(prismaMock.contentBrief.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "brief-1" },
+        data: expect.objectContaining({
+          status: "STORYBOARD_REVIEW",
+          videoScript: "Scene 1: Open on a wide shot...",
+          videoPrompt: "A cinematic video about AI in marketing",
+          storyboardImageUrl: "https://cdn.example.com/media/biz-1/brief-1.png",
+        }),
+      })
+    );
+    // Should NOT create a Post
+    expect(prismaMock.post.create).not.toHaveBeenCalled();
+    // Counts as "created" (successfully processed)
+    expect(result.created).toBe(1);
+  });
+
+  it("skips Post creation when brief status is STORYBOARD_REVIEW after handler", async () => {
+    const brief = makeBrief({
+      recommendedFormat: "VIDEO",
+      platform: "TWITTER",
+    });
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.findUnique.mockResolvedValue(null);
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+
+    await runFulfillment();
+
+    expect(prismaMock.post.create).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("retries VIDEO storyboard generation on failure", async () => {
+    const brief = makeBrief({
+      recommendedFormat: "VIDEO",
+      platform: "YOUTUBE",
+      retryCount: 0,
+      business: {
+        contentStrategy: makeBrief().business.contentStrategy,
+        socialAccounts: [
+          {
+            id: "sa-yt",
+            businessId: "biz-1",
+            platform: "YOUTUBE" as const,
+            platformId: "yt-123",
+            username: "@acme_yt",
+            blotatoAccountId: "blotato-yt",
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      },
+    });
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.findUnique.mockResolvedValue(null);
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+    mockGenerateVideoStoryboard.mockRejectedValue(new Error("AI timeout"));
+
+    const result = await runFulfillment();
+
+    expect(result.failed).toBe(1);
+    expect(prismaMock.contentBrief.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "PENDING",
+          retryCount: 1,
+          errorMessage: "AI timeout",
+        }),
+      })
+    );
+  });
+
+  it("stuck brief recovery excludes STORYBOARD_REVIEW and RENDERING", async () => {
+    prismaMock.contentBrief.findMany.mockResolvedValue([] as never);
+
+    await runFulfillment();
+
+    // The recovery query should only target FULFILLING status
+    const recoveryCall = prismaMock.contentBrief.updateMany.mock.calls[0];
+    expect(recoveryCall[0]).toEqual(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "FULFILLING",
+        }),
+      })
+    );
+    // Verify it does NOT include STORYBOARD_REVIEW or RENDERING in the query
+    const whereClause = recoveryCall[0]?.where;
+    expect(whereClause?.status).toBe("FULFILLING");
   });
 });
