@@ -30,6 +30,21 @@ const STUCK_THRESHOLD_MS = 5 * 60_000; // 5 minutes
 const RETRY_BASE_MS = 60_000; // 1 min base
 const RETRY_CAP_MS = 30 * 60_000; // 30 min cap
 
+// ── Error type guard ────────────────────────────────────────────────────────
+
+/**
+ * Duck-type check for BlotatoApiError that works even when prototype chains
+ * are broken in bundled environments (e.g., SST/Lambda esbuild).
+ */
+export function isBlotatoApiError(err: unknown): err is BlotatoApiError {
+  if (err instanceof BlotatoApiError) return true;
+  if (err instanceof Error && "status" in err && err.name === "BlotatoApiError") {
+    console.warn("[scheduler] isBlotatoApiError matched via duck-type fallback (instanceof failed)");
+    return true;
+  }
+  return false;
+}
+
 // ── Retry helpers ────────────────────────────────────────────────────────────
 
 function retryDelayMs(attempt: number): number {
@@ -40,7 +55,7 @@ function retryDelayMs(attempt: number): number {
 function shouldRetry(err: unknown, retryCount: number): boolean {
   if (retryCount >= MAX_RETRIES) return false;
   // Don't retry 4xx client errors (except 429 rate limit)
-  if (err instanceof BlotatoApiError && err.status >= 400 && err.status < 500 && err.status !== 429) {
+  if (isBlotatoApiError(err) && err.status >= 400 && err.status < 500 && err.status !== 429) {
     return false;
   }
   return true;
@@ -261,7 +276,7 @@ export async function runMetricsRefresh(): Promise<{ processed: number }> {
       } catch (err) {
         // 404 means the Blotato post no longer exists — clear the stale ID
         // so it's permanently excluded from future metrics fetches.
-        if (err instanceof BlotatoApiError && err.status === 404) {
+        if (isBlotatoApiError(err) && err.status === 404) {
           console.info(`[metrics-refresh] Clearing stale blotatoPostId for post ${post.id}`);
           try {
             await prisma.post.update({
