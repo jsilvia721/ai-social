@@ -139,9 +139,9 @@ find_tmux_session() {
     return
   fi
 
-  # Priority 2: session name contains the issue number (--tmux=classic naming)
+  # Priority 2: session name ending with "-<issue>" (--tmux=classic worktree naming)
   local match
-  match=$(echo "$sessions" | grep -F "${issue}" | head -1)
+  match=$(echo "$sessions" | grep -E "(^|-)${issue}\$" | head -1)
   if [ -n "$match" ]; then
     echo "$match"
     return
@@ -157,11 +157,6 @@ attach_to_session() {
 
   if [ -z "$session" ]; then
     echo "No tmux session found for issue #${issue}."
-    echo ""
-    echo "Possible reasons:"
-    echo "  • The worker is not running in tmux mode"
-    echo "  • The worker has already finished"
-    echo "  • tmux is not running"
     exit 1
   fi
 
@@ -287,8 +282,7 @@ show_status() {
     printf '  #%-4s %-9s %s elapsed  %s%s%s  %s\n' \
       "$issue" "$type" "$elapsed_str" "$hb_str" "$progress_str" "$tmux_str" "$size_str"
 
-    # Show copy-pasteable attach command when tmux session exists
-    if [ -n "$tmux_session" ]; then
+    if [ "$VERBOSE" -eq 1 ] && [ -n "$tmux_session" ]; then
       echo "         tmux attach -t ${tmux_session}"
     fi
 

@@ -344,8 +344,12 @@ chmod +x "$MOCK_TMUX_DIR/tmux"
 
 output=$(PATH="$MOCK_TMUX_DIR:$PATH" run_status)
 assert_contains "shows tmux session name" "tmux:worker-200" "$output"
-assert_contains "shows attach command" "tmux attach -t worker-200" "$output"
 assert_not_contains "does not show unrelated session" "worker-300" "$output"
+
+# Attach command only shown in verbose mode
+assert_not_contains "no attach hint without -v" "tmux attach" "$output"
+output=$(PATH="$MOCK_TMUX_DIR:$PATH" run_status -v)
+assert_contains "shows attach command with -v" "tmux attach -t worker-200" "$output"
 
 # Test with no tmux available
 MOCK_NO_TMUX_DIR=$(mktemp -d)
