@@ -61,10 +61,16 @@ jobs:
               }
 
               // Parse issue numbers from table rows in the summary comment
+              issueRefPattern.lastIndex = 0;
               const workIssueNumbers = [];
+              const seenIssueNums = new Set();
               let match;
               while ((match = issueRefPattern.exec(summaryComment.body)) !== null) {
-                workIssueNumbers.push(parseInt(match[1], 10));
+                const num = parseInt(match[1], 10);
+                if (!seenIssueNums.has(num)) {
+                  seenIssueNums.add(num);
+                  workIssueNumbers.push(num);
+                }
               }
 
               if (workIssueNumbers.length === 0) {
@@ -83,12 +89,14 @@ jobs:
               // --- Step 3: Check if ALL work issues are closed ---
               let allClosed = true;
               const openIssues = [];
+              const workIssueData = new Map();
 
               for (const workNum of workIssueNumbers) {
                 const workIssue = await github.rest.issues.get({
                   owner, repo,
                   issue_number: workNum
                 });
+                workIssueData.set(workNum, workIssue.data);
                 if (workIssue.data.state !== 'closed') {
                   allClosed = false;
                   openIssues.push(workNum);
@@ -131,25 +139,18 @@ jobs:
 
                   const taskRows = [];
                   for (const workNum of workIssueNumbers) {
-                    try {
-                      const workIssue = await github.rest.issues.get({
-                        owner, repo,
-                        issue_number: workNum
-                      });
-                      const workTitle = workIssue.data.title;
+                    const cached = workIssueData.get(workNum);
+                    const workTitle = cached ? cached.title : `(issue #${workNum})`;
 
-                      const linkedPr = mergedPrs.find(pr =>
-                        pr.body && pr.body.includes(`Closes #${workNum}`)
-                      );
+                    const closesPattern = new RegExp(`(?:closes|fixes|resolves)\\s+#${workNum}\\b`, 'i');
+                    const linkedPr = mergedPrs.find(pr =>
+                      pr.body && closesPattern.test(pr.body)
+                    );
 
-                      if (linkedPr) {
-                        taskRows.push(`| #${workNum} | ${workTitle} | #${linkedPr.number} |`);
-                      } else {
-                        taskRows.push(`| #${workNum} | ${workTitle} | — |`);
-                      }
-                    } catch (err) {
-                      console.log(`  Failed to look up work issue #${workNum}: ${err.message}`);
-                      taskRows.push(`| #${workNum} | (error fetching) | — |`);
+                    if (linkedPr) {
+                      taskRows.push(`| #${workNum} | ${workTitle} | #${linkedPr.number} |`);
+                    } else {
+                      taskRows.push(`| #${workNum} | ${workTitle} | — |`);
                     }
                   }
 
@@ -212,11 +213,15 @@ jobs:
                 labels: ['claude-done']
               });
 
-              await github.rest.issues.removeLabel({
-                owner, repo,
-                issue_number: planIssue.number,
-                name: 'claude-active'
-              });
+              try {
+                await github.rest.issues.removeLabel({
+                  owner, repo,
+                  issue_number: planIssue.number,
+                  name: 'claude-active'
+                });
+              } catch (err) {
+                console.log(`  Warning: could not remove claude-active label: ${err.message}`);
+              }
 
               await github.rest.issues.update({
                 owner, repo,
