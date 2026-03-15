@@ -17,19 +17,24 @@ const baseBrief = {
   updatedAt: new Date().toISOString(),
 };
 
+const NOW = new Date("2026-03-15T12:00:00Z");
+
 const renderingBrief = {
   ...baseBrief,
   id: "brief-2",
   status: "RENDERING" as const,
-  updatedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5 min ago
+  updatedAt: new Date(NOW.getTime() - 5 * 60 * 1000).toISOString(), // 5 min ago
 };
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.useFakeTimers();
+  jest.setSystemTime(NOW);
   global.fetch = jest.fn();
 });
 
 afterEach(() => {
+  jest.useRealTimers();
   cleanup();
 });
 
@@ -134,6 +139,27 @@ describe("StoryboardReviewCard", () => {
       await waitFor(() => {
         expect(onStatusChange).toHaveBeenCalledWith("brief-1", "REMOVED");
       });
+    });
+
+    it("shows error message when approve fails", async () => {
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ error: "Brief must be in STORYBOARD_REVIEW status" }),
+      });
+
+      const onStatusChange = jest.fn();
+      render(
+        <StoryboardReviewCard brief={baseBrief} onStatusChange={onStatusChange} />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Brief must be in STORYBOARD_REVIEW status")).toBeInTheDocument();
+      });
+
+      // Should NOT have called onStatusChange
+      expect(onStatusChange).not.toHaveBeenCalled();
     });
   });
 

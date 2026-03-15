@@ -193,7 +193,7 @@ export default function BriefsPage() {
                 ) : (
                   <QueueItem
                     key={brief.id}
-                    brief={brief as Parameters<typeof QueueItem>[0]["brief"]}
+                    brief={{ ...brief, status: brief.status as "PENDING" | "FULFILLED" | "EXPIRED" | "CANCELLED" }}
                     isSelected={brief.id === selectedBriefId}
                     onClick={() => setSelectedBriefId(brief.id)}
                   />
