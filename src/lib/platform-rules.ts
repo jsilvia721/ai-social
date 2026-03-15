@@ -1,7 +1,7 @@
 import type { Platform } from "@prisma/client";
 
 /** Platforms that require at least one media attachment to publish. */
-export const MEDIA_REQUIRED_PLATFORMS = new Set<Platform>(["INSTAGRAM", "TIKTOK"]);
+export const MEDIA_REQUIRED_PLATFORMS = new Set<Platform>(["INSTAGRAM", "TIKTOK", "YOUTUBE"]);
 
 /** Returns true if the given platform requires media attachments. */
 export function requiresMedia(platform: Platform): boolean {

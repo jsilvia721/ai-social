@@ -11,10 +11,13 @@ describe("platform-rules", () => {
       expect(MEDIA_REQUIRED_PLATFORMS.has("TIKTOK")).toBe(true);
     });
 
-    it("does not include TWITTER, FACEBOOK, or YOUTUBE", () => {
+    it("includes YOUTUBE", () => {
+      expect(MEDIA_REQUIRED_PLATFORMS.has("YOUTUBE")).toBe(true);
+    });
+
+    it("does not include TWITTER or FACEBOOK", () => {
       expect(MEDIA_REQUIRED_PLATFORMS.has("TWITTER")).toBe(false);
       expect(MEDIA_REQUIRED_PLATFORMS.has("FACEBOOK")).toBe(false);
-      expect(MEDIA_REQUIRED_PLATFORMS.has("YOUTUBE")).toBe(false);
     });
   });
 
@@ -35,8 +38,8 @@ describe("platform-rules", () => {
       expect(requiresMedia("FACEBOOK")).toBe(false);
     });
 
-    it("returns false for YOUTUBE", () => {
-      expect(requiresMedia("YOUTUBE")).toBe(false);
+    it("returns true for YOUTUBE", () => {
+      expect(requiresMedia("YOUTUBE")).toBe(true);
     });
   });
 
@@ -73,8 +76,16 @@ describe("platform-rules", () => {
       expect(() => assertMediaForPlatform("FACEBOOK", [])).not.toThrow();
     });
 
-    it("does not throw when media is missing for YOUTUBE", () => {
-      expect(() => assertMediaForPlatform("YOUTUBE", [])).not.toThrow();
+    it("does not throw when media is provided for YOUTUBE", () => {
+      expect(() =>
+        assertMediaForPlatform("YOUTUBE", ["https://example.com/video.mp4"])
+      ).not.toThrow();
+    });
+
+    it("throws when media is missing for YOUTUBE", () => {
+      expect(() => assertMediaForPlatform("YOUTUBE", [])).toThrow(
+        "YOUTUBE requires at least one image or video"
+      );
     });
   });
 });
