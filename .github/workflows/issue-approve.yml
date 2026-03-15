@@ -27,7 +27,9 @@ jobs:
           script: |
             const issue_number = context.issue.number;
             const labels = context.payload.issue.labels.map(l => l.name);
+            const body = context.payload.issue.body || '';
 
+            // Remove the review trigger label
             await github.rest.issues.removeLabel({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -36,19 +38,37 @@ jobs:
             });
 
             if (labels.includes('plan')) {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                labels: ['claude-approved']
-              });
+              // Plan issues: check for PLAN_ITEMS markers
+              if (body.includes('PLAN_ITEMS_START')) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  labels: ['claude-approved']
+                });
 
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                body: 'Plan approved. The issue daemon will pick this up and create work issues shortly.'
-              });
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  body: 'Plan approved. The issue daemon will pick this up and create work issues shortly.'
+                });
+              } else {
+                // Re-add needs-human-review since we can't route without markers
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  labels: ['needs-human-review']
+                });
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  body: '⚠️ Plan is missing `PLAN_ITEMS_START` / `PLAN_ITEMS_END` markers. Cannot approve until the plan body contains structured plan items.'
+                });
+              }
             } else if (labels.includes('bug-report')) {
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
@@ -64,6 +84,7 @@ jobs:
                 body: 'Bug approved for investigation. A plan will be created shortly.'
               });
             } else {
+              // Default: any other issue type
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -75,6 +96,6 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number,
-                body: 'Issue approved. The issue daemon will pick this up for implementation shortly.'
+                body: 'Issue approved for implementation. The issue daemon will pick this up shortly.'
               });
             }
