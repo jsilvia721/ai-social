@@ -6,7 +6,7 @@
 import { prisma } from "@/lib/db";
 import { publishPost } from "@/lib/blotato/publish";
 import { getPostMetrics } from "@/lib/blotato/metrics";
-import { BlotatoApiError } from "@/lib/blotato/client";
+import { BlotatoApiError, isBlotatoApiError } from "@/lib/blotato/client";
 import { sendFailureAlert } from "@/lib/alerts";
 import { reportServerError } from "@/lib/server-error-reporter";
 import { normalizeMessage } from "@/lib/normalize-error";
@@ -29,21 +29,6 @@ const MAX_RETRIES = 2; // 3 total attempts (0, 1, 2)
 const STUCK_THRESHOLD_MS = 5 * 60_000; // 5 minutes
 const RETRY_BASE_MS = 60_000; // 1 min base
 const RETRY_CAP_MS = 30 * 60_000; // 30 min cap
-
-// ── Error type guard ────────────────────────────────────────────────────────
-
-/**
- * Duck-type check for BlotatoApiError that works even when prototype chains
- * are broken in bundled environments (e.g., SST/Lambda esbuild).
- */
-export function isBlotatoApiError(err: unknown): err is BlotatoApiError {
-  if (err instanceof BlotatoApiError) return true;
-  if (err instanceof Error && "status" in err && err.name === "BlotatoApiError") {
-    console.warn("[scheduler] isBlotatoApiError matched via duck-type fallback (instanceof failed)");
-    return true;
-  }
-  return false;
-}
 
 // ── Retry helpers ────────────────────────────────────────────────────────────
 

@@ -6,7 +6,8 @@ jest.mock("@/lib/blotato/metrics");
 jest.mock("@/lib/alerts");
 jest.mock("@/lib/server-error-reporter");
 
-import { runScheduler, runMetricsRefresh, isBlotatoApiError } from "@/lib/scheduler";
+import { runScheduler, runMetricsRefresh } from "@/lib/scheduler";
+import { isBlotatoApiError } from "@/lib/blotato/client";
 import { publishPost } from "@/lib/blotato/publish";
 import { getPostMetrics } from "@/lib/blotato/metrics";
 import { sendFailureAlert } from "@/lib/alerts";

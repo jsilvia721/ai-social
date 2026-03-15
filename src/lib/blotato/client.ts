@@ -25,6 +25,27 @@ export class BlotatoRateLimitError extends BlotatoApiError {
   }
 }
 
+/**
+ * Duck-type check for BlotatoApiError that works even when prototype chains
+ * are broken in bundled environments (e.g., SST/Lambda esbuild).
+ *
+ * Note: the duck-type branch narrows to BlotatoApiError structurally;
+ * the object may not be a true instance.
+ */
+export function isBlotatoApiError(err: unknown): err is BlotatoApiError {
+  if (err instanceof BlotatoApiError) return true;
+  if (
+    err instanceof Error &&
+    err.name === "BlotatoApiError" &&
+    "status" in err &&
+    typeof (err as Record<string, unknown>).status === "number"
+  ) {
+    console.warn("[blotato] isBlotatoApiError matched via duck-type fallback (instanceof failed)");
+    return true;
+  }
+  return false;
+}
+
 export async function blotatoFetch<S extends z.ZodTypeAny>(
   path: string,
   schema: S,
