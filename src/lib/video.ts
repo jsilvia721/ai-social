@@ -1,15 +1,39 @@
 /**
- * Video processing — shared between webhook handler and reconciliation.
+ * Video generation constants and post-processing.
  *
- * processCompletedPrediction(): downloads video from Replicate, uploads to S3,
+ * Constants: VIDEO_MODEL_DEFAULT, PLATFORM_VIDEO_ASPECT_RATIO, VIDEO_DURATION_DEFAULT.
+ * Processing: processCompletedPrediction() downloads video from Replicate, uploads to S3,
  * creates Post with review decision, marks brief FULFILLED.
  */
 
+import type { ContentBrief, ContentStrategy, Platform, SocialAccount } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { downloadAndUploadVideo } from "@/lib/media";
 import { computeReviewDecision, matchPillar } from "@/lib/fulfillment";
 import { reportServerError } from "@/lib/server-error-reporter";
-import type { ContentBrief, ContentStrategy, SocialAccount } from "@prisma/client";
+
+// ── Video Generation Constants ──────────────────────────────────────────────
+
+/** Default Replicate model for video generation (Kling V3 Omni). */
+export const VIDEO_MODEL_DEFAULT = "kwaivgi/kling-v3-omni-video";
+
+/** Default video duration in seconds. */
+export const VIDEO_DURATION_DEFAULT = 5;
+
+/** Max prompt length for Kling V3. */
+export const VIDEO_PROMPT_MAX_LENGTH = 2500;
+
+/**
+ * Platform-specific aspect ratios for video content.
+ * Vertical (9:16) for short-form, horizontal (16:9) for long-form.
+ */
+export const PLATFORM_VIDEO_ASPECT_RATIO: Record<Platform, string> = {
+  TIKTOK: "9:16",
+  INSTAGRAM: "9:16",
+  YOUTUBE: "16:9",
+  FACEBOOK: "16:9",
+  TWITTER: "16:9",
+};
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
