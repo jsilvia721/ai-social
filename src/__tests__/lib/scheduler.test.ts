@@ -7,6 +7,7 @@ jest.mock("@/lib/alerts");
 jest.mock("@/lib/server-error-reporter");
 
 import { runScheduler, runMetricsRefresh } from "@/lib/scheduler";
+import { isBlotatoApiError } from "@/lib/blotato/client";
 import { publishPost } from "@/lib/blotato/publish";
 import { getPostMetrics } from "@/lib/blotato/metrics";
 import { sendFailureAlert } from "@/lib/alerts";
@@ -280,6 +281,27 @@ describe("runScheduler", () => {
     await runScheduler();
 
     // Should go straight to FAILED, skip retry
+    expect(prismaMock.post.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "FAILED" }),
+      })
+    );
+  });
+
+  it("does NOT retry on duck-type BlotatoApiError 4xx (broken instanceof)", async () => {
+    const duckTypeError = new Error("Invalid account");
+    duckTypeError.name = "BlotatoApiError";
+    (duckTypeError as any).status = 404;
+
+    const post = makePost({ status: "SCHEDULED", retryCount: 0 });
+    prismaMock.post.findMany.mockResolvedValue([post] as any);
+    prismaMock.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPublishPost.mockRejectedValue(duckTypeError);
+    prismaMock.post.update.mockResolvedValue(post as any);
+
+    await runScheduler();
+
+    // Should go straight to FAILED via duck-type fallback
     expect(prismaMock.post.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "FAILED" }),
@@ -806,5 +828,74 @@ describe("runMetricsRefresh", () => {
 
     // Should NOT throw despite both getPostMetrics and reportServerError failing
     await expect(runMetricsRefresh()).resolves.toEqual({ processed: 1 });
+  });
+
+  it("clears blotatoPostId when duck-type BlotatoApiError (broken instanceof) throws 404", async () => {
+    // Simulate a bundled environment where instanceof fails but duck-type matches
+    const duckTypeError = new Error("Not found");
+    duckTypeError.name = "BlotatoApiError";
+    (duckTypeError as any).status = 404;
+
+    const publishedPost = {
+      ...makePost({ status: "PUBLISHED" }),
+      blotatoPostId: "blotato-post-abc",
+    };
+    prismaMock.post.findMany.mockResolvedValue([publishedPost] as any);
+    mockGetPostMetrics.mockRejectedValue(duckTypeError);
+    prismaMock.post.update.mockResolvedValue(publishedPost as any);
+
+    const consoleSpy = jest.spyOn(console, "info").mockImplementation();
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation();
+
+    await runMetricsRefresh();
+
+    // Should clear the stale blotatoPostId via duck-type fallback
+    expect(prismaMock.post.update).toHaveBeenCalledWith({
+      where: { id: "post-1" },
+      data: { blotatoPostId: null },
+    });
+    // 404 errors should NOT be reported
+    expect(mockReportServerError).not.toHaveBeenCalled();
+    // Should warn about duck-type fallback
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("duck-type fallback")
+    );
+
+    consoleSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+});
+
+// ── isBlotatoApiError ──────────────────────────────────────────────────────
+
+describe("isBlotatoApiError", () => {
+  it("returns true for a real BlotatoApiError instance", async () => {
+    const { BlotatoApiError } = await import("@/lib/blotato/client");
+    const err = new BlotatoApiError("Not found", 404);
+    expect(isBlotatoApiError(err)).toBe(true);
+  });
+
+  it("returns true for a duck-type match (broken instanceof)", () => {
+    const err = new Error("Not found");
+    err.name = "BlotatoApiError";
+    (err as any).status = 404;
+    expect(isBlotatoApiError(err)).toBe(true);
+  });
+
+  it("returns false for a plain Error", () => {
+    expect(isBlotatoApiError(new Error("something"))).toBe(false);
+  });
+
+  it("returns false for non-Error objects", () => {
+    expect(isBlotatoApiError("string error")).toBe(false);
+    expect(isBlotatoApiError(null)).toBe(false);
+    expect(isBlotatoApiError(undefined)).toBe(false);
+    expect(isBlotatoApiError({ status: 404, name: "BlotatoApiError" })).toBe(false);
+  });
+
+  it("returns false for Error with matching name but no status property", () => {
+    const err = new Error("Not found");
+    err.name = "BlotatoApiError";
+    expect(isBlotatoApiError(err)).toBe(false);
   });
 });

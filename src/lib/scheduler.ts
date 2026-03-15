@@ -6,7 +6,7 @@
 import { prisma } from "@/lib/db";
 import { publishPost } from "@/lib/blotato/publish";
 import { getPostMetrics } from "@/lib/blotato/metrics";
-import { BlotatoApiError } from "@/lib/blotato/client";
+import { BlotatoApiError, isBlotatoApiError } from "@/lib/blotato/client";
 import { sendFailureAlert } from "@/lib/alerts";
 import { reportServerError } from "@/lib/server-error-reporter";
 import { normalizeMessage } from "@/lib/normalize-error";
@@ -40,7 +40,7 @@ function retryDelayMs(attempt: number): number {
 function shouldRetry(err: unknown, retryCount: number): boolean {
   if (retryCount >= MAX_RETRIES) return false;
   // Don't retry 4xx client errors (except 429 rate limit)
-  if (err instanceof BlotatoApiError && err.status >= 400 && err.status < 500 && err.status !== 429) {
+  if (isBlotatoApiError(err) && err.status >= 400 && err.status < 500 && err.status !== 429) {
     return false;
   }
   return true;
@@ -261,7 +261,7 @@ export async function runMetricsRefresh(): Promise<{ processed: number }> {
       } catch (err) {
         // 404 means the Blotato post no longer exists — clear the stale ID
         // so it's permanently excluded from future metrics fetches.
-        if (err instanceof BlotatoApiError && err.status === 404) {
+        if (isBlotatoApiError(err) && err.status === 404) {
           console.info(`[metrics-refresh] Clearing stale blotatoPostId for post ${post.id}`);
           try {
             await prisma.post.update({
