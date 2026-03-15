@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/block-destructive.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/hygiene-check.sh",
+            "timeout": 10
+          },
+          {
+            "type": "prompt",
+            "prompt": "Review if assistant is rationalizing incomplete work. Reject if claiming issues are 'pre-existing', 'out of scope', or deferring to unrequested follow-ups. Return JSON only: {\"ok\": false, \"reason\": \"...\"} or {\"ok\": true}",
+            "model": "claude-haiku"
+          }
+        ]
+      }
+    ]
+  }
+}
