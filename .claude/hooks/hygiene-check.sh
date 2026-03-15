@@ -20,7 +20,7 @@ if [[ "$STOP_ACTIVE" == "true" ]]; then
 fi
 
 # Get stray files from git status, filtering out sensitive patterns
-STRAY_FILES=$(git status --short 2>/dev/null | grep -v -E '\.(env|pem|key)' | grep -v -E '\.env\.' || true)
+STRAY_FILES=$(git status --short 2>/dev/null | grep -v -E '\.(env|pem|key)' || true)
 
 if [[ -n "$STRAY_FILES" ]]; then
   echo "⚠️  Stray files detected:" >&2

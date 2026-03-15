@@ -6,8 +6,9 @@
 
 set -euo pipefail
 
-# Fail open if jq is not installed
+# Fail open if jq is not installed (per spec), but warn
 if ! command -v jq &>/dev/null; then
+  echo "WARNING: jq not found, destructive command guard disabled" >&2
   exit 0
 fi
 
@@ -43,21 +44,21 @@ RESULT=$(echo "$INPUT" | jq -r '
   # git checkout . or git checkout -- .
   elif ($cmd | test("git\\s+checkout\\s+(--\\s+)?\\.($|[\\s;|&])")) then "block:git checkout . is blocked."
 
-  # git restore . or git restore --source
+  # git restore . (discard all changes)
   elif ($cmd | test("git\\s+restore\\s+\\.")) then "block:git restore . is blocked."
-  elif ($cmd | test("git\\s+restore\\s+--source")) then "block:git restore --source is blocked."
 
   # git clean with -f flag
   elif ($cmd | test("git\\s+clean\\s.*-[a-zA-Z]*f")) then "block:git clean -f is blocked."
 
-  # git branch -D (allow -d)
+  # git branch -D or --delete --force (allow -d)
   elif ($cmd | test("git\\s+branch\\s+-D\\s")) then "block:git branch -D is blocked. Use -d instead."
+  elif ($cmd | test("git\\s+branch\\s+.*--delete\\s+--force|git\\s+branch\\s+.*--force\\s+--delete")) then "block:git branch --delete --force is blocked. Use -d instead."
 
   # rm -rf on critical paths (block /, ., src, prisma, .claude, .github, ~)
   # Allow node_modules, .next, dist, coverage
   elif ($cmd | test("rm\\s+-[a-zA-Z]*r[a-zA-Z]*f|rm\\s+-[a-zA-Z]*f[a-zA-Z]*r")) then
-    if ($cmd | test("rm\\s+-rf\\s+(node_modules|\\.next|dist|coverage)")) then "allow"
-    elif ($cmd | test("rm\\s+-rf\\s+(/($|\\s)|\\.\\.?($|\\s)|src|prisma|\\.claude|\\.github|~)")) then "block:rm -rf on critical path is blocked."
+    if ($cmd | test("rm\\s+-[a-zA-Z]*r[a-zA-Z]*f\\s+(node_modules|\\.next|dist|coverage)|rm\\s+-[a-zA-Z]*f[a-zA-Z]*r\\s+(node_modules|\\.next|dist|coverage)")) then "allow"
+    elif ($cmd | test("rm\\s+-[a-zA-Z]*r[a-zA-Z]*f\\s+(/($|\\s)|\\.\\.?($|\\s)|src|prisma|\\.claude|\\.github|~)|rm\\s+-[a-zA-Z]*f[a-zA-Z]*r\\s+(/($|\\s)|\\.\\.?($|\\s)|src|prisma|\\.claude|\\.github|~)")) then "block:rm -rf on critical path is blocked."
     else "allow"
     end
 
