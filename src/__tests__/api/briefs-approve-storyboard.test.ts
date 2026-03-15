@@ -129,6 +129,35 @@ describe("POST /api/briefs/[id]/approve-storyboard", () => {
     );
   });
 
+  it("returns 400 when no video prompt is available", async () => {
+    mockAuthenticated();
+    prismaMock.contentBrief.findUnique.mockResolvedValue({
+      ...storyboardBrief,
+      videoPrompt: null,
+    });
+    prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
+
+    const [req, ctx] = makeRequest("cb-1", {});
+    const res = await POST(req, ctx);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("No video prompt");
+  });
+
+  it("returns 502 when generateVideo fails", async () => {
+    mockAuthenticated();
+    prismaMock.contentBrief.findUnique.mockResolvedValue(storyboardBrief);
+    prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
+    mockGenerateVideo.mockRejectedValue(new Error("Replicate API timeout"));
+
+    const [req, ctx] = makeRequest("cb-1");
+    const res = await POST(req, ctx);
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toBe("Video generation failed");
+    expect(body.detail).toContain("Replicate API timeout");
+  });
+
   it("falls back to brief videoPrompt when body videoPrompt is not provided", async () => {
     mockAuthenticated();
     prismaMock.contentBrief.findUnique.mockResolvedValue(storyboardBrief);
