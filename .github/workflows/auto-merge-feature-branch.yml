@@ -48,7 +48,18 @@ jobs:
               return;
             }
 
-            const pr = prs[0];
+            // Verify SHA matches to avoid acting on stale workflow runs
+            const pr = prs.find(p => p.head.sha === headSha) || null;
+            if (!pr) {
+              console.log(`No open PR found with HEAD SHA ${headSha}. The branch may have moved. Skipping.`);
+              core.setOutput('found', 'false');
+              return;
+            }
+
+            if (prs.length > 1) {
+              console.log(`WARNING: Found ${prs.length} open PRs for branch ${headBranch}. Using PR #${pr.number} (SHA match).`);
+            }
+
             const baseBranch = pr.base.ref;
 
             console.log(`Found PR #${pr.number}: "${pr.title}" targeting ${baseBranch}`);
@@ -63,7 +74,6 @@ jobs:
             core.setOutput('found', 'true');
             core.setOutput('pr_number', pr.number.toString());
             core.setOutput('base_branch', baseBranch);
-            core.setOutput('pr_body', pr.body || '');
 
       - name: Checkout repository
         if: steps.find-pr.outputs.found == 'true'
@@ -84,6 +94,7 @@ jobs:
           echo "Syncing origin/main into ${BASE_BRANCH}..."
 
           git fetch origin main
+          PRE_MERGE_SHA=$(git rev-parse HEAD)
           git merge origin/main --no-edit || {
             echo "merge_conflict=true" >> "$GITHUB_OUTPUT"
             echo "::warning::Failed to merge origin/main into ${BASE_BRANCH}. Continuing with PR merge attempt."
@@ -92,7 +103,7 @@ jobs:
           }
 
           # Push the sync if there were changes
-          if ! git diff --quiet HEAD@{1} HEAD 2>/dev/null; then
+          if [ "$(git rev-parse HEAD)" != "$PRE_MERGE_SHA" ]; then
             git push origin "${BASE_BRANCH}"
             echo "Pushed main sync to ${BASE_BRANCH}"
           else
@@ -104,64 +115,64 @@ jobs:
       - name: Merge PR
         if: steps.find-pr.outputs.found == 'true'
         id: merge-pr
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
         run: |
           echo "Merging PR #${PR_NUMBER} with merge commit strategy..."
-
-          if gh pr merge "${PR_NUMBER}" --merge; then
-            echo "merge_success=true" >> "$GITHUB_OUTPUT"
-            echo "PR #${PR_NUMBER} merged successfully."
-          else
-            echo "merge_success=false" >> "$GITHUB_OUTPUT"
-            echo "::error::Failed to merge PR #${PR_NUMBER}."
-          fi
+          gh pr merge "${PR_NUMBER}" --merge
+          echo "PR #${PR_NUMBER} merged successfully."
 
       - name: Handle merge failure
-        if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outputs.merge_success == 'false'
+        if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outcome == 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
         run: |
           gh pr comment "${PR_NUMBER}" --body "$(cat <<'EOF'
-          ⚠️ **Auto-merge failed** — this PR has merge conflicts with the base branch.
+⚠️ **Auto-merge failed** — this PR has merge conflicts with the base branch.
 
-          The daemon conflict resolver will attempt to resolve this automatically. If not resolved, manual intervention is needed:
+The daemon conflict resolver will attempt to resolve this automatically. If not resolved, manual intervention is needed:
 
-          1. Check out the PR branch locally
-          2. Merge or rebase against the base branch
-          3. Resolve conflicts and push
+1. Check out the PR branch locally
+2. Merge or rebase against the base branch
+3. Resolve conflicts and push
 
-          _This comment was posted by the auto-merge workflow._
-          EOF
+_This comment was posted by the auto-merge workflow._
+EOF
           )"
 
           gh pr edit "${PR_NUMBER}" --add-label "merge-conflict"
+          exit 1
 
       - name: Close referenced issues
-        if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outputs.merge_success == 'true'
+        if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outcome == 'success'
         uses: actions/github-script@v7
         env:
-          PR_BODY: ${{ steps.find-pr.outputs.pr_body }}
           PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const prBody = process.env.PR_BODY || '';
             const prNumber = process.env.PR_NUMBER;
 
-            // Also fetch the PR to get the latest body (in case it was updated)
+            const prNum = parseInt(prNumber, 10);
+            if (isNaN(prNum)) {
+              core.setFailed('PR_NUMBER environment variable is missing or invalid.');
+              return;
+            }
+
+            // Fetch the PR to get the latest body
             const { data: pr } = await github.rest.pulls.get({
               owner, repo,
-              pull_number: parseInt(prNumber, 10)
+              pull_number: prNum
             });
 
-            const text = `${pr.title}\n${pr.body || ''}\n${prBody}`;
+            const text = `${pr.title}\n${pr.body || ''}`;
 
             // Parse "Closes #N", "Fixes #N", "Resolves #N" from PR body and title
-            const closingPattern = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
+            const closingPattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
             const issueNumbers = new Set();
             let match;
             while ((match = closingPattern.exec(text)) !== null) {
