@@ -169,6 +169,25 @@ describe("CronRunTimeline", () => {
       expect(screen.getByLabelText("Previous page")).not.toBeDisabled();
     });
 
+    it("resets page when runs array shrinks below current page", async () => {
+      const user = userEvent.setup();
+      const runs = makeRuns(PAGE_SIZE * 3); // 3 pages
+      const { rerender } = render(<CronRunTimeline runs={runs} />);
+
+      // Navigate to page 3
+      await user.click(screen.getByLabelText("Next page"));
+      await user.click(screen.getByLabelText("Next page"));
+      expect(screen.getByText("Page 3 of 3")).toBeInTheDocument();
+
+      // Shrink to 1 page — should reset to page 1
+      rerender(<CronRunTimeline runs={makeRuns(5)} />);
+      // With only 5 runs (< PAGE_SIZE), pagination should disappear
+      expect(screen.queryByText(/Page/)).not.toBeInTheDocument();
+      // All 5 rows should be visible
+      const rows = screen.getAllByRole("row");
+      expect(rows.length).toBe(5 + 1);
+    });
+
     it("shows total run count", () => {
       const total = PAGE_SIZE + 10;
       const runs = makeRuns(total);

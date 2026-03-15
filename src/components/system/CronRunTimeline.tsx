@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Pagination } from "@/components/ui/pagination";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,14 @@ function formatDate(iso: string): string {
 export function CronRunTimeline({ runs }: CronRunTimelineProps) {
   const [page, setPage] = useState(1);
   const totalPages = Math.ceil(runs.length / PAGE_SIZE);
+
+  // Reset to last valid page when runs array shrinks (e.g., time range change)
+  useEffect(() => {
+    if (page > totalPages && totalPages > 0) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
   const paginatedRuns = runs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   if (runs.length === 0) {
