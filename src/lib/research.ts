@@ -53,9 +53,21 @@ interface ParsedFeedItem {
   pubDate?: string;
 }
 
+interface Rss20Result {
+  rss?: { channel?: { item?: Record<string, unknown> | Record<string, unknown>[] } };
+}
+interface AtomResult {
+  feed?: { entry?: Record<string, unknown> | Record<string, unknown>[] };
+}
+type FeedParseResult = Rss20Result & AtomResult;
+
+function asString(val: unknown): string | undefined {
+  return typeof val === "string" ? val : undefined;
+}
+
 /** Parse RSS 2.0 or Atom XML into a uniform item list */
 async function parseRssXml(xml: string): Promise<ParsedFeedItem[]> {
-  const result = await parseStringPromise(xml, { explicitArray: false, trim: true });
+  const result = (await parseStringPromise(xml, { explicitArray: false, trim: true })) as FeedParseResult;
 
   // RSS 2.0: result.rss.channel.item
   if (result.rss?.channel) {
@@ -63,11 +75,11 @@ async function parseRssXml(xml: string): Promise<ParsedFeedItem[]> {
     const rawItems = channel.item
       ? Array.isArray(channel.item) ? channel.item : [channel.item]
       : [];
-    return rawItems.map((item: Record<string, string>) => ({
-      title: item.title,
-      link: item.link,
-      snippet: item.description || item["content:encoded"],
-      pubDate: item.pubDate,
+    return rawItems.map((item: Record<string, unknown>) => ({
+      title: asString(item.title),
+      link: asString(item.link),
+      snippet: asString(item.description) || asString(item["content:encoded"]),
+      pubDate: asString(item.pubDate),
     }));
   }
 
@@ -75,10 +87,10 @@ async function parseRssXml(xml: string): Promise<ParsedFeedItem[]> {
   if (result.feed?.entry) {
     const rawEntries = Array.isArray(result.feed.entry) ? result.feed.entry : [result.feed.entry];
     return rawEntries.map((entry: Record<string, unknown>) => ({
-      title: typeof entry.title === "string" ? entry.title : (entry.title as Record<string, string>)?._,
-      link: typeof entry.link === "string" ? entry.link : (entry.link as Record<string, Record<string, string>>)?.$?.href,
-      snippet: typeof entry.summary === "string" ? entry.summary : (entry.summary as Record<string, string>)?._,
-      pubDate: (entry.updated ?? entry.published) as string | undefined,
+      title: asString(entry.title) ?? asString((entry.title as Record<string, unknown>)?._),
+      link: asString(entry.link) ?? asString((entry.link as Record<string, Record<string, string>>)?.$?.href),
+      snippet: asString(entry.summary) ?? asString((entry.summary as Record<string, unknown>)?._),
+      pubDate: asString(entry.updated) ?? asString(entry.published),
     }));
   }
 
