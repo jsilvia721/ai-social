@@ -252,5 +252,5 @@ ci_monitor_fingerprint_open() {
   local file
   file=$(_ci_monitor_file)
   [ -f "$file" ] || return 1
-  grep -q "^[^|]*|filed|${fingerprint}|" "$file"
+  awk -F'|' -v fp="$fingerprint" '$2 == "filed" && $3 == fp { found=1; exit } END { exit !found }' "$file"
 }
