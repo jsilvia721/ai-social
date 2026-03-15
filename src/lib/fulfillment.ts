@@ -111,17 +111,11 @@ async function handleVideoStoryboard(
   brief: FulfillableBrief,
   strategy: ContentStrategy
 ): Promise<void> {
-  // Step 1: Generate storyboard via AI
   const storyboard = await generateVideoStoryboard(brief, strategy);
-
-  // Step 2: Generate thumbnail image from the AI-produced prompt
   const { buffer, mimeType } = await generateImage(storyboard.thumbnailPrompt);
-
-  // Step 3: Upload thumbnail to S3
   const thumbKey = `media/${brief.businessId}/${brief.id}-thumb.webp`;
   const thumbnailUrl = await uploadBuffer(buffer, thumbKey, mimeType);
 
-  // Step 4: Update brief with storyboard data and transition to STORYBOARD_REVIEW
   await prisma.contentBrief.update({
     where: { id: brief.id },
     data: {

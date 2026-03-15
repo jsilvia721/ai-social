@@ -85,15 +85,4 @@ describe("generateVideoStoryboard", () => {
     expect(result.thumbnailPrompt.length).toBeGreaterThan(0);
   });
 
-  it("includes topic context in the mock response", async () => {
-    const brief = makeBrief({ topic: "AI productivity tools for teams" });
-    const strategy = makeStrategy();
-
-    const result = await generateVideoStoryboard(brief, strategy);
-
-    // Mock should return reasonable content
-    expect(result.videoScript).toBeTruthy();
-    expect(result.videoPrompt).toBeTruthy();
-    expect(result.thumbnailPrompt).toBeTruthy();
-  });
 });
