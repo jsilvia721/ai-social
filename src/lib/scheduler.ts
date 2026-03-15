@@ -30,6 +30,29 @@ const STUCK_THRESHOLD_MS = 5 * 60_000; // 5 minutes
 const RETRY_BASE_MS = 60_000; // 1 min base
 const RETRY_CAP_MS = 30 * 60_000; // 30 min cap
 
+// ── Error helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Duck-type check for BlotatoApiError that works even when prototype chains
+ * are broken (e.g., SST/Lambda esbuild bundles). Falls back to checking
+ * `err.name === "BlotatoApiError"` and `"status" in err`.
+ */
+function isBlotatoApiError(err: unknown): err is BlotatoApiError {
+  if (err instanceof BlotatoApiError) return true;
+  if (
+    err instanceof Error &&
+    err.name === "BlotatoApiError" &&
+    "status" in err
+  ) {
+    console.warn(
+      `[scheduler] BlotatoApiError matched via duck-type fallback (instanceof failed). ` +
+        `This may indicate a bundling issue.`,
+    );
+    return true;
+  }
+  return false;
+}
+
 // ── Retry helpers ────────────────────────────────────────────────────────────
 
 function retryDelayMs(attempt: number): number {
