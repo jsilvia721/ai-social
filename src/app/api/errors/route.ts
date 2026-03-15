@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
 
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.flatten().fieldErrors },
+      { error: parsed.error.issues.map((i) => i.message).join("; ") },
       { status: 400 }
     );
   }
