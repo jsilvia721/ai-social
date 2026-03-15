@@ -42,18 +42,49 @@ From each item's `**Depends on:**` field, build a dependency graph using the pos
 Items with `Depends on: none` are roots — they can start immediately.
 Items with dependencies must wait for their dependencies to complete.
 
-### 3. Create Issues in Topological Order
+### 3. Create Feature Branch
+
+Before creating work issues, create and push a feature branch from `origin/main`. This ensures the branch exists before any child issues are labeled `claude-ready` (preventing a race where an issue-worker tries to target a branch that doesn't exist yet).
+
+**Derive the branch name once** and reuse it for all subsequent steps:
+
+1. Strip any leading `Plan:` or `Plan -` prefix from the plan issue title
+2. Lowercase, replace non-alphanumeric characters with hyphens, collapse consecutive hyphens, trim trailing hyphens
+3. Truncate to 40 characters (trim any trailing hyphen after truncation)
+4. Branch name: `feat/plan-<plan-issue-number>-<slug>`
+
+Example: Plan issue #42 titled "Plan: Add Widget System (v2)" → slug `add-widget-system-v2` → branch `feat/plan-42-add-widget-system-v2`
+
+```bash
+SLUG="$(echo "<plan title>" | sed 's/^[Pp]lan[: -]*//' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//' | cut -c1-40 | sed 's/-$//')"
+BRANCH="feat/plan-<N>-${SLUG}"
+git fetch origin && git branch "$BRANCH" origin/main && git push origin "$BRANCH"
+```
+
+Comment on the plan issue with the branch name marker:
+
+```
+<!-- FEATURE_BRANCH: feat/plan-<N>-<slug> -->
+Feature branch created: `feat/plan-<N>-<slug>`
+```
+
+**If branch creation fails:** Add the `claude-blocked` label to the plan issue and comment with the error. Stop — do not create work issues or proceed further.
+
+### 4. Create Issues in Topological Order
 
 Process items in topological order (roots first, then dependents). For each item, create a GitHub issue.
 
 **Plan auto-approval:** The parent plan has been approved by the human, so child work issues are **auto-approved**. Root issues get `claude-ready` (not `needs-human-review`). This eliminates the need for individual `/go` approvals on each work item.
 
+Use the `$BRANCH` variable derived in Step 3 for the `TARGET_BRANCH` marker in every child issue:
+
 ```bash
 gh issue create \
   --title "<title from plan item>" \
   --label "<claude-ready OR blocked>" \
-  --body "$(cat <<'ISSUE_EOF'
+  --body "$(cat <<ISSUE_EOF
 <!-- PARENT_PLAN: #<plan-issue-number> -->
+<!-- TARGET_BRANCH: $BRANCH -->
 
 ### Objective
 
@@ -78,7 +109,7 @@ ISSUE_EOF
 )"
 ```
 
-**IMPORTANT:** Every child issue body MUST begin with the `<!-- PARENT_PLAN: #<plan-issue-number> -->` marker. This is used by downstream workflows to cascade approval.
+**IMPORTANT:** Every child issue body MUST begin with the `<!-- PARENT_PLAN: #<plan-issue-number> -->` marker followed by the `<!-- TARGET_BRANCH: $BRANCH -->` marker. The PARENT_PLAN marker is used by downstream workflows to cascade approval. The TARGET_BRANCH marker tells the issue-worker which branch to target.
 
 **Labeling rules:**
 - Items with NO dependencies: label `claude-ready` (auto-approved via parent plan approval)
@@ -95,7 +126,7 @@ ISSUE_EOF
 
 Use the **actual issue numbers** returned by `gh issue create`, not the position numbers from the plan.
 
-### 4. Post Summary
+### 5. Post Summary
 
 Comment on the original plan issue with a summary table mapping position numbers to created issue numbers:
 
@@ -108,19 +139,19 @@ Comment on the original plan issue with a summary table mapping position numbers
 | 2 | #102 | Add Widget API | Moderate | #101 |
 ```
 
-### 5. Close Out
+### 6. Close Out
 
 Remove the `claude-approved` label and add `claude-active` to the plan issue.
 
 ## Error Handling
 
-If anything fails during issue creation:
+If anything fails during branch creation or issue creation:
 - Comment on the plan issue with what went wrong
 - Add label `claude-blocked`
 - Do NOT add `claude-active`
 
 ## Rules
 
-- **Do not modify any code.** You only create issues.
+- **Do not modify any code.** You only create issues and feature branches.
 - **Preserve all detail** from the plan items — don't summarize or truncate the objective, context, or acceptance criteria.
 - **Map dependencies correctly** — use actual created issue numbers, not position numbers, when writing dependency references.
