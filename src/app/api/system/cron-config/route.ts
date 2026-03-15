@@ -104,6 +104,18 @@ const patchSchema = z
       }
     }
 
+    // Reject rate parameters for weekly-only crons
+    if (
+      WEEKLY_CRONS.has(data.cronName) &&
+      !RATE_CRONS.has(data.cronName) &&
+      data.intervalValue !== undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${data.cronName} is a weekly cron; use dayOfWeek and hourUtc instead of intervalValue`,
+      });
+    }
+
     // Weekly cron validation
     if (WEEKLY_CRONS.has(data.cronName) && data.dayOfWeek !== undefined) {
       if (data.hourUtc === undefined) {
@@ -133,12 +145,14 @@ async function syncScheduleToEventBridge(
 ): Promise<string | undefined> {
   const result = await updateCronSchedule(cronName, expression);
   if (!result.success) {
-    await prisma.cronConfig.update({
-      where: { cronName },
-      data: { syncStatus: "PENDING" },
-    });
+    // syncStatus stays PENDING (set before calling this helper)
     return "EventBridge sync pending";
   }
+  // Promote to SYNCED on successful sync
+  await prisma.cronConfig.update({
+    where: { cronName },
+    data: { syncStatus: "SYNCED" },
+  });
   return undefined;
 }
 
@@ -153,10 +167,6 @@ async function syncToggleToEventBridge(
     ? await enableCron(cronName)
     : await disableCron(cronName);
   if (!result.success) {
-    await prisma.cronConfig.update({
-      where: { cronName },
-      data: { syncStatus: "PENDING" },
-    });
     return "EventBridge sync pending";
   }
   return undefined;
@@ -219,7 +229,8 @@ export async function GET() {
     });
 
     return NextResponse.json({ configs: enriched });
-  } catch {
+  } catch (err) {
+    console.error("[GET /api/system/cron-config]", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -279,7 +290,7 @@ export async function PATCH(req: NextRequest) {
           intervalValue,
           intervalUnit: unit,
           scheduleExpression: expression,
-          syncStatus: "SYNCED",
+          syncStatus: "PENDING",
           ...(enabled !== undefined ? { enabled } : {}),
         },
       });
@@ -298,7 +309,7 @@ export async function PATCH(req: NextRequest) {
           dayOfWeek,
           hourUtc,
           scheduleExpression: expression,
-          syncStatus: "SYNCED",
+          syncStatus: "PENDING",
           ...(enabled !== undefined ? { enabled } : {}),
         },
       });
@@ -309,7 +320,8 @@ export async function PATCH(req: NextRequest) {
 
     // If only cronName provided, nothing to update
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (err) {
+    console.error("[PATCH /api/system/cron-config]", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

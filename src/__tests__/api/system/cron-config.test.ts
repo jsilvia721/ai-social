@@ -273,6 +273,20 @@ describe("PATCH /api/system/cron-config", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects rate params for weekly-only cron (optimize)", async () => {
+    mockAuthenticatedAsAdmin();
+    const res = await PATCH(
+      makePatchRequest({
+        cronName: "optimize",
+        intervalValue: 5,
+        intervalUnit: "minutes",
+      })
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("weekly");
+  });
+
   it("rejects invalid dayOfWeek for weekly crons", async () => {
     mockAuthenticatedAsAdmin();
     const res = await PATCH(
@@ -311,15 +325,21 @@ describe("PATCH /api/system/cron-config", () => {
     expect(body.success).toBe(true);
     expect(body.warning).toBeUndefined();
 
-    // Should have updated DB with SYNCED status
+    // First DB call sets PENDING, second call promotes to SYNCED
     expect(prismaMock.cronConfig.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { cronName: "publish" },
         data: expect.objectContaining({
           intervalValue: 5,
           intervalUnit: "minutes",
-          syncStatus: "SYNCED",
+          syncStatus: "PENDING",
         }),
+      })
+    );
+    expect(prismaMock.cronConfig.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { cronName: "publish" },
+        data: { syncStatus: "SYNCED" },
       })
     );
     expect(mockUpdateCronSchedule).toHaveBeenCalledWith(
