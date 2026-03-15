@@ -44,13 +44,17 @@ Items with dependencies must wait for their dependencies to complete.
 
 ### 3. Create Issues in Topological Order
 
-Process items in topological order (roots first, then dependents). For each item, create a GitHub issue:
+Process items in topological order (roots first, then dependents). For each item, create a GitHub issue.
+
+**Plan auto-approval:** The parent plan has been approved by the human, so child work issues are **auto-approved**. Root issues get `claude-ready` (not `needs-human-review`). This eliminates the need for individual `/go` approvals on each work item.
 
 ```bash
 gh issue create \
   --title "<title from plan item>" \
-  --label "<needs-human-review OR blocked>" \
+  --label "<claude-ready OR blocked>" \
   --body "$(cat <<'ISSUE_EOF'
+<!-- PARENT_PLAN: #<plan-issue-number> -->
+
 ### Objective
 
 <objective from plan item>
@@ -74,8 +78,10 @@ ISSUE_EOF
 )"
 ```
 
+**IMPORTANT:** Every child issue body MUST begin with the `<!-- PARENT_PLAN: #<plan-issue-number> -->` marker. This is used by downstream workflows to cascade approval.
+
 **Labeling rules:**
-- Items with NO dependencies: label `needs-human-review` (requires human approval — comment `/go` or 👍 to approve)
+- Items with NO dependencies: label `claude-ready` (auto-approved via parent plan approval)
 - Items WITH dependencies: label `blocked` (waiting on dependency issues). Also add a Dependencies section:
 
 ```
@@ -84,7 +90,7 @@ ISSUE_EOF
 > Do not start until the following issues are merged:
 > - #<actual issue number> — <title>
 >
-> Once all dependencies are merged, this issue will be labeled `needs-human-review` for human review. Comment `/go` or 👍 to approve.
+> Once all dependencies are merged, this issue will be auto-approved via the parent plan.
 ```
 
 Use the **actual issue numbers** returned by `gh issue create`, not the position numbers from the plan.

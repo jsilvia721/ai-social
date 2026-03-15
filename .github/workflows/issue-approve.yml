@@ -57,14 +57,14 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number,
-                  labels: ['claude-approved']
+                  labels: ['claude-approved', 'plan-auto-approved']
                 });
 
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number,
-                  body: 'Plan approved. The issue daemon will pick this up and create work issues shortly.'
+                  body: 'Plan approved. Child work issues will be **auto-approved** (`claude-ready`). The issue daemon will pick this up and create work issues shortly.'
                 });
               } else {
                 // Re-add needs-human-review since we can't route without markers

@@ -136,8 +136,6 @@ jobs:
               }
 
               if (allResolved) {
-                console.log(`#${depIssueNum}: all dependencies resolved! Removing blocked label and adding needs-human-review.`);
-
                 // Remove 'blocked' label if present
                 try {
                   await github.rest.issues.removeLabel({
@@ -149,16 +147,51 @@ jobs:
                   console.log(`#${depIssueNum}: 'blocked' label not present, skipping removal.`);
                 }
 
-                await github.rest.issues.addLabels({
-                  owner, repo,
-                  issue_number: depIssueNum,
-                  labels: ['needs-human-review']
-                });
+                // Check if this issue belongs to an auto-approved plan
+                const parentPlanMatch = body.match(/<!-- PARENT_PLAN: #(\d+) -->/);
+                let autoApprove = false;
 
-                await github.rest.issues.createComment({
-                  owner, repo,
-                  issue_number: depIssueNum,
-                  body: `All dependencies resolved (${triggerDescription}). Marking as \`needs-human-review\` for human review. Comment \`/go\` or 👍 to approve.`
-                });
+                if (parentPlanMatch) {
+                  const parentNumber = parseInt(parentPlanMatch[1], 10);
+                  try {
+                    const parentIssue = await github.rest.issues.get({
+                      owner, repo,
+                      issue_number: parentNumber
+                    });
+                    const parentLabels = parentIssue.data.labels.map(l => l.name);
+                    autoApprove = parentLabels.includes('plan-auto-approved');
+                    console.log(`#${depIssueNum}: parent plan #${parentNumber} auto-approved=${autoApprove}`);
+                  } catch (e) {
+                    console.log(`#${depIssueNum}: could not fetch parent plan #${parentNumber}, falling back to manual review.`);
+                  }
+                }
+
+                if (autoApprove) {
+                  console.log(`#${depIssueNum}: all dependencies resolved, auto-approving (parent plan approved).`);
+                  await github.rest.issues.addLabels({
+                    owner, repo,
+                    issue_number: depIssueNum,
+                    labels: ['claude-ready']
+                  });
+
+                  await github.rest.issues.createComment({
+                    owner, repo,
+                    issue_number: depIssueNum,
+                    body: `All dependencies resolved (${triggerDescription}). Auto-approved via parent plan. Marking as \`claude-ready\`.`
+                  });
+                } else {
+                  console.log(`#${depIssueNum}: all dependencies resolved, requires human review.`);
+                  await github.rest.issues.addLabels({
+                    owner, repo,
+                    issue_number: depIssueNum,
+                    labels: ['needs-human-review']
+                  });
+
+                  await github.rest.issues.createComment({
+                    owner, repo,
+                    issue_number: depIssueNum,
+                    body: `All dependencies resolved (${triggerDescription}). Marking as \`needs-human-review\` for human review. Comment \`/go\` or 👍 to approve.`
+                  });
+                }
               }
             }

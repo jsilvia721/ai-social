@@ -100,16 +100,54 @@ gh issue comment <number> --body "<!-- progress:step_2_plan -->**[Progress]** Pl
 
 ## Step 4: Review Gate (Complexity-Dependent)
 
-### Trivial Issues
+### Detect Auto-Approved Work
+
+Before choosing review depth, check if this issue is a child of an approved plan:
+
+```bash
+# Check for PARENT_PLAN marker in issue body
+gh issue view <number> --json body --jq '.body' | grep -q '<!-- PARENT_PLAN:'
+```
+
+If the marker exists, this is **auto-approved work** — the human approved direction at the plan level. This triggers the **mandatory self-validation gate** described below.
+
+### Standalone Issues (no PARENT_PLAN marker)
+
+#### Trivial Issues
 - Quick self-review: re-read your diff (`git diff origin/main...HEAD`), check for obvious mistakes.
 
-### Moderate Issues
+#### Moderate Issues
 - Launch **2 review subagents in parallel:**
   - `kieran-typescript-reviewer` — always include
   - Pick ONE of: `security-sentinel`, `performance-oracle`, `code-simplicity-reviewer`
 
-### Complex Issues
+#### Complex Issues
 - Launch the full review suite from `compound-engineering.local.md`. Include `data-integrity-guardian` for schema changes and `deployment-verification-agent` for deployment impact.
+
+### Auto-Approved Work (has PARENT_PLAN marker) — Mandatory Self-Validation Gate
+
+For ALL complexity tiers (including Trivial), run the full validation gate:
+
+1. **Minimum 2 review agents** — launch in parallel:
+   - `security-sentinel` — always include
+   - `kieran-typescript-reviewer` — always include
+   - For Complex issues, also add: `data-integrity-guardian` (if schema changes), `deployment-verification-agent` (if deployment impact)
+
+2. **Run `/preflight`** — ci:check + migration check + rebase check + stray files. This must pass before creating the PR.
+
+3. **Critical findings escalation** — if ANY review agent reports **Critical** severity findings:
+   - Still create the PR (don't block — the human will review)
+   - Add label `needs-human-attention` to the PR
+   - Add a prominent warning at the top of the PR description:
+     ```
+     > **⚠️ Critical review findings require human attention.** See Review Results below.
+     ```
+
+This ensures that by the time the human sees a PR from auto-approved work, it has been:
+- Implemented with TDD (tests written first)
+- Reviewed by 2+ specialized agents
+- Passed ci:check (lint + typecheck + coverage)
+- Verified against test plan
 
 **BLOCKING REQUIREMENT:** Do NOT proceed to Step 5 until ALL launched review agents have returned. If an agent fails, re-launch once. If it fails again, record "failed after retry."
 
