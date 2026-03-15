@@ -11,11 +11,7 @@ jobs:
   approve:
     if: >-
       github.event.issue.pull_request == null &&
-      (
-        contains(github.event.issue.labels.*.name, 'claude-plan-review') ||
-        contains(github.event.issue.labels.*.name, 'needs-triage') ||
-        contains(github.event.issue.labels.*.name, 'claude-self-improvement')
-      ) &&
+      contains(github.event.issue.labels.*.name, 'needs-human-review') &&
       (
         contains(github.event.comment.body, '/go') ||
         contains(github.event.comment.body, '/approve') ||
@@ -32,14 +28,14 @@ jobs:
             const issue_number = context.issue.number;
             const labels = context.payload.issue.labels.map(l => l.name);
 
-            if (labels.includes('claude-plan-review')) {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                name: 'claude-plan-review'
-              });
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              name: 'needs-human-review'
+            });
 
+            if (labels.includes('plan')) {
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -53,51 +49,21 @@ jobs:
                 issue_number,
                 body: 'Plan approved. The issue daemon will pick this up and create work issues shortly.'
               });
-            } else if (labels.includes('needs-triage')) {
-              await github.rest.issues.removeLabel({
+            } else if (labels.includes('bug-report')) {
+              await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number,
-                name: 'needs-triage'
+                labels: ['bug-investigate']
               });
 
-              if (labels.includes('bug-report')) {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number,
-                  labels: ['bug-investigate']
-                });
-
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number,
-                  body: 'Bug approved for investigation. A plan will be created shortly.'
-                });
-              } else {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number,
-                  labels: ['claude-ready']
-                });
-
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number,
-                  body: 'Issue approved. The issue daemon will pick this up for implementation shortly.'
-                });
-              }
-            } else if (labels.includes('claude-self-improvement')) {
-              await github.rest.issues.removeLabel({
+              await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number,
-                name: 'claude-self-improvement'
+                body: 'Bug approved for investigation. A plan will be created shortly.'
               });
-
+            } else {
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -109,6 +75,6 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number,
-                body: 'Self-improvement issue approved. The issue daemon will pick this up for implementation shortly.'
+                body: 'Issue approved. The issue daemon will pick this up for implementation shortly.'
               });
             }

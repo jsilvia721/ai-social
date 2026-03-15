@@ -50,7 +50,7 @@ Create a GitHub issue with the plan for fixing the bug. The issue body MUST incl
 ```bash
 gh issue create \
   --title "Plan: Fix bug #<number> — <concise summary of the bug>" \
-  --label "claude-plan-review" \
+  --label "plan" --label "needs-human-review" \
   --body "$(cat <<'PLAN_EOF'
 ## Problem
 

@@ -27,7 +27,7 @@ LABEL_ACTIVE="claude-active"
 LABEL_BLOCKED="claude-blocked"
 LABEL_INTERRUPTED="claude-interrupted"
 LABEL_RESUME="claude-resume"
-LABEL_PLAN_REVIEW="claude-plan-review"
+LABEL_HUMAN_REVIEW="needs-human-review"
 LABEL_APPROVED="claude-approved"
 LABEL_BUG_INVESTIGATE="bug-investigate"
 LABEL_BUG_PLANNED="bug-planned"
@@ -787,10 +787,10 @@ while true; do
             record_worker "$!" "$number" "plan"
             log "Spawned plan-executor PID $! for issue #${number}"
           else
-            # Single work item — route to needs-triage for human review
-            log "Issue #${number} is a single work item (no plan markers), routing to needs-triage"
-            gh issue edit "$number" --remove-label "$LABEL_APPROVED" --add-label "needs-triage" 2>/dev/null || true
-            gh issue comment "$number" --body "This is a single work item (not a multi-item plan). Routing to \`needs-triage\` for human review before work begins." 2>/dev/null || true
+            # Single work item — route to needs-human-review for human review
+            log "Issue #${number} is a single work item (no plan markers), routing to needs-human-review"
+            gh issue edit "$number" --remove-label "$LABEL_APPROVED" --add-label "$LABEL_HUMAN_REVIEW" 2>/dev/null || true
+            gh issue comment "$number" --body "This is a single work item (not a multi-item plan). Routing to \`needs-human-review\` for human review before work begins." 2>/dev/null || true
           fi
         done <<< "$approved_issues"
 

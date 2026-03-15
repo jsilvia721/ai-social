@@ -117,7 +117,7 @@ Fix any issues the reviews surface, then re-run ci:check.
 
 ### Review Pattern Escalation (Moderate + Complex only)
 
-If a review finding reveals a missing convention (something you should have known *before* writing the code), propose a `.claude/rules/` rule using the `claude-self-improvement` issue template from Step 7. Cap at **1 per review cycle**. Don't escalate code bugs.
+If a review finding reveals a missing convention (something you should have known *before* writing the code), propose a `.claude/rules/` rule using the `needs-human-review` issue template from Step 7. Cap at **1 per review cycle**. Don't escalate code bugs.
 
 Post progress:
 ```bash
@@ -231,7 +231,7 @@ Create **at most 3** self-improvement issues per run. Prioritize by severity.
 ```bash
 gh issue create \
   --title "Self-improvement: <concise title>" \
-  --label "claude-self-improvement" \
+  --label "needs-human-review" \
   --body "$(cat <<'SI_EOF'
 ## Objective
 <What should be changed and why — actionable task for a future issue-worker>
@@ -258,7 +258,7 @@ SI_EOF
 
 ### Escalation
 
-If the proposed fix is complex (multi-file, architectural), invoke the `create-issue` skill with `--label claude-self-improvement` instead.
+If the proposed fix is complex (multi-file, architectural), invoke the `create-issue` skill with `--label needs-human-review` instead.
 
 ### Error Handling
 

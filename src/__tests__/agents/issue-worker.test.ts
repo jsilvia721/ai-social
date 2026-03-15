@@ -157,7 +157,7 @@ describe("issue-worker agent prompt", () => {
         content,
         "## Step 7: Self-Assessment"
       );
-      expect(selfAssessmentSection).toContain("claude-self-improvement");
+      expect(selfAssessmentSection).toContain("needs-human-review");
       expect(selfAssessmentSection).toContain("Self-improvement:");
       expect(selfAssessmentSection).toContain("Signal type:");
       expect(selfAssessmentSection).toContain("Severity:");
@@ -259,9 +259,9 @@ describe("issue-worker agent prompt", () => {
       expect(section).toMatch(/pattern.*escalat|escalat.*pattern/i);
     });
 
-    it("uses claude-self-improvement label for escalated patterns", () => {
+    it("uses needs-human-review label for escalated patterns", () => {
       const section = extractSection(content, "## Step 4: Review Gate");
-      expect(section).toContain("claude-self-improvement");
+      expect(section).toContain("needs-human-review");
     });
 
     it("distinguishes conventions from bugs", () => {

@@ -136,7 +136,7 @@ jobs:
               }
 
               if (allResolved) {
-                console.log(`#${depIssueNum}: all dependencies resolved! Removing blocked label and adding needs-triage.`);
+                console.log(`#${depIssueNum}: all dependencies resolved! Removing blocked label and adding needs-human-review.`);
 
                 // Remove 'blocked' label if present
                 try {
@@ -152,13 +152,13 @@ jobs:
                 await github.rest.issues.addLabels({
                   owner, repo,
                   issue_number: depIssueNum,
-                  labels: ['needs-triage']
+                  labels: ['needs-human-review']
                 });
 
                 await github.rest.issues.createComment({
                   owner, repo,
                   issue_number: depIssueNum,
-                  body: `All dependencies resolved (${triggerDescription}). Marking as \`needs-triage\` for human review. Comment \`/go\` or 👍 to approve.`
+                  body: `All dependencies resolved (${triggerDescription}). Marking as \`needs-human-review\` for human review. Comment \`/go\` or 👍 to approve.`
                 });
               }
             }

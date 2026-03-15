@@ -49,7 +49,7 @@ Process items in topological order (roots first, then dependents). For each item
 ```bash
 gh issue create \
   --title "<title from plan item>" \
-  --label "<needs-triage OR blocked>" \
+  --label "<needs-human-review OR blocked>" \
   --body "$(cat <<'ISSUE_EOF'
 ### Objective
 
@@ -75,7 +75,7 @@ ISSUE_EOF
 ```
 
 **Labeling rules:**
-- Items with NO dependencies: label `needs-triage` (requires human approval — comment `/go` or 👍 to approve)
+- Items with NO dependencies: label `needs-human-review` (requires human approval — comment `/go` or 👍 to approve)
 - Items WITH dependencies: label `blocked` (waiting on dependency issues). Also add a Dependencies section:
 
 ```
@@ -84,7 +84,7 @@ ISSUE_EOF
 > Do not start until the following issues are merged:
 > - #<actual issue number> — <title>
 >
-> Once all dependencies are merged, this issue will be labeled `needs-triage` for human review. Comment `/go` or 👍 to approve.
+> Once all dependencies are merged, this issue will be labeled `needs-human-review` for human review. Comment `/go` or 👍 to approve.
 ```
 
 Use the **actual issue numbers** returned by `gh issue create`, not the position numbers from the plan.

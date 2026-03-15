@@ -29,7 +29,7 @@ MIN_COUNT_THRESHOLD=1      # skip errors seen fewer than this many times (unless
 COOLDOWN_SECONDS=1800      # don't re-check the same fingerprint within this window (CloudWatch only)
 LOG_DIR="./logs/bug-monitor"
 LABEL_BUG="bug-report"
-LABEL_TRIAGE="needs-triage"
+LABEL_TRIAGE="needs-human-review"
 LABEL_BUG_MONITOR_HEALTH="bug-monitor-health"
 
 # User-specified log groups (empty = auto-discover)

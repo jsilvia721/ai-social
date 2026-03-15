@@ -250,7 +250,7 @@ export function generateFingerprint(route: string, findingTitle: string): string
 }
 
 export function getLabelsForFinding(finding: Finding): string[] {
-  const labels = ["qa-audit", "needs-triage"];
+  const labels = ["qa-audit", "needs-human-review"];
   if (finding.complexity === "simple") {
     labels.push("simple-fix");
   } else {
