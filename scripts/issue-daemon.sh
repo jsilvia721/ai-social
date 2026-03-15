@@ -117,6 +117,11 @@ kill_worker_tmux_session() {
 # $1 — PID of the process group leader
 kill_process_group() {
   local pid="$1"
+  # Guard against invalid PIDs (empty, 0, or 1 would kill unintended processes)
+  if [ -z "$pid" ] || [ "$pid" -le 1 ] 2>/dev/null; then
+    echo "[daemon] WARNING: refusing to kill process group for invalid PID: '$pid'"
+    return 1
+  fi
   # Attempt process group kill first; fall back to regular kill
   if ! kill -TERM -- -"$pid" 2>/dev/null; then
     kill -TERM "$pid" 2>/dev/null || true
@@ -490,7 +495,7 @@ EOF
 )"
 
     # shellcheck disable=SC2086
-    perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
+    (perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
       $STDBUF_PREFIX claude -p "$prompt" \
       --agent "issue-worker" \
       --worktree \
@@ -498,7 +503,7 @@ EOF
       --session-id "$session_id" \
       --max-budget-usd "$MAX_BUDGET" \
       --allowedTools "Agent,Bash,Edit,Glob,Grep,Read,Write,Skill" \
-      2>&1 | tee "$log_file" &
+      2>&1 | tee "$log_file") &
     local claude_pid=$!
   fi
 
@@ -596,7 +601,7 @@ run_plan_executor() {
 
   # Run Claude in background so heartbeat can run concurrently
   # shellcheck disable=SC2086
-  perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
+  (perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
     $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the plan-executor agent. Process approved plan issue #${issue_number}.
 
@@ -613,7 +618,7 @@ EOF
     $TMUX_FLAGS \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Bash,Glob,Grep,Read" \
-    2>&1 | tee "$log_file" &
+    2>&1 | tee "$log_file") &
   local claude_pid=$!
 
   # Start heartbeat writer
@@ -682,7 +687,7 @@ run_bug_investigator() {
 
   # Run Claude in background so heartbeat can run concurrently
   # shellcheck disable=SC2086
-  perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
+  (perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
     $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the bug-investigator agent. Investigate bug issue #${issue_number}.
 
@@ -699,7 +704,7 @@ EOF
     $TMUX_FLAGS \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Bash,Glob,Grep,Read" \
-    2>&1 | tee "$log_file" &
+    2>&1 | tee "$log_file") &
   local claude_pid=$!
 
   # Start heartbeat writer
@@ -766,7 +771,7 @@ run_plan_writer() {
 
   # Run Claude in background so heartbeat can run concurrently
   # shellcheck disable=SC2086
-  perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
+  (perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
     $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the plan-writer agent. Write a full plan for stub plan issue #${issue_number}.
 
@@ -783,7 +788,7 @@ EOF
     $TMUX_FLAGS \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Bash,Glob,Grep,Read" \
-    2>&1 | tee "$log_file" &
+    2>&1 | tee "$log_file") &
   local claude_pid=$!
 
   # Start heartbeat writer
