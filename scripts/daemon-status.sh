@@ -6,6 +6,7 @@
 #   ./scripts/daemon-status.sh -v      # verbose: show last 5 lines of each worker's log
 #   ./scripts/daemon-status.sh -w      # watch mode: refresh every 5 seconds
 #   ./scripts/daemon-status.sh -g      # fetch latest GitHub progress tag per active worker
+#   ./scripts/daemon-status.sh -a 123  # attach to tmux session for issue #123
 #   ./scripts/daemon-status.sh -v -w -g # all flags combined
 #
 # Requirements:
@@ -17,18 +18,27 @@ set -euo pipefail
 VERBOSE=0
 WATCH=0
 GITHUB=0
+ATTACH_ISSUE=""
 LOG_DIR="${LOG_DIR:-./logs/issue-daemon}"
 WATCH_INTERVAL=5
 
 # --- Parse flags --------------------------------------------------------------
-while getopts "vwg" opt; do
+while getopts "vwga:" opt; do
   case $opt in
     v) VERBOSE=1 ;;
     w) WATCH=1 ;;
     g) GITHUB=1 ;;
-    *) echo "Usage: $0 [-v] [-w] [-g]" && exit 1 ;;
+    a) ATTACH_ISSUE="$OPTARG" ;;
+    *) echo "Usage: $0 [-v] [-w] [-g] [-a <issue>]" && exit 1 ;;
   esac
 done
+
+# Validate -a argument is numeric
+if [ -n "$ATTACH_ISSUE" ]; then
+  case "$ATTACH_ISSUE" in
+    *[!0-9]*) echo "Error: -a requires a numeric issue number" >&2; exit 1 ;;
+  esac
+fi
 
 # --- Setup --------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -112,6 +122,53 @@ get_progress_tag() {
   local issue="$1"
   gh issue view "$issue" --json comments \
     -q '[.comments[].body | capture("<!-- progress:(?<t>[a-z0-9_]+) -->") | .t] | last // empty' 2>/dev/null || true
+}
+
+# Find the tmux session name for a given issue number.
+# Checks for sessions named "worker-<issue>" (resume path) or containing
+# the issue number (fresh-start --tmux=classic path).
+# $1 — issue number
+# Returns session name or empty string.
+find_tmux_session() {
+  local issue="$1"
+
+  # Bail if tmux is not available or no server is running
+  if ! command -v tmux >/dev/null 2>&1; then
+    return
+  fi
+
+  local sessions
+  sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null) || return
+
+  # Priority 1: exact match on "worker-<issue>" (daemon resume path)
+  if echo "$sessions" | grep -qxF "worker-${issue}"; then
+    echo "worker-${issue}"
+    return
+  fi
+
+  # Priority 2: session name ending with "-<issue>" (--tmux=classic worktree naming)
+  local match
+  match=$(echo "$sessions" | grep -E "(^|-)${issue}\$" | head -1)
+  if [ -n "$match" ]; then
+    echo "$match"
+    return
+  fi
+}
+
+# Attach to the tmux session for a given issue number.
+# $1 — issue number
+attach_to_session() {
+  local issue="$1"
+  local session
+  session=$(find_tmux_session "$issue")
+
+  if [ -z "$session" ]; then
+    echo "No tmux session found for issue #${issue}."
+    exit 1
+  fi
+
+  echo "Attaching to tmux session '${session}' for issue #${issue}..."
+  exec tmux attach -t "$session"
 }
 
 # --- Display ------------------------------------------------------------------
@@ -221,8 +278,20 @@ show_status() {
       fi
     fi
 
-    printf '  #%-4s %-9s %s elapsed  %s%s  %s\n' \
-      "$issue" "$type" "$elapsed_str" "$hb_str" "$progress_str" "$size_str"
+    # Tmux session info
+    local tmux_str=""
+    local tmux_session
+    tmux_session=$(find_tmux_session "$issue")
+    if [ -n "$tmux_session" ]; then
+      tmux_str="  tmux:${tmux_session}"
+    fi
+
+    printf '  #%-4s %-9s %s elapsed  %s%s%s  %s\n' \
+      "$issue" "$type" "$elapsed_str" "$hb_str" "$progress_str" "$tmux_str" "$size_str"
+
+    if [ "$VERBOSE" -eq 1 ] && [ -n "$tmux_session" ]; then
+      echo "         tmux attach -t '${tmux_session}'"
+    fi
 
     if [ "$VERBOSE" -eq 1 ] && [ -f "$log_path" ]; then
       echo "    --- last 5 lines ---"
@@ -235,6 +304,12 @@ show_status() {
 }
 
 # --- Main ---------------------------------------------------------------------
+
+# Handle -a flag: attach to tmux session for an issue
+if [ -n "$ATTACH_ISSUE" ]; then
+  attach_to_session "$ATTACH_ISSUE"
+  exit 0
+fi
 
 if [ "$WATCH" -eq 1 ]; then
   while true; do
