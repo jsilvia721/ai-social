@@ -349,7 +349,7 @@ assert_not_contains "does not show unrelated session" "worker-300" "$output"
 # Attach command only shown in verbose mode
 assert_not_contains "no attach hint without -v" "tmux attach" "$output"
 output=$(PATH="$MOCK_TMUX_DIR:$PATH" run_status -v)
-assert_contains "shows attach command with -v" "tmux attach -t worker-200" "$output"
+assert_contains "shows attach command with -v" "tmux attach -t 'worker-200'" "$output"
 
 # Test with no tmux available
 MOCK_NO_TMUX_DIR=$(mktemp -d)
@@ -404,6 +404,10 @@ assert_contains "attach mentions issue number" "#999" "$output"
 # Test attach when tmux is not available
 output=$(PATH="$MOCK_NO_TMUX_DIR:/usr/bin:/bin" LOG_DIR="$TEST_LOG_DIR" DAEMON_STATE_DIR="$TEST_STATE_DIR" bash "$STATUS_SCRIPT" -a 42 2>/dev/null || true)
 assert_contains "attach shows error when tmux unavailable" "No tmux session found" "$output"
+
+# Test -a with non-numeric input
+output=$(LOG_DIR="$TEST_LOG_DIR" DAEMON_STATE_DIR="$TEST_STATE_DIR" bash "$STATUS_SCRIPT" -a "abc" 2>&1 || true)
+assert_contains "rejects non-numeric -a argument" "numeric issue number" "$output"
 
 rm -rf "$MOCK_ATTACH_DIR"
 

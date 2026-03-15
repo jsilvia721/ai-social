@@ -33,6 +33,13 @@ while getopts "vwga:" opt; do
   esac
 done
 
+# Validate -a argument is numeric
+if [ -n "$ATTACH_ISSUE" ]; then
+  case "$ATTACH_ISSUE" in
+    *[!0-9]*) echo "Error: -a requires a numeric issue number" >&2; exit 1 ;;
+  esac
+fi
+
 # --- Setup --------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"
@@ -283,7 +290,7 @@ show_status() {
       "$issue" "$type" "$elapsed_str" "$hb_str" "$progress_str" "$tmux_str" "$size_str"
 
     if [ "$VERBOSE" -eq 1 ] && [ -n "$tmux_session" ]; then
-      echo "         tmux attach -t ${tmux_session}"
+      echo "         tmux attach -t '${tmux_session}'"
     fi
 
     if [ "$VERBOSE" -eq 1 ] && [ -f "$log_path" ]; then
