@@ -31,6 +31,8 @@ LABEL_PLAN_REVIEW="claude-plan-review"
 LABEL_APPROVED="claude-approved"
 LABEL_BUG_INVESTIGATE="bug-investigate"
 LABEL_BUG_PLANNED="bug-planned"
+LABEL_PLAN="plan"
+LABEL_NEEDS_HUMAN_REVIEW="needs-human-review"
 LOG_DIR="./logs/issue-daemon"
 RATE_LIMIT_PAUSE_SECONDS=900
 WALL_TIMEOUT=60            # wall-clock timeout in minutes per worker
@@ -587,6 +589,83 @@ EOF
   remove_worker "$self_pid"
 }
 
+# --- Plan writer function -----------------------------------------------------
+run_plan_writer() {
+  local issue_number="$1"
+  local issue_title="$2"
+  local log_file="$LOG_DIR/plan-writer-${issue_number}.log"
+
+  log "Starting plan-writer for issue #${issue_number}: ${issue_title}"
+
+  # Label as in-progress
+  gh issue edit "$issue_number" --add-label "$LABEL_WIP" 2>/dev/null || true
+
+  # Record start time
+  local start_time
+  start_time=$(date +%s)
+
+  # Run Claude in background so heartbeat can run concurrently
+  $STDBUF_PREFIX claude -p "$(cat <<EOF
+You are the plan-writer agent. Write a full plan for stub plan issue #${issue_number}.
+
+Read the full issue with: gh issue view ${issue_number} --json title,body,labels
+
+Follow your agent instructions exactly — research the codebase, write a structured plan
+with PLAN_ITEMS markers, and update the issue.
+
+If you get stuck, comment on the issue and add the label "claude-blocked".
+EOF
+)" \
+    --agent "plan-writer" \
+    --max-budget-usd "$MAX_BUDGET" \
+    --allowedTools "Bash,Glob,Grep,Read" \
+    > "$log_file" 2>&1 &
+  local claude_pid=$!
+
+  # Start heartbeat writer
+  local hb_pid
+  hb_pid=$(start_heartbeat "$issue_number" "$claude_pid")
+
+  # Wait for Claude to finish
+  wait "$claude_pid"
+  local exit_code=$?
+
+  # Stop heartbeat
+  stop_heartbeat "$hb_pid" "$issue_number"
+
+  local end_time
+  end_time=$(date +%s)
+  local runtime=$(( end_time - start_time ))
+
+  # Get our own PID for cleanup (Bash 3 compatible)
+  local self_pid
+  self_pid=$(sh -c 'echo $PPID')
+
+  # Check for rate limit first
+  if detect_rate_limit "$exit_code" "$log_file"; then
+    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-writer" "$log_file"
+    remove_worker "$self_pid"
+    return
+  fi
+
+  if [ $exit_code -eq 0 ]; then
+    log "Plan-writer for issue #${issue_number} completed successfully"
+    # plan-writer adds needs-human-review itself; just remove WIP
+    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  else
+    record_failure
+    log "Plan-writer for issue #${issue_number} failed (exit code: $exit_code)"
+    local labels
+    labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
+    if ! echo "$labels" | grep -q "$LABEL_BLOCKED"; then
+      gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
+      gh issue comment "$issue_number" --body "Plan-writer exited with code $exit_code. Check logs at \`$log_file\` for details." 2>/dev/null || true
+    fi
+  fi
+
+  remove_worker "$self_pid"
+}
+
 # --- Worker tracking via PID file ---------------------------------------------
 active_worker_count() {
   local count=0
@@ -604,7 +683,7 @@ active_worker_count() {
 
 # --- Main loop ----------------------------------------------------------------
 log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, timeout=${WALL_TIMEOUT}m)"
-log "Watching for issues labeled '${LABEL_RESUME}', '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', '${LABEL_BUG_INVESTIGATE}', and '${LABEL_READY}'..."
+log "Watching for issues labeled '${LABEL_RESUME}', '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', '${LABEL_PLAN}', '${LABEL_BUG_INVESTIGATE}', and '${LABEL_READY}'..."
 log "PID file: ${DAEMON_PID_FILE} (send SIGUSR1 to toggle drain mode)"
 
 while true; do
@@ -685,6 +764,8 @@ while true; do
         stale_log_file="$LOG_DIR/issue-${w_issue}.log"
         if [ "$w_type" = "plan" ]; then
           stale_log_file="$LOG_DIR/plan-${w_issue}.log"
+        elif [ "$w_type" = "plan-writer" ]; then
+          stale_log_file="$LOG_DIR/plan-writer-${w_issue}.log"
         elif [ "$w_type" = "bug-investigate" ]; then
           stale_log_file="$LOG_DIR/bug-investigate-${w_issue}.log"
         fi
@@ -795,6 +876,46 @@ while true; do
         done <<< "$approved_issues"
 
         # Recalculate available slots after spawning plan executors
+        active=$(active_worker_count)
+        available_slots=$(( MAX_WORKERS - active ))
+      fi
+    fi
+
+    # --- Priority 1.25: Stub plan issues (plan-writer) ---
+    if [ "$available_slots" -gt 0 ]; then
+      # Find issues labeled "plan" that are not already in progress or completed
+      plan_issues=$(gh issue list \
+        --state open \
+        --label "$LABEL_PLAN" \
+        --limit "$available_slots" \
+        --json number,title,labels \
+        -q '.[] | @json' 2>/dev/null || echo "")
+
+      if [ -n "$plan_issues" ]; then
+        while IFS= read -r issue_json; do
+          number=$(echo "$issue_json" | jq -r '.number')
+          title=$(echo "$issue_json" | jq -r '.title')
+
+          # Filter out issues with exclusion labels
+          issue_labels=$(echo "$issue_json" | jq -r '.labels[].name' 2>/dev/null)
+          skip=false
+          for exclude_label in "$LABEL_NEEDS_HUMAN_REVIEW" "$LABEL_WIP" "$LABEL_APPROVED" "$LABEL_BLOCKED" "$LABEL_DONE"; do
+            if echo "$issue_labels" | grep -qx "$exclude_label"; then
+              skip=true
+              break
+            fi
+          done
+          if [ "$skip" = "true" ]; then
+            log "Skipping plan issue #${number} (has exclusion label)"
+            continue
+          fi
+
+          run_plan_writer "$number" "$title" &
+          record_worker "$!" "$number" "plan-writer"
+          log "Spawned plan-writer PID $! for issue #${number}"
+        done <<< "$plan_issues"
+
+        # Recalculate available slots
         active=$(active_worker_count)
         available_slots=$(( MAX_WORKERS - active ))
       fi
