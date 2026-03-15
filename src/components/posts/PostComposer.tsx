@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { Sparkles, Loader2, Send, Clock, ImageIcon, Upload, X, Film, Copy, Wand2
 import type { Platform } from "@/types";
 import { reportError } from "@/lib/error-reporter";
 import { isVideoUrl, isVideoFile, isMovUrl, getFilenameFromUrl, VIDEO_EXTENSIONS } from "@/lib/media-utils";
+import { useDropZone } from "@/hooks/useDropZone";
 
 const CHAR_LIMITS: Partial<Record<Platform, number>> = {
   TWITTER: 280,
@@ -275,8 +276,7 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
     }
   }
 
-  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
+  const processFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
 
     const videos = files.filter(isVideoFile);
@@ -365,7 +365,17 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  }, [mediaUrls, hasVideo]);
+
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    await processFiles(files);
   }
+
+  const { isDragOver, dropZoneProps } = useDropZone({
+    onDrop: processFiles,
+    disabled: isUploading,
+  });
 
   function removeMedia(index: number) {
     setMediaUrls((prev) => prev.filter((_, i) => i !== index));
@@ -527,8 +537,17 @@ export function PostComposer({ editPost, defaultScheduledAt }: { editPost?: Edit
       />
 
       {/* Media */}
-      <Card className="bg-zinc-900 border-zinc-700">
+      <Card
+        className={`bg-zinc-900 border-zinc-700 transition-colors ${isDragOver ? "border-violet-500 bg-violet-950/20" : ""}`}
+        {...dropZoneProps}
+      >
         <CardContent className="pt-4 space-y-3">
+          {isDragOver && (
+            <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-violet-500 bg-violet-950/30 py-8 text-sm text-violet-300">
+              <Upload className="h-5 w-5 mr-2" />
+              Drop files to upload
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ImageIcon className="h-4 w-4 text-zinc-400" />

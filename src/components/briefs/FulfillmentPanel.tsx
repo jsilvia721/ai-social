@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ChangeEvent } from "react";
 import { X, Copy, Check, Upload, Calendar, Loader2, Film } from "lucide-react";
 import { isVideoUrl, isMovUrl, getFilenameFromUrl } from "@/lib/media-utils";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { reportError } from "@/lib/error-reporter";
+import { useDropZone } from "@/hooks/useDropZone";
 
 type Platform = "TWITTER" | "INSTAGRAM" | "FACEBOOK" | "TIKTOK" | "YOUTUBE";
 type BriefFormat = "TEXT" | "IMAGE" | "CAROUSEL" | "VIDEO";
@@ -112,15 +113,14 @@ export function FulfillmentPanel({
     setTimeout(() => setCopied(false), 2000);
   }, [brief.aiImagePrompt]);
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files?.length) return;
+  const processFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
 
     setIsUploading(true);
     setError(null);
 
     try {
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         // Get presigned URL
         const presignRes = await fetch(
           `/api/upload/presigned?mimeType=${encodeURIComponent(file.type)}&fileSize=${file.size}`
@@ -142,7 +142,7 @@ export function FulfillmentPanel({
         setMediaUrls((prev) => [...prev, publicUrl]);
       }
     } catch (err) {
-      const file = files?.length ? files[0] : undefined;
+      const file = files[0];
       reportError(err, {
         url: window.location.href,
         metadata: { type: "UPLOAD", method: "presigned", fileType: file?.type, fileSize: file?.size },
@@ -152,7 +152,17 @@ export function FulfillmentPanel({
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  }, []);
+
+  async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    await processFiles(files);
   }
+
+  const { isDragOver, dropZoneProps } = useDropZone({
+    onDrop: processFiles,
+    disabled: isUploading,
+  });
 
   async function handleSubmit() {
     if (!selectedAccountId) {
@@ -323,13 +333,21 @@ export function FulfillmentPanel({
               ))}
             </div>
           )}
-          <label className="flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-zinc-700 px-4 py-6 text-sm text-zinc-400 hover:border-zinc-600 hover:text-zinc-300 cursor-pointer transition-colors">
+          <label
+            className={cn(
+              "flex items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 text-sm cursor-pointer transition-colors",
+              isDragOver
+                ? "border-violet-500 bg-violet-950/30 text-violet-300"
+                : "border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300"
+            )}
+            {...dropZoneProps}
+          >
             {isUploading ? (
               <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
               <Upload className="h-5 w-5" />
             )}
-            {isUploading ? "Uploading..." : "Drop files or click to upload"}
+            {isUploading ? "Uploading..." : isDragOver ? "Drop files to upload" : "Drop files or click to upload"}
             <input
               ref={fileInputRef}
               type="file"
