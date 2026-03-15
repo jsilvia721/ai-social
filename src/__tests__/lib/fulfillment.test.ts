@@ -514,6 +514,7 @@ describe("runFulfillment", () => {
     expect(prismaMock.post.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
+          socialAccountId: "sa-ig",
           mediaUrls: ["https://cdn.example.com/media/biz-1/brief-1.png"],
         }),
       })
