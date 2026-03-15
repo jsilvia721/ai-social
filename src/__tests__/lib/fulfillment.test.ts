@@ -460,6 +460,13 @@ describe("runFulfillment", () => {
       expect.stringContaining("media/biz-1/brief-1"),
       "image/png"
     );
+    expect(prismaMock.post.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          mediaUrls: [expect.stringContaining("media/biz-1/brief-1")],
+        }),
+      })
+    );
     consoleSpy.mockRestore();
   });
 
