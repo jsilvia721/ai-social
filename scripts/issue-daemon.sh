@@ -789,6 +789,11 @@ push_and_verify_conflict() {
 run_conflict_resolver() {
   local pr_number="$1"
   local head_branch="$2"
+
+  # Validate inputs before use in shell commands and Claude prompt
+  _validate_pr_number "$pr_number" || return 1
+  _validate_branch_name "$head_branch" || return 1
+
   local log_file="$LOG_DIR/conflict-pr-${pr_number}.log"
 
   log "Starting conflict-resolver agent for PR #${pr_number} (branch: ${head_branch})"
@@ -1306,8 +1311,13 @@ while true; do
     if [ "$conflict_count" -gt 0 ]; then
       conflict_pr=$(echo "$conflicting_json" | jq -r '.[0].number')
       conflict_branch=$(echo "$conflicting_json" | jq -r '.[0].headRefName')
+      # Validate extracted values before use in shell commands
+      if ! _validate_pr_number "$conflict_pr" 2>/dev/null || ! _validate_branch_name "$conflict_branch" 2>/dev/null; then
+        log "Skipping conflict PR — invalid PR number or branch name from API"
+        conflict_pr=""
+        conflict_branch=""
       # Check if we should retry (skip if retries exhausted or main hasn't advanced)
-      if ! should_retry "$conflict_pr"; then
+      elif ! should_retry "$conflict_pr"; then
         log "Skipping conflict PR #${conflict_pr} (retries exhausted or main unchanged)"
         conflict_pr=""
         conflict_branch=""
@@ -1323,6 +1333,9 @@ while true; do
         while IFS= read -r pr_json; do
           pr_num=$(echo "$pr_json" | jq -r '.number')
           pr_branch=$(echo "$pr_json" | jq -r '.headRefName')
+          # Validate before use
+          _validate_pr_number "$pr_num" 2>/dev/null || continue
+          _validate_branch_name "$pr_branch" 2>/dev/null || continue
           if should_retry "$pr_num"; then
             conflict_pr="$pr_num"
             conflict_branch="$pr_branch"
