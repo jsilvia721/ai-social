@@ -162,11 +162,11 @@ describe("POST /api/feedback", () => {
       }),
     });
 
-    // Verify createIssue was called with [Feedback] prefix and needs-triage label
+    // Verify createIssue was called with [Feedback] prefix and needs-human-review label
     expect(mockCreateIssue).toHaveBeenCalledWith(
       expect.stringMatching(/^\[Feedback\] /),
       expect.stringContaining("User Feedback"),
-      ["needs-triage"]
+      ["needs-human-review"]
     );
 
     // Verify DB update to ISSUE_CREATED
@@ -209,7 +209,7 @@ describe("POST /api/feedback", () => {
     expect(mockCreateIssue).toHaveBeenCalledWith(
       expect.any(String),
       expect.stringContaining(screenshotUrl),
-      ["needs-triage"]
+      ["needs-human-review"]
     );
   });
 
@@ -350,7 +350,7 @@ describe("POST /api/feedback", () => {
     expect(mockCreateIssue).toHaveBeenCalledWith(
       expect.any(String),
       expect.stringContaining("http://localhost:3000/dashboard"),
-      ["needs-triage"]
+      ["needs-human-review"]
     );
   });
 

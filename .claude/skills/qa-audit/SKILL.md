@@ -105,7 +105,7 @@ Only create issues for findings with **confidence >= 0.7**.
 ```bash
 gh issue create \
   --title "[QA] <Page Label>: <Finding Title>" \
-  --label "qa-audit" --label "needs-triage" \
+  --label "qa-audit" --label "needs-human-review" \
   --label "<simple-fix|complex>" \
   --body "$(cat <<'EOF'
 **Severity:** <severity>
@@ -158,7 +158,7 @@ Include: pages audited (N of M), pages failed (with reasons), QA issues created 
 ```bash
 gh issue create \
   --title "[QA-Infra] <blocker description>" \
-  --label "qa-audit" --label "claude-self-improvement" \
+  --label "qa-audit" --label "needs-human-review" \
   --body "$(cat <<'QEOF'
 ## What was attempted
 <exact steps taken>

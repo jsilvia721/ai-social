@@ -8,7 +8,7 @@ allowed-tools: Agent, Bash, Glob, Grep, Read
 
 The user will describe tasks they want done. Create GitHub issues **optimized for the issue-worker agent** — right-sized for high success rates, minimal context window usage, and maximum parallelism.
 
-**Arguments:** $ARGUMENTS — the user's natural language description. May include `--label <label-name>` to override the default `claude-plan-review` label.
+**Arguments:** $ARGUMENTS — the user's natural language description. May include `--label <label-name>` to override the default `needs-human-review` label.
 
 ## Process
 
@@ -16,7 +16,7 @@ The user will describe tasks they want done. Create GitHub issues **optimized fo
 
 Parse the request. If vague, ask one clarifying question. Make reasonable assumptions and note them in the issue context.
 
-**Label parsing:** Extract `--label <name>` if present (default: `claude-plan-review`).
+**Label parsing:** Extract `--label <name>` if present (default: `needs-human-review`).
 
 ### 2. Research the Codebase
 
@@ -43,9 +43,9 @@ Count files, identify layers (schema, API, UI, tests), estimate lines changed.
 
 | Strategy | When | Label |
 |----------|------|-------|
-| **Parallel** | No file overlap, no data dependency | `needs-triage` (all at once) |
-| **Sequential** | Issue B depends on A's output | `needs-triage` on A; note in B: "Depends on #N" |
-| **Single** | Keep as one issue | `needs-triage` |
+| **Parallel** | No file overlap, no data dependency | `needs-human-review` (all at once) |
+| **Sequential** | Issue B depends on A's output | `needs-human-review` on A; note in B: "Depends on #N" |
+| **Single** | Keep as one issue | `needs-human-review` |
 
 ### 4. Assess Complexity (per issue)
 
@@ -116,7 +116,7 @@ ISSUE_EOF
 )"
 ```
 
-**Important:** Use the parsed label (default: `claude-plan-review`). Do NOT use `claude-ready` or `needs-triage` unless explicitly passed via `--label`. Include ALL detail the worker needs — the plan-executor preserves it verbatim.
+**Important:** Use the parsed label (default: `needs-human-review`). Do NOT use `claude-ready` or `needs-human-review` unless explicitly passed via `--label`. Include ALL detail the worker needs — the plan-executor preserves it verbatim.
 
 ## Quality Standards
 

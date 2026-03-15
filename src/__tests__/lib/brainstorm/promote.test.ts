@@ -189,7 +189,7 @@ describe("promoteBrainstormItems", () => {
     expect(body).toContain("#42"); // links back to brainstorm
     expect(body).toContain("Important for growth"); // rationale
     expect(body).toContain("Small"); // scope
-    expect(labels).toEqual(["plan", "claude-plan-review"]);
+    expect(labels).toEqual(["plan"]);
   });
 
   it("updates brainstorm issue body with plan link", async () => {

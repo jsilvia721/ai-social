@@ -1,6 +1,6 @@
 name: Claude Code Task
 description: A task for Claude Code to pick up and implement autonomously
-labels: ["needs-triage"]
+labels: ["needs-human-review"]
 body:
   - type: markdown
     attributes:

@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) {
       screenshotUrl,
     });
 
-    const issue = await createIssue(title, body, ["needs-triage"]);
+    const issue = await createIssue(title, body, ["needs-human-review"]);
     githubIssueNumber = issue.number;
     githubIssueUrl = issue.html_url;
 
