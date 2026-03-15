@@ -470,6 +470,57 @@ describe("runFulfillment", () => {
     consoleSpy.mockRestore();
   });
 
+  it("creates post with media for CAROUSEL format on INSTAGRAM", async () => {
+    const brief = makeBrief({
+      recommendedFormat: "CAROUSEL",
+      platform: "INSTAGRAM",
+      business: {
+        contentStrategy: makeBrief().business.contentStrategy,
+        socialAccounts: [
+          {
+            id: "sa-ig",
+            businessId: "biz-1",
+            platform: "INSTAGRAM" as const,
+            platformId: "ig-123",
+            username: "@acme_ig",
+            blotatoAccountId: "blotato-ig",
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      },
+    });
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.post.findUnique.mockResolvedValue(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prismaMock.$transaction.mockImplementation(async (fn: any) => {
+      if (typeof fn === "function") return fn(prismaMock);
+      return [];
+    });
+    prismaMock.post.create.mockResolvedValue({ id: "post-ig-carousel" } as never);
+    prismaMock.contentBrief.update.mockResolvedValue({} as never);
+
+    const result = await runFulfillment();
+
+    expect(result.created).toBe(1);
+    expect(mockGenerateImage).toHaveBeenCalledWith(
+      expect.stringContaining("A futuristic marketing dashboard")
+    );
+    expect(mockUploadBuffer).toHaveBeenCalled();
+    expect(prismaMock.post.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          socialAccountId: "sa-ig",
+          mediaUrls: ["https://cdn.example.com/media/biz-1/brief-1.png"],
+        }),
+      })
+    );
+  });
+
   it("recovers stuck FULFILLING briefs (preserves retryCount)", async () => {
     prismaMock.contentBrief.findMany.mockResolvedValue([] as never);
 
