@@ -337,22 +337,6 @@ else
   fail "returns 0 (mechanical) when only package-lock.json conflicted" "exit 0" "exit 1"
 fi
 
-# yarn.lock
-git() {
-  case "$*" in
-    *"diff --name-only --diff-filter=U"*)
-      echo "yarn.lock"
-      ;;
-    *) command git "$@" ;;
-  esac
-}
-
-if is_mechanical_conflict "$CONFLICT_WORKTREE_DIR"; then
-  pass "returns 0 (mechanical) when only yarn.lock conflicted"
-else
-  fail "returns 0 (mechanical) when only yarn.lock conflicted" "exit 0" "exit 1"
-fi
-
 # Mixed: lockfile + source
 git() {
   case "$*" in

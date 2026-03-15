@@ -36,7 +36,8 @@ DAEMON_BOT_LOGIN="${DAEMON_BOT_LOGIN:-app/claude-code-bot}"
 CONFLICT_MAX_RETRIES="${CONFLICT_MAX_RETRIES:-3}"
 
 # Lockfile patterns considered "mechanical" (auto-resolvable).
-LOCKFILE_PATTERNS="^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$"
+# Only package-lock.json — this project uses npm exclusively.
+LOCKFILE_PATTERNS="^package-lock\.json$"
 
 # Excluded file patterns (should skip to label).
 EXCLUDED_PATTERNS="^(prisma/migrations/|prisma/schema\.prisma|sst\.config\.ts)"
@@ -180,11 +181,7 @@ push_rebased_branch() {
     conflict_log "$pr_number" "Push succeeded"
     return 0
   else
-    if echo "$push_output" | grep -qiE 'stale info|failed to push|rejected'; then
-      conflict_log "$pr_number" "Push rejected (lease failure): $push_output"
-    else
-      conflict_log "$pr_number" "Push failed: $push_output"
-    fi
+    conflict_log "$pr_number" "Push failed: $push_output"
     return 1
   fi
 }
@@ -329,21 +326,8 @@ handle_mechanical_conflicts() {
     # Delete the conflicted lockfile and regenerate
     rm -f "${worktree_path}/${file}"
     git -C "$worktree_path" add "$file" 2>/dev/null || true
-
-    case "$basename" in
-      package-lock.json)
-        (cd "$worktree_path" && npm install --package-lock-only 2>/dev/null) || true
-        git -C "$worktree_path" add "$file" 2>/dev/null || true
-        ;;
-      yarn.lock)
-        (cd "$worktree_path" && yarn install --frozen-lockfile 2>/dev/null) || true
-        git -C "$worktree_path" add "$file" 2>/dev/null || true
-        ;;
-      pnpm-lock.yaml)
-        (cd "$worktree_path" && pnpm install --lockfile-only 2>/dev/null) || true
-        git -C "$worktree_path" add "$file" 2>/dev/null || true
-        ;;
-    esac
+    (cd "$worktree_path" && npm install --package-lock-only 2>/dev/null) || true
+    git -C "$worktree_path" add "$file" 2>/dev/null || true
   done <<< "$conflicted_files"
 
   # Continue the rebase
@@ -493,16 +477,10 @@ cleanup_stale_conflict_worktrees() {
     return 0
   fi
 
-  local found=0
   for dir in "$worktree_dir"/conflict-pr-*; do
     [ -d "$dir" ] || continue
-    found=1
     local pr_num="${dir##*conflict-pr-}"
     log "Cleaning up stale conflict worktree: $dir (PR #$pr_num)"
     git worktree remove "$dir" --force 2>/dev/null || rm -rf "$dir"
   done
-
-  if [ "$found" -eq 0 ]; then
-    log "No stale conflict worktrees found"
-  fi
 }
