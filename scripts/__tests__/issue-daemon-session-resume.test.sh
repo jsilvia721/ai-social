@@ -93,7 +93,8 @@ assert_not_grep "no MAX_TURNS config variable" \
 assert_not_grep "no --max-turns flag usage" \
   'max-turns' "$DAEMON_SCRIPT"
 
-assert_not_grep "no -t flag in getopts" \
+# -t flag is now used for tmux mode (issue #514)
+assert_grep "-t flag in getopts (tmux mode)" \
   'getopts.*t:' "$DAEMON_SCRIPT"
 
 # ==============================================================================

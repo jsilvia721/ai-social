@@ -38,15 +38,17 @@ RATE_LIMIT_PAUSE_SECONDS=900
 WALL_TIMEOUT=60            # wall-clock timeout in minutes per worker
 HEARTBEAT_INTERVAL=30      # seconds between heartbeat writes
 STALE_THRESHOLD=300        # seconds before a heartbeat is considered stale (5 min)
+TMUX_MODE="auto"           # "auto" (detect), "on" (force), "off" (disable)
 
 # --- Parse flags --------------------------------------------------------------
-while getopts "w:i:b:T:" opt; do
+while getopts "w:i:b:T:t:" opt; do
   case $opt in
     w) MAX_WORKERS=$OPTARG ;;
     i) POLL_INTERVAL=$OPTARG ;;
     b) MAX_BUDGET=$OPTARG ;;
     T) WALL_TIMEOUT=$OPTARG ;;
-    *) echo "Usage: $0 [-w workers] [-i interval] [-b budget] [-T timeout_min]" && exit 1 ;;
+    t) TMUX_MODE=$OPTARG ;;
+    *) echo "Usage: $0 [-w workers] [-i interval] [-b budget] [-T timeout_min] [-t on|off|auto]" && exit 1 ;;
   esac
 done
 
@@ -116,6 +118,42 @@ if command -v stdbuf >/dev/null 2>&1; then
   log "Using stdbuf for line-buffered worker output"
 else
   log "WARNING: stdbuf not found — worker logs may be block-buffered and incomplete on kill"
+fi
+
+# Detect tmux for --tmux=classic support
+TMUX_ENABLED=false
+case "$TMUX_MODE" in
+  on)
+    if command -v tmux >/dev/null 2>&1; then
+      TMUX_ENABLED=true
+      log "Tmux mode: forced ON"
+    else
+      log "WARNING: tmux not found — tmux mode requested but not available, continuing without tmux"
+    fi
+    ;;
+  off)
+    log "Tmux mode: disabled"
+    ;;
+  auto)
+    if command -v tmux >/dev/null 2>&1; then
+      TMUX_ENABLED=true
+      log "Tmux mode: auto-detected (tmux available)"
+    else
+      log "WARNING: tmux not found — continuing without tmux"
+    fi
+    ;;
+  *)
+    log "WARNING: unknown TMUX_MODE '$TMUX_MODE', defaulting to auto"
+    if command -v tmux >/dev/null 2>&1; then
+      TMUX_ENABLED=true
+    fi
+    ;;
+esac
+
+# Build tmux CLI flags (empty when disabled)
+TMUX_FLAGS=""
+if [ "$TMUX_ENABLED" = "true" ]; then
+  TMUX_FLAGS="--tmux=classic"
 fi
 
 # Source rate limit helpers (detect_rate_limit, parse_reset_time, format_reset_display,
@@ -319,13 +357,29 @@ run_worker() {
     local resume_prompt
     resume_prompt="Continue working on issue #${issue_number}. You were previously interrupted. Pick up where you left off and complete the implementation. If you already created a PR, verify it's ready. If not, continue with the TDD workflow."
 
-    (cd "$worktree_path" && $STDBUF_PREFIX claude -p "$resume_prompt" \
-      --agent "issue-worker" \
-      --resume "$session_id" \
-      --max-budget-usd "$MAX_BUDGET" \
-      --allowedTools "Agent,Bash,Edit,Glob,Grep,Read,Write,Skill" \
-      >> "$log_file" 2>&1) &
-    local claude_pid=$!
+    if [ "$TMUX_ENABLED" = "true" ]; then
+      # Wrap resume in a named tmux session for observability
+      local tmux_session="worker-${issue_number}"
+      tmux kill-session -t "$tmux_session" 2>/dev/null || true
+      tmux new-session -d -s "$tmux_session" \
+        "cd '$worktree_path' && $STDBUF_PREFIX claude -p '$resume_prompt' \
+          --agent 'issue-worker' \
+          --resume '$session_id' \
+          --max-budget-usd '$MAX_BUDGET' \
+          --allowedTools 'Agent,Bash,Edit,Glob,Grep,Read,Write,Skill' \
+          2>&1 | tee -a '$log_file'"
+      # Get the PID of the shell running inside tmux
+      local claude_pid
+      claude_pid=$(tmux list-panes -t "$tmux_session" -F '#{pane_pid}' 2>/dev/null | head -1)
+    else
+      (cd "$worktree_path" && $STDBUF_PREFIX claude -p "$resume_prompt" \
+        --agent "issue-worker" \
+        --resume "$session_id" \
+        --max-budget-usd "$MAX_BUDGET" \
+        --allowedTools "Agent,Bash,Edit,Glob,Grep,Read,Write,Skill" \
+        >> "$log_file" 2>&1) &
+      local claude_pid=$!
+    fi
   else
     # Fresh start — generate a new session ID
     session_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
@@ -357,13 +411,15 @@ If you get stuck, comment on the issue and add the label "claude-blocked".
 EOF
 )"
 
+    # shellcheck disable=SC2086
     $STDBUF_PREFIX claude -p "$prompt" \
       --agent "issue-worker" \
       --worktree \
+      $TMUX_FLAGS \
       --session-id "$session_id" \
       --max-budget-usd "$MAX_BUDGET" \
       --allowedTools "Agent,Bash,Edit,Glob,Grep,Read,Write,Skill" \
-      > "$log_file" 2>&1 &
+      2>&1 | tee "$log_file" &
     local claude_pid=$!
   fi
 
@@ -458,6 +514,7 @@ run_plan_executor() {
   start_time=$(date +%s)
 
   # Run Claude in background so heartbeat can run concurrently
+  # shellcheck disable=SC2086
   $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the plan-executor agent. Process approved plan issue #${issue_number}.
 
@@ -470,9 +527,11 @@ If parsing fails, comment on the issue and add the label "claude-blocked".
 EOF
 )" \
     --agent "plan-executor" \
+    --worktree \
+    $TMUX_FLAGS \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Bash,Glob,Grep,Read" \
-    > "$log_file" 2>&1 &
+    2>&1 | tee "$log_file" &
   local claude_pid=$!
 
   # Start heartbeat writer
@@ -538,6 +597,7 @@ run_bug_investigator() {
   start_time=$(date +%s)
 
   # Run Claude in background so heartbeat can run concurrently
+  # shellcheck disable=SC2086
   $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the bug-investigator agent. Investigate bug issue #${issue_number}.
 
@@ -550,9 +610,11 @@ If you get stuck, comment on the issue and add the label "claude-blocked".
 EOF
 )" \
     --agent "bug-investigator" \
+    --worktree \
+    $TMUX_FLAGS \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Bash,Glob,Grep,Read" \
-    > "$log_file" 2>&1 &
+    2>&1 | tee "$log_file" &
   local claude_pid=$!
 
   # Start heartbeat writer
@@ -616,6 +678,7 @@ run_plan_writer() {
   start_time=$(date +%s)
 
   # Run Claude in background so heartbeat can run concurrently
+  # shellcheck disable=SC2086
   $STDBUF_PREFIX claude -p "$(cat <<EOF
 You are the plan-writer agent. Write a full plan for stub plan issue #${issue_number}.
 
@@ -628,9 +691,11 @@ If you get stuck, comment on the issue and add the label "claude-blocked".
 EOF
 )" \
     --agent "plan-writer" \
+    --worktree \
+    $TMUX_FLAGS \
     --max-budget-usd "$MAX_BUDGET" \
     --allowedTools "Bash,Glob,Grep,Read" \
-    > "$log_file" 2>&1 &
+    2>&1 | tee "$log_file" &
   local claude_pid=$!
 
   # Start heartbeat writer
@@ -693,7 +758,7 @@ active_worker_count() {
 }
 
 # --- Main loop ----------------------------------------------------------------
-log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, timeout=${WALL_TIMEOUT}m)"
+log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, timeout=${WALL_TIMEOUT}m, tmux=$TMUX_ENABLED)"
 log "Watching for issues labeled '${LABEL_RESUME}', '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', '${LABEL_PLAN}', '${LABEL_BUG_INVESTIGATE}', and '${LABEL_READY}'..."
 log "PID file: ${DAEMON_PID_FILE} (send SIGUSR1 to toggle drain mode)"
 
