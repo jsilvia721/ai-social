@@ -16,7 +16,7 @@ You will receive a GitHub issue number. Use `gh issue view <number> --json title
 After reading the issue body, check for a `<!-- TARGET_BRANCH: ... -->` marker:
 
 ```bash
-target_branch=$(gh issue view <number> --json body --jq '.body' | grep -oP '(?<=<!-- TARGET_BRANCH: ).*?(?= -->)' || echo "main")
+target_branch=$(gh issue view <number> --json body --jq '.body' | grep -oP '(?<=<!-- TARGET_BRANCH: )[A-Za-z0-9._/-]+(?= -->)' || echo "main")
 ```
 
 If the marker is present, use `origin/<target_branch>` everywhere this document references `origin/main`. If absent, `target_branch` defaults to `main` — preserving identical behavior for all pre-existing and standalone issues.
