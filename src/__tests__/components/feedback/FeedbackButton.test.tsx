@@ -213,9 +213,8 @@ describe("FeedbackButton", () => {
     const closeBtn = closeButtons.find(
       (btn) => btn.querySelector(".sr-only")?.textContent === "Close"
     );
-    if (closeBtn) {
-      fireEvent.click(closeBtn);
-    }
+    expect(closeBtn).toBeDefined();
+    fireEvent.click(closeBtn!);
 
     // Re-open should fetch a new greeting (fresh FeedbackChat instance)
     const greetingResponse2 = createMockSSEResponse(["Hello again!"]);

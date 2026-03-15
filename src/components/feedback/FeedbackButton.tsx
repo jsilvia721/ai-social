@@ -34,13 +34,7 @@ export function FeedbackButton() {
           showCloseButton={false}
         >
           {open && (
-            <FeedbackChat
-              onClose={() => handleOpenChange(false)}
-              onSuccess={() => {
-                // FeedbackChat shows its own success state;
-                // no additional action needed here
-              }}
-            />
+            <FeedbackChat onClose={() => handleOpenChange(false)} />
           )}
         </DialogContent>
       </Dialog>

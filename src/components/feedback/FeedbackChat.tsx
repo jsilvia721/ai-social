@@ -122,7 +122,7 @@ export interface FeedbackChatProps {
   onSuccess?: (issueUrl?: string) => void;
 }
 
-export function FeedbackChat({ onClose, onSuccess }: FeedbackChatProps = {}) {
+export function FeedbackChat({ onClose, onSuccess }: FeedbackChatProps) {
   const embedded = !!onClose;
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
