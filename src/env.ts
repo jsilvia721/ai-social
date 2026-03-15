@@ -30,6 +30,14 @@ const serverSchema = z.object({
   GITHUB_REPO_NAME: z.string().optional(),
   GITHUB_BOT_USERNAME: z.string().optional(),
   BRAINSTORM_FREQUENCY_DAYS: z.coerce.number().optional(),
+  // EventBridge rule names: injected by SST from cron construct properties
+  PUBLISH_RULE_NAME: z.string().optional(),
+  METRICS_RULE_NAME: z.string().optional(),
+  RESEARCH_RULE_NAME: z.string().optional(),
+  BRIEFS_RULE_NAME: z.string().optional(),
+  FULFILL_RULE_NAME: z.string().optional(),
+  OPTIMIZE_RULE_NAME: z.string().optional(),
+  BRAINSTORM_RULE_NAME: z.string().optional(),
   MOCK_EXTERNAL_APIS: z.enum(["true", "false"]).optional(),
   NODE_ENV: z
     .enum(["development", "production", "test"])
