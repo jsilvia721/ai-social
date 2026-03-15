@@ -12,6 +12,7 @@ const serverSchema = z.object({
   // External API keys: required in production, optional when mocked
   ANTHROPIC_API_KEY: isMocked ? z.string().default("mock-key") : z.string().min(1),
   REPLICATE_API_TOKEN: z.string().optional(),
+  REPLICATE_WEBHOOK_SECRET: z.string().optional(),
   BLOTATO_API_KEY: isMocked ? z.string().default("mock-key") : z.string().min(1),
   SES_FROM_EMAIL: z.string().email().optional(),
   ALLOWED_EMAILS: z.string().min(1),
