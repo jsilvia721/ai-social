@@ -1,6 +1,3 @@
-import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
-
-jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 jest.mock("next-auth/next", () => ({
   getServerSession: jest.fn(),
 }));
@@ -13,8 +10,24 @@ jest.mock("@/lib/system-metrics", () => ({
 jest.mock("@/lib/mocks/config", () => ({
   shouldMockExternalApis: jest.fn(),
 }));
+
+// Mock Anthropic SDK with a controllable stream
+const mockStreamIterator = jest.fn();
+const mockAbort = jest.fn();
+const mockFinalMessage = jest.fn();
 jest.mock("@anthropic-ai/sdk", () => {
-  return jest.fn();
+  return jest.fn().mockImplementation(() => ({
+    messages: {
+      stream: jest.fn().mockImplementation(() => {
+        const streamObj = {
+          [Symbol.asyncIterator]: () => mockStreamIterator(),
+          abort: mockAbort,
+          finalMessage: mockFinalMessage,
+        };
+        return streamObj;
+      }),
+    },
+  }));
 });
 
 import { POST } from "@/app/api/feedback/chat/route";
@@ -22,7 +35,7 @@ import { NextRequest } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { trackApiCall } from "@/lib/system-metrics";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
-import { checkRateLimit, _resetAllLimits } from "@/lib/rate-limit";
+import { _resetAllLimits } from "@/lib/rate-limit";
 
 const mockGetServerSession = getServerSession as jest.MockedFunction<
   typeof getServerSession
@@ -42,6 +55,14 @@ function makeRequest(body: unknown) {
   });
 }
 
+function makeRawRequest(rawBody: string) {
+  return new NextRequest("http://localhost/api/feedback/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: rawBody,
+  });
+}
+
 function validPayload(overrides: Record<string, unknown> = {}) {
   return {
     messages: [{ role: "user", content: "I found a bug" }],
@@ -50,13 +71,18 @@ function validPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+interface SSEEvent {
+  type: "text" | "error" | "done" | "unknown";
+  data: string;
+}
+
 async function readSSEStream(
   response: Response
-): Promise<{ events: Array<{ type: string; data: string }>; raw: string }> {
+): Promise<{ events: SSEEvent[]; raw: string }> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let raw = "";
-  const events: Array<{ type: string; data: string }> = [];
+  const events: SSEEvent[] = [];
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -75,7 +101,7 @@ async function readSSEStream(
       } else {
         try {
           const parsed = JSON.parse(data);
-          events.push({ type: parsed.type, data });
+          events.push({ type: parsed.type ?? "unknown", data });
         } catch {
           events.push({ type: "unknown", data });
         }
@@ -87,7 +113,6 @@ async function readSSEStream(
 }
 
 beforeEach(() => {
-  resetPrismaMock();
   jest.clearAllMocks();
   _resetAllLimits();
   mockGetServerSession.mockResolvedValue({
@@ -110,6 +135,13 @@ describe("POST /api/feedback/chat", () => {
 
   // ── Validation ───────────────────────────────────────────────────────
 
+  it("returns 400 for invalid JSON body", async () => {
+    const res = await POST(makeRawRequest("not json"));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("Invalid JSON body");
+  });
+
   it("returns 400 for missing messages", async () => {
     const res = await POST(
       makeRequest({ context: { pageUrl: "https://example.com" } })
@@ -130,7 +162,7 @@ describe("POST /api/feedback/chat", () => {
         validPayload({
           messages: [
             { role: "user", content: "first" },
-            { role: "user", content: "second" }, // two user messages in a row
+            { role: "user", content: "second" },
           ],
         })
       )
@@ -153,7 +185,6 @@ describe("POST /api/feedback/chat", () => {
   });
 
   it("returns 400 when messages exceed 20 total", async () => {
-    // Build 21 messages alternating user/assistant ending with user
     const messages = [];
     for (let i = 0; i < 21; i++) {
       messages.push({
@@ -178,38 +209,12 @@ describe("POST /api/feedback/chat", () => {
 
   // ── Exchange cap ────────────────────────────────────────────────────
 
-  it("returns 400 when user message count exceeds 10", async () => {
-    // 11 user messages alternating with 10 assistant messages = 21 total
-    // But max is 20, so build exactly 20 messages with 11 user messages
-    // Actually, 20 messages alternating = 10 user + 10 assistant
-    // To get 11 user messages in 20, we need non-alternating which would fail validation
-    // So let's test with the countUserMessages logic directly
-
-    // Build messages: 10 user + 10 assistant = 20 total, alternating, ending with user
-    // That's 10 user messages which is at the cap. Let's go over with 11 user:
-    // We need 11 user + 10 assistant = 21 total but max is 20
-    // Since >20 fails separately, let's test the exchange cap with exactly 20 messages (10 user + 10 assistant)
-    // where the last is assistant — but that fails "last must be user"
-    // The only way to have >10 user messages with alternating and last=user in <=20 messages:
-    // 11 user + 10 assistant = 21, which exceeds 20
-    // So effectively the 20-message cap and alternating pattern make it impossible to exceed 10 user messages
-    // However the issue says "rejects if countUserMessages > 10" — so there might be a separate check
-    // Let's test by mocking a scenario or with a valid 20-message payload that has 10 user + 10 assistant ending with assistant
-    // That can't work either because last must be user
-    // The max user messages possible is 10 (in a 19-message sequence: u, a, u, a, ..., u)
-    // So the exchange cap check is effectively redundant with the 20-message limit given alternation constraint
-    // But we should still test it works as a guard. We'll test it returns success at the boundary.
-
-    // Let's just verify the route checks countUserMessages and returns 400.
-    // We need to construct a payload that passes Zod but fails the exchange cap.
-    // With alternating messages ending with user, max 20:
-    //   19 messages = 10 user + 9 assistant (10 user = at cap, OK)
-    //   But if somehow the schema allowed it (relaxed), 21 user+assistant...
-    // In practice this AC is about having the check in the code even though schema constraints
-    // make it hard to trigger naturally. The code should still have the check.
-    // Let's just verify the code path exists by testing a message set at the boundary.
-
-    // Test at the boundary: 10 user messages (should be allowed)
+  it("allows messages at the exchange cap boundary (10 user messages)", async () => {
+    // With alternating messages + last=user + max 20, the maximum possible
+    // user messages is 10 (19 messages: u,a,u,a,...,u). The exchange cap
+    // (countUserMessages > 10) acts as defense-in-depth — the schema
+    // constraints prevent it from being triggered in practice, but the code
+    // check exists as a guard. This test verifies the boundary is accepted.
     const messages = [];
     for (let i = 0; i < 19; i++) {
       messages.push({
@@ -217,17 +222,15 @@ describe("POST /api/feedback/chat", () => {
         content: `msg ${i}`,
       });
     }
-    // 19 messages = 10 user + 9 assistant, last is user
     const res = await POST(makeRequest(validPayload({ messages })));
-    // Should NOT be rejected for exchange cap (10 is at the limit, not over)
-    expect(res.status).not.toBe(400);
+    // 10 user messages is at the cap, not over — should stream successfully
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("text/event-stream");
   });
 
   // ── Rate limiting ──────────────────────────────────────────────────
 
   it("returns 429 when rate limited with Retry-After header", async () => {
-    // Exhaust rate limit by sending many first-message requests
-    // The rate limiter is real (not mocked), so we need to exceed the limit
     for (let i = 0; i < 10; i++) {
       await POST(makeRequest(validPayload()));
     }
@@ -238,12 +241,10 @@ describe("POST /api/feedback/chat", () => {
   });
 
   it("does not rate-limit follow-up messages (user count > 1)", async () => {
-    // Exhaust rate limit for first messages
     for (let i = 0; i < 10; i++) {
       await POST(makeRequest(validPayload()));
     }
 
-    // A follow-up message (2+ user messages) should NOT be rate limited
     const followUp = validPayload({
       messages: [
         { role: "user", content: "first" },
@@ -252,7 +253,6 @@ describe("POST /api/feedback/chat", () => {
       ],
     });
     const res = await POST(makeRequest(followUp));
-    // Should not be 429
     expect(res.status).not.toBe(429);
   });
 
@@ -269,15 +269,12 @@ describe("POST /api/feedback/chat", () => {
 
     const { events } = await readSSEStream(res);
 
-    // Should have at least one text event
     const textEvents = events.filter((e) => e.type === "text");
     expect(textEvents.length).toBeGreaterThan(0);
 
-    // Should end with [DONE]
     const doneEvents = events.filter((e) => e.type === "done");
     expect(doneEvents.length).toBe(1);
 
-    // Text events should have valid JSON with type and text fields
     for (const evt of textEvents) {
       const parsed = JSON.parse(evt.data);
       expect(parsed.type).toBe("text");
@@ -288,15 +285,107 @@ describe("POST /api/feedback/chat", () => {
   it("calls trackApiCall after mock stream completes", async () => {
     mockShouldMock.mockReturnValue(true);
     const res = await POST(makeRequest(validPayload()));
-
-    // Drain the stream to trigger completion
     await readSSEStream(res);
 
-    // trackApiCall should have been called
     expect(mockTrackApiCall).toHaveBeenCalledWith(
       expect.objectContaining({
         service: "anthropic",
         endpoint: "feedbackChat",
+        statusCode: 200,
+      })
+    );
+  });
+
+  // ── Anthropic streaming (non-mock) ────────────────────────────────
+
+  it("streams Claude response as SSE events via Anthropic SDK", async () => {
+    mockShouldMock.mockReturnValue(false);
+
+    // Set up mock stream to yield text deltas
+    const chunks = [
+      {
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "Hello " },
+      },
+      {
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "there!" },
+      },
+      { type: "message_stop" }, // non-text event should be ignored
+    ];
+
+    mockStreamIterator.mockReturnValue({
+      next: jest
+        .fn()
+        .mockResolvedValueOnce({ value: chunks[0], done: false })
+        .mockResolvedValueOnce({ value: chunks[1], done: false })
+        .mockResolvedValueOnce({ value: chunks[2], done: false })
+        .mockResolvedValueOnce({ value: undefined, done: true }),
+    });
+
+    mockFinalMessage.mockResolvedValue({
+      usage: { input_tokens: 50, output_tokens: 25 },
+    });
+
+    const res = await POST(makeRequest(validPayload()));
+    expect(res.status).toBe(200);
+
+    const { events } = await readSSEStream(res);
+
+    const textEvents = events.filter((e) => e.type === "text");
+    expect(textEvents).toHaveLength(2);
+    expect(JSON.parse(textEvents[0].data).text).toBe("Hello ");
+    expect(JSON.parse(textEvents[1].data).text).toBe("there!");
+
+    expect(events[events.length - 1].type).toBe("done");
+  });
+
+  it("tracks token usage from Anthropic stream finalMessage", async () => {
+    mockShouldMock.mockReturnValue(false);
+
+    mockStreamIterator.mockReturnValue({
+      next: jest.fn().mockResolvedValueOnce({ value: undefined, done: true }),
+    });
+
+    mockFinalMessage.mockResolvedValue({
+      usage: { input_tokens: 100, output_tokens: 50 },
+    });
+
+    const res = await POST(makeRequest(validPayload()));
+    await readSSEStream(res);
+
+    expect(mockTrackApiCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        service: "anthropic",
+        endpoint: "feedbackChat",
+        statusCode: 200,
+        metadata: { inputTokens: 100, outputTokens: 50 },
+      })
+    );
+  });
+
+  it("sends error SSE event when Anthropic stream throws", async () => {
+    mockShouldMock.mockReturnValue(false);
+
+    mockStreamIterator.mockReturnValue({
+      next: jest.fn().mockRejectedValue(new Error("API overloaded")),
+    });
+
+    mockFinalMessage.mockRejectedValue(new Error("Stream failed"));
+
+    const res = await POST(makeRequest(validPayload()));
+    const { events } = await readSSEStream(res);
+
+    const errorEvents = events.filter((e) => e.type === "error");
+    expect(errorEvents).toHaveLength(1);
+    expect(JSON.parse(errorEvents[0].data).error).toBe("API overloaded");
+
+    // trackApiCall should record the error
+    expect(mockTrackApiCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        service: "anthropic",
+        endpoint: "feedbackChat",
+        error: "API overloaded",
       })
     );
   });

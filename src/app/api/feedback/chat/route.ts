@@ -148,7 +148,7 @@ function createAnthropicStream(
         }
 
         // Track API usage
-        let tokenUsage: Record<string, unknown> | undefined;
+        let tokenUsage: { inputTokens: number; outputTokens: number } | undefined;
         if (stream) {
           try {
             const finalMessage = await stream.finalMessage();
@@ -201,9 +201,7 @@ export async function POST(req: NextRequest) {
   const { messages, context } = parsed.data;
 
   // Check exchange cap
-  const userMsgCount = countUserMessages(
-    messages.map((m) => ({ ...m, content: m.content }))
-  );
+  const userMsgCount = countUserMessages(messages);
   if (userMsgCount > EXCHANGE_CAP) {
     return Response.json(
       { error: "Conversation exchange limit reached" },
