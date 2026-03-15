@@ -132,7 +132,7 @@ export default function RepurposeReviewPage() {
         router.push("/dashboard/posts");
       } else {
         const data = await res.json();
-        setError(data.error || "Failed to schedule");
+        setError(typeof data.error === "string" ? data.error : "Failed to schedule");
       }
     } finally {
       setPageOp("idle");

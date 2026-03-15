@@ -73,7 +73,7 @@ export function ReviewCard({ post }: { post: ReviewPost }) {
       const res = await fetch(`/api/posts/${post.id}/approve`, { method: "POST" });
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || "Failed to approve");
+        setError(typeof data.error === "string" ? data.error : "Failed to approve");
       }
     } catch {
       setError("Network error");
@@ -91,7 +91,7 @@ export function ReviewCard({ post }: { post: ReviewPost }) {
       const res = await fetch(`/api/posts/${post.id}/reject`, { method: "POST" });
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || "Failed to reject");
+        setError(typeof data.error === "string" ? data.error : "Failed to reject");
       }
     } catch {
       setError("Network error");
@@ -113,7 +113,7 @@ export function ReviewCard({ post }: { post: ReviewPost }) {
       });
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || "Failed to save");
+        setError(typeof data.error === "string" ? data.error : "Failed to save");
         return;
       }
       const data = await res.json();

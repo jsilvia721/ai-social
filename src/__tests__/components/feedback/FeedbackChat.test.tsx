@@ -295,6 +295,68 @@ describe("FeedbackChat", () => {
     expect(screen.getByRole("button", { name: /wrap up/i })).toBeInTheDocument();
   });
 
+  it("handles non-string data.error by falling back to default message", async () => {
+    const greetingResponse = createMockSSEResponse(["Hello!"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse);
+
+    openChat();
+    await waitFor(() => {
+      expect(screen.getByText(/Hello!/)).toBeInTheDocument();
+    });
+
+    const input = screen.getByPlaceholderText(/type your message/i);
+    fireEvent.change(input, { target: { value: "Another message" } });
+
+    // Mock a non-ok response where data.error is an object (Zod FieldErrors)
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      headers: new Headers(),
+      json: () =>
+        Promise.resolve({
+          error: { content: ["String must contain at least 1 character(s)"] },
+        }),
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+
+    await waitFor(() => {
+      // Should show the fallback string, NOT "[object Object]"
+      expect(screen.getByText("Request failed")).toBeInTheDocument();
+    });
+  });
+
+  it("handles string data.error normally", async () => {
+    const greetingResponse = createMockSSEResponse(["Hello!"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse);
+
+    openChat();
+    await waitFor(() => {
+      expect(screen.getByText(/Hello!/)).toBeInTheDocument();
+    });
+
+    const input = screen.getByPlaceholderText(/type your message/i);
+    fireEvent.change(input, { target: { value: "Another message" } });
+
+    // Mock a non-ok response where data.error is a proper string
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      headers: new Headers(),
+      json: () => Promise.resolve({ error: "Content is too short" }),
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Content is too short")).toBeInTheDocument();
+    });
+  });
+
   it("handles rate limit (429) with friendly message", async () => {
     const greetingResponse = createMockSSEResponse(["Hello!"]);
     mockFetch.mockResolvedValueOnce(greetingResponse);
