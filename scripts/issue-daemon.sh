@@ -40,6 +40,8 @@ HEARTBEAT_INTERVAL=30      # seconds between heartbeat writes
 STALE_THRESHOLD=300        # seconds before a heartbeat is considered stale (5 min)
 TMUX_MODE="auto"           # "auto" (detect), "on" (force), "off" (disable)
 LABEL_NEEDS_REBASE="needs-manual-rebase"
+LABEL_CI_FAILURE="ci-failure"
+CI_MONITOR_RERUN_TIMEOUT=600  # 10 min timeout for CI reruns
 
 # --- Parse flags --------------------------------------------------------------
 while getopts "w:i:b:T:t:" opt; do
@@ -62,6 +64,10 @@ mkdir -p "$LOG_DIR"
 # shellcheck source=scripts/lib/daemon-state.sh
 source "scripts/lib/daemon-state.sh"
 ensure_state_dir
+
+# Source CI health monitor (depends on daemon-state.sh ci_monitor_* functions)
+# shellcheck source=scripts/lib/ci-health-monitor.sh
+source "scripts/lib/ci-health-monitor.sh"
 
 # Source conflict resolver early — cleanup_stale_conflict_worktrees is called during init
 # shellcheck source=scripts/lib/conflict-resolver.sh
@@ -1089,6 +1095,9 @@ while true; do
       fi
     fi
   done < "$PID_FILE"
+
+  # --- Priority -1: CI health monitor (runs inline, no worker slot) ---
+  check_ci_health || true
 
   active=$(active_worker_count)
   available_slots=$(( MAX_WORKERS - active ))
