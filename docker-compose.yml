@@ -16,5 +16,26 @@ services:
       timeout: 5s
       retries: 10
 
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    profiles:
+      - agent
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4g
+    volumes:
+      - .:/repo:ro
+      - agent_workdir:/workdir
+    environment:
+      - GITHUB_TOKEN
+      - ANTHROPIC_API_KEY
+      - DATABASE_URL
+      - NODE_ENV
+
 volumes:
   postgres_data:
+  agent_workdir:
