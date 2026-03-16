@@ -25,18 +25,18 @@ export function getModel(tier: "default" | "fast"): ModelId {
 }
 
 // ── Lazy client singleton ───────────────────────────────────────────────────
-// Follows the same pattern as src/lib/db.ts (private variable + getter).
+// Follows the same globalThis pattern as src/lib/db.ts to survive Next.js
+// hot-module-replacement in dev. In Lambda, module caching ensures one client
+// per cold start regardless.
 
-let _client: Anthropic | undefined;
+const globalForAnthropic = globalThis as unknown as { anthropicClient: Anthropic };
 
 /**
  * Returns a shared Anthropic client instance. Created lazily on first call.
- * In dev, the instance persists across hot-reloads; in Lambda, module caching
- * ensures one client per cold start.
  */
 export function getAnthropicClient(): Anthropic {
-  if (!_client) {
-    _client = new Anthropic();
+  if (!globalForAnthropic.anthropicClient) {
+    globalForAnthropic.anthropicClient = new Anthropic();
   }
-  return _client;
+  return globalForAnthropic.anthropicClient;
 }

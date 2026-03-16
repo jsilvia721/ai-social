@@ -99,6 +99,7 @@ function createAnthropicStream(
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const client = getAnthropicClient();
+  const modelId = getModel("default");
   let stream: ReturnType<typeof client.messages.stream> | undefined;
 
   return new ReadableStream<Uint8Array>({
@@ -106,7 +107,7 @@ function createAnthropicStream(
       let errorMessage: string | undefined;
       try {
         stream = client.messages.stream({
-          model: getModel("default"),
+          model: modelId,
           max_tokens: 1024,
           system: systemPrompt,
           messages,
@@ -170,7 +171,7 @@ function createAnthropicStream(
           statusCode: errorMessage ? undefined : 200,
           latencyMs: Date.now() - startMs,
           error: errorMessage,
-          metadata: { ...tokenUsage, modelId: getModel("default") },
+          metadata: { ...tokenUsage, modelId },
         });
       }
     },
