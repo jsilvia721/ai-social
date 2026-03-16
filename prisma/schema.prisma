@@ -72,6 +72,7 @@ model Business {
   researchSummaries ResearchSummary[]
   contentBriefs     ContentBrief[]
   strategyDigests   StrategyDigest[]
+  agentEvents       AgentEvent[]
 }
 
 model BusinessMember {
@@ -366,6 +367,24 @@ model CronConfig {
   hourUtc            Int?     // for weekly crons (e.g., 23)
   syncStatus         String   @default("SYNCED") // "SYNCED" | "PENDING"
   updatedAt          DateTime @updatedAt
+}
+
+// ── Agent Events ────────────────────────────────────────────────────────────
+
+model AgentEvent {
+  id         String   @id @default(cuid())
+  eventType  String   // "research.sources_fetched", "brief.generated", etc.
+  actor      String   // "cron:research", "cron:fulfill", "user:<userId>", etc.
+  businessId String?
+  entityType String?  // "Post", "ContentBrief", "ResearchSummary", etc.
+  entityId   String?
+  payload    Json?
+  createdAt  DateTime @default(now())
+  business   Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([entityType, entityId])
 }
 
 // ── User Feedback ───────────────────────────────────────────────────────────
