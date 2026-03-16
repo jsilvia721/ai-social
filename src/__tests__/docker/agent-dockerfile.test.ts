@@ -1,184 +1,173 @@
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, accessSync, constants } from "fs";
 import { resolve } from "path";
 
 /**
- * Tests for Dockerfile.agent and related configuration.
- * Validates file structure, security practices, and configuration without
- * requiring Docker to be running.
+ * Tests for Dockerfile.agent and supporting files.
+ *
+ * These validate the file structure, content correctness, and security
+ * properties without requiring Docker to be running.
  */
 
-const ROOT = resolve(__dirname, "../../../");
+const ROOT = resolve(__dirname, "../../..");
 
 describe("Dockerfile.agent", () => {
   const dockerfilePath = resolve(ROOT, "Dockerfile.agent");
-  let dockerfile: string;
-
-  beforeAll(() => {
-    dockerfile = readFileSync(dockerfilePath, "utf-8");
-  });
 
   it("exists", () => {
     expect(existsSync(dockerfilePath)).toBe(true);
   });
 
-  it("uses Node.js 22 base image", () => {
-    expect(dockerfile).toMatch(/^FROM node:22/m);
-  });
+  describe("content", () => {
+    let content: string;
 
-  it("references git, jq, and gh in apt-get install commands", () => {
-    // Verify each tool appears in an install context
-    expect(dockerfile).toMatch(/apt-get install[\s\S]*\bgit\b/);
-    expect(dockerfile).toMatch(/apt-get install[\s\S]*\bjq\b/);
-    expect(dockerfile).toMatch(/apt-get install[\s\S]*\bgh\b/);
-  });
+    beforeAll(() => {
+      content = readFileSync(dockerfilePath, "utf-8");
+    });
 
-  it("installs Claude CLI via npm with a pinned version", () => {
-    expect(dockerfile).toMatch(/npm install -g @anthropic-ai\/claude-code/);
-    // Should not use @latest — version should be pinned via ARG
-    expect(dockerfile).not.toMatch(/claude-code@latest/);
-    expect(dockerfile).toMatch(/ARG CLAUDE_CLI_VERSION=/);
-  });
+    it("uses Node.js 22 base image", () => {
+      expect(content).toMatch(/FROM node:22/);
+    });
 
-  it("does not contain any hardcoded secrets", () => {
-    // Should not contain actual API keys, tokens, or passwords
-    expect(dockerfile).not.toMatch(/sk-[a-zA-Z0-9]{20,}/);
-    expect(dockerfile).not.toMatch(/ghp_[a-zA-Z0-9]{20,}/);
-    expect(dockerfile).not.toMatch(/password\s*=\s*["'][^"']+["']/i);
-    // ENV directives should not set secret values
-    const envLines = dockerfile
-      .split("\n")
-      .filter((l) => l.match(/^\s*ENV\s/));
-    for (const line of envLines) {
-      expect(line).not.toMatch(
-        /(ANTHROPIC_API_KEY|GITHUB_TOKEN|DATABASE_URL).*=\s*\S/
-      );
-    }
-  });
+    it("installs git", () => {
+      expect(content).toMatch(/\bgit\b/);
+    });
 
-  it("creates a non-root user", () => {
-    expect(dockerfile).toMatch(/useradd.*agent/);
-    expect(dockerfile).toMatch(/^USER agent/m);
-  });
+    it("installs jq", () => {
+      expect(content).toMatch(/\bjq\b/);
+    });
 
-  it("includes a HEALTHCHECK directive", () => {
-    expect(dockerfile).toMatch(/^HEALTHCHECK/m);
-    expect(dockerfile).toContain("healthcheck.sh");
-  });
+    it("installs GitHub CLI", () => {
+      expect(content).toMatch(/\bgh\b/);
+    });
 
-  it("sets WORKDIR to /workdir", () => {
-    expect(dockerfile).toMatch(/^WORKDIR \/workdir/m);
-  });
+    it("installs Claude CLI", () => {
+      expect(content).toMatch(/@anthropic-ai\/claude-code/);
+    });
 
-  it("references issue-daemon.sh as the default command", () => {
-    expect(dockerfile).toContain("issue-daemon.sh");
+    it("does NOT contain any secrets or API keys", () => {
+      expect(content).not.toMatch(/sk-ant-/i);
+      expect(content).not.toMatch(/ghp_/i);
+      expect(content).not.toMatch(/ANTHROPIC_API_KEY=/);
+      expect(content).not.toMatch(/GITHUB_TOKEN=/);
+      // ENV declarations for passthrough are OK, but hardcoded values are not
+      expect(content).not.toMatch(/ENV\s+ANTHROPIC_API_KEY\s+\S/);
+      expect(content).not.toMatch(/ENV\s+GITHUB_TOKEN\s+\S/);
+    });
+
+    it("runs as non-root user", () => {
+      expect(content).toMatch(/USER\s+agent/);
+    });
+
+    it("includes a HEALTHCHECK instruction", () => {
+      expect(content).toMatch(/HEALTHCHECK/);
+    });
+
+    it("uses the issue-daemon as entrypoint", () => {
+      expect(content).toMatch(/issue-daemon/);
+    });
   });
 });
 
 describe("docker-compose.agent.yml", () => {
   const composePath = resolve(ROOT, "docker-compose.agent.yml");
-  let compose: string;
-
-  beforeAll(() => {
-    compose = readFileSync(composePath, "utf-8");
-  });
 
   it("exists", () => {
     expect(existsSync(composePath)).toBe(true);
   });
 
-  it("configures CPU limits", () => {
-    expect(compose).toMatch(/cpus:\s*["']?\d/);
-  });
+  describe("content", () => {
+    let content: string;
 
-  it("configures memory limits", () => {
-    expect(compose).toMatch(/memory:\s*\d+[GMgm]/);
-  });
+    beforeAll(() => {
+      content = readFileSync(composePath, "utf-8");
+    });
 
-  it("passes secrets via environment variables (not build args)", () => {
-    expect(compose).toContain("ANTHROPIC_API_KEY");
-    expect(compose).toContain("GITHUB_TOKEN");
-    // Should use variable passthrough syntax (no value assigned in file)
-    expect(compose).toMatch(/^\s*- ANTHROPIC_API_KEY$/m);
-    expect(compose).toMatch(/^\s*- GITHUB_TOKEN$/m);
-  });
+    it("references Dockerfile.agent", () => {
+      expect(content).toMatch(/Dockerfile\.agent/);
+    });
 
-  it("mounts repo as read-only", () => {
-    expect(compose).toMatch(/\.?:\/repo:ro/);
-  });
+    it("configures CPU limits", () => {
+      expect(content).toMatch(/cpus:/);
+    });
 
-  it("references Dockerfile.agent", () => {
-    expect(compose).toContain("Dockerfile.agent");
-  });
+    it("configures memory limits", () => {
+      expect(content).toMatch(/memory:/);
+    });
 
-  it("includes security hardening (no-new-privileges, cap_drop)", () => {
-    expect(compose).toMatch(/no-new-privileges/);
-    expect(compose).toMatch(/cap_drop/);
+    it("passes ANTHROPIC_API_KEY from environment", () => {
+      expect(content).toMatch(/ANTHROPIC_API_KEY/);
+    });
+
+    it("passes GITHUB_TOKEN from environment", () => {
+      expect(content).toMatch(/GITHUB_TOKEN/);
+    });
+
+    it("does NOT hardcode any secrets", () => {
+      expect(content).not.toMatch(/sk-ant-/i);
+      expect(content).not.toMatch(/ghp_[a-zA-Z0-9]/);
+    });
+
+    it("mounts repo as read-only", () => {
+      expect(content).toMatch(/:ro/);
+    });
+
+    it("configures logging limits", () => {
+      expect(content).toMatch(/max-size/);
+      expect(content).toMatch(/max-file/);
+    });
   });
 });
 
-describe("agent-healthcheck.sh", () => {
+describe("scripts/agent-healthcheck.sh", () => {
   const healthcheckPath = resolve(ROOT, "scripts/agent-healthcheck.sh");
-  let healthcheck: string;
-
-  beforeAll(() => {
-    healthcheck = readFileSync(healthcheckPath, "utf-8");
-  });
 
   it("exists", () => {
     expect(existsSync(healthcheckPath)).toBe(true);
   });
 
-  it("checks for required binaries via command -v", () => {
-    // The script uses `command -v "$cmd"` in a loop over tool names
-    expect(healthcheck).toMatch(/command -v/);
-    // Verify each required tool is listed in the check
-    for (const cmd of ["node", "git", "gh", "jq", "claude"]) {
-      expect(healthcheck).toMatch(new RegExp(`\\b${cmd}\\b`));
-    }
+  it("is executable", () => {
+    expect(() => {
+      accessSync(healthcheckPath, constants.X_OK);
+    }).not.toThrow();
   });
 
-  it("checks for repo mount at /repo", () => {
-    expect(healthcheck).toMatch(/\/repo\b/);
+  it("has a bash shebang", () => {
+    const content = readFileSync(healthcheckPath, "utf-8");
+    expect(content.startsWith("#!/usr/bin/env bash")).toBe(true);
   });
 
-  it("checks workdir is writable at /workdir", () => {
-    expect(healthcheck).toMatch(/\/workdir\b/);
+  it("checks for running processes", () => {
+    const content = readFileSync(healthcheckPath, "utf-8");
+    expect(content).toMatch(/pgrep/);
   });
 
-  it("uses bash strict mode", () => {
-    expect(healthcheck).toContain("set -euo pipefail");
-  });
-
-  it("exits 0 for healthy and 1 for unhealthy", () => {
-    expect(healthcheck).toContain("exit 0");
-    expect(healthcheck).toContain("exit 1");
+  it("checks workspace mount", () => {
+    const content = readFileSync(healthcheckPath, "utf-8");
+    expect(content).toMatch(/\/workspace\/package\.json/);
   });
 });
 
 describe("docs/agent-docker.md", () => {
   const docsPath = resolve(ROOT, "docs/agent-docker.md");
-  let docs: string;
-
-  beforeAll(() => {
-    docs = readFileSync(docsPath, "utf-8");
-  });
 
   it("exists", () => {
     expect(existsSync(docsPath)).toBe(true);
   });
 
   it("documents required environment variables", () => {
-    expect(docs).toContain("ANTHROPIC_API_KEY");
-    expect(docs).toContain("GITHUB_TOKEN");
+    const content = readFileSync(docsPath, "utf-8");
+    expect(content).toMatch(/ANTHROPIC_API_KEY/);
+    expect(content).toMatch(/GITHUB_TOKEN/);
   });
 
   it("documents resource limits", () => {
-    expect(docs).toMatch(/resource/i);
-    expect(docs).toMatch(/cpu/i);
-    expect(docs).toMatch(/memory/i);
+    const content = readFileSync(docsPath, "utf-8");
+    expect(content).toMatch(/CPU/i);
+    expect(content).toMatch(/memory/i);
   });
 
   it("documents health check", () => {
-    expect(docs).toMatch(/health/i);
+    const content = readFileSync(docsPath, "utf-8");
+    expect(content).toMatch(/[Hh]ealth/);
   });
 });

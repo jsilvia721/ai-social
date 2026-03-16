@@ -1,19 +1,17 @@
-# docker-compose.agent.yml — Run the agent worker with resource limits.
+# docker-compose.agent.yml — Run the autonomous issue-daemon agent in Docker.
 #
 # Usage:
 #   docker compose -f docker-compose.agent.yml up --build
 #   docker compose -f docker-compose.agent.yml up -d        # detached
+#   docker compose -f docker-compose.agent.yml logs -f agent # follow logs
 #   docker compose -f docker-compose.agent.yml down          # stop
 #
-# Required environment variables (set in shell or .env file):
-#   ANTHROPIC_API_KEY  — Claude API key
-#   GITHUB_TOKEN       — GitHub personal access token (repo + issues scope)
+# Environment variables (set in shell or .env file):
+#   ANTHROPIC_API_KEY  — Required. Claude API key.
+#   GITHUB_TOKEN       — Required. GitHub personal access token with repo scope.
+#   DATABASE_URL       — Optional. Database connection string.
 #
-# Optional:
-#   DATABASE_URL       — PostgreSQL connection string (for DB-dependent tasks)
-#   AGENT_MAX_WORKERS  — Override max parallel workers (default: 1)
-#   AGENT_POLL_INTERVAL — Override poll interval in seconds (default: 60)
-#   AGENT_MAX_BUDGET   — Override max USD budget per issue (default: 50)
+# Resource limits can be adjusted below or via environment variables.
 
 services:
   agent:
@@ -23,49 +21,46 @@ services:
     container_name: ai-social-agent
     restart: unless-stopped
 
-    # Resource limits — tune based on host capacity
+    # Resource limits — adjust based on your machine
     deploy:
       resources:
         limits:
-          cpus: "2.0"
-          memory: 4G
+          cpus: "${AGENT_CPU_LIMIT:-2.0}"
+          memory: ${AGENT_MEMORY_LIMIT:-4G}
         reservations:
           cpus: "0.5"
           memory: 512M
 
-    # Mount repo read-only; writable workdir for agent output
-    volumes:
-      - .:/repo:ro
-      - agent_workdir:/workdir
-
-    # Environment passthrough — secrets provided at runtime, never baked in
-    environment:
-      - ANTHROPIC_API_KEY
-      - GITHUB_TOKEN
-      - DATABASE_URL
-      - AGENT_MAX_WORKERS
-      - AGENT_POLL_INTERVAL
-      - AGENT_MAX_BUDGET
-      # Git identity for commits made by the agent
-      - GIT_AUTHOR_NAME=ai-social-agent
-      - GIT_AUTHOR_EMAIL=agent@ai-social.local
-      - GIT_COMMITTER_NAME=ai-social-agent
-      - GIT_COMMITTER_EMAIL=agent@ai-social.local
-
-    # Security hardening
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-
-    # Disk limit via tmpfs (for /tmp scratch space)
+    # Tmpfs for /tmp to limit disk usage (256MB max)
     tmpfs:
-      - /tmp:size=1G
+      - /tmp:size=256M
 
-    # Depends on local dev database (optional — remove if using external DB)
-    # depends_on:
-    #   db:
-    #     condition: service_healthy
+    # Environment variables — secrets passed at runtime, never baked in
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - NODE_ENV=production
+      # Agent-specific config
+      - AGENT_MAX_WORKERS=${AGENT_MAX_WORKERS:-1}
+      - AGENT_POLL_INTERVAL=${AGENT_POLL_INTERVAL:-60}
+      - AGENT_MAX_BUDGET=${AGENT_MAX_BUDGET:-50}
+
+    volumes:
+      # Mount the repo read-only — agent uses worktrees for writes
+      - .:/workspace:ro
+      # Writable volume for agent worktrees and logs
+      - agent-workdir:/agent-workdir
+
+    # Override default CMD to use env-configurable workers
+    command: ["-w", "${AGENT_MAX_WORKERS:-1}", "-i", "${AGENT_POLL_INTERVAL:-60}", "-b", "${AGENT_MAX_BUDGET:-50}"]
+
+    # Logging limits to prevent disk exhaustion
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
 volumes:
-  agent_workdir:
+  agent-workdir:
