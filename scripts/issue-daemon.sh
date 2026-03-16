@@ -1163,6 +1163,70 @@ while true; do
     fi
     fi
 
+    # --- Priority 0.75a: CI failure investigation (elevated) ---
+    if [ "$available_slots" -gt 0 ]; then
+      ci_bug_issues=$(gh issue list \
+        --state open \
+        --label "$LABEL_BUG_INVESTIGATE" \
+        --label "$LABEL_CI_FAILURE" \
+        --limit "$available_slots" \
+        --json number,title \
+        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
+
+      if [ -n "$ci_bug_issues" ]; then
+        while IFS= read -r issue_json; do
+          number=$(echo "$issue_json" | jq -r '.number')
+          title=$(echo "$issue_json" | jq -r '.title')
+
+          wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
+          if [ "$wip_check" -gt 0 ]; then
+            log "Skipping CI bug issue #${number} (already WIP)"
+            continue
+          fi
+
+          run_bug_investigator "$number" "$title" &
+          record_worker "$!" "$number" "bug-investigate"
+          log "Spawned bug-investigator PID $! for CI failure issue #${number}"
+        done <<< "$ci_bug_issues"
+
+        # Recalculate available slots
+        active=$(active_worker_count)
+        available_slots=$(( MAX_WORKERS - active ))
+      fi
+    fi
+
+    # --- Priority 0.75b: CI failure implementation (elevated) ---
+    if [ "$available_slots" -gt 0 ]; then
+      ci_ready_issues=$(gh issue list \
+        --state open \
+        --label "$LABEL_READY" \
+        --label "$LABEL_CI_FAILURE" \
+        --limit "$available_slots" \
+        --json number,title \
+        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
+
+      if [ -n "$ci_ready_issues" ]; then
+        while IFS= read -r issue_json; do
+          number=$(echo "$issue_json" | jq -r '.number')
+          title=$(echo "$issue_json" | jq -r '.title')
+
+          wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
+          if [ "$wip_check" -gt 0 ]; then
+            log "Skipping CI ready issue #${number} (already WIP)"
+            continue
+          fi
+
+          run_worker "$number" "$title" &
+          record_worker "$!" "$number" "worker"
+          log "Spawned worker PID $! for CI failure ready issue #${number}"
+        done <<< "$ci_ready_issues"
+
+        # Recalculate available slots
+        active=$(active_worker_count)
+        available_slots=$(( MAX_WORKERS - active ))
+      fi
+    fi
+
     # --- Priority 1: Approved plans (create work issues quickly) ---
     if [ "$available_slots" -gt 0 ]; then
       approved_issues=$(gh issue list \
