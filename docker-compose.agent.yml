@@ -1,0 +1,71 @@
+# docker-compose.agent.yml — Run the agent worker with resource limits.
+#
+# Usage:
+#   docker compose -f docker-compose.agent.yml up --build
+#   docker compose -f docker-compose.agent.yml up -d        # detached
+#   docker compose -f docker-compose.agent.yml down          # stop
+#
+# Required environment variables (set in shell or .env file):
+#   ANTHROPIC_API_KEY  — Claude API key
+#   GITHUB_TOKEN       — GitHub personal access token (repo + issues scope)
+#
+# Optional:
+#   DATABASE_URL       — PostgreSQL connection string (for DB-dependent tasks)
+#   AGENT_MAX_WORKERS  — Override max parallel workers (default: 1)
+#   AGENT_POLL_INTERVAL — Override poll interval in seconds (default: 60)
+#   AGENT_MAX_BUDGET   — Override max USD budget per issue (default: 50)
+
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: ai-social-agent
+    restart: unless-stopped
+
+    # Resource limits — tune based on host capacity
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+    # Mount repo read-only; writable workdir for agent output
+    volumes:
+      - .:/repo:ro
+      - agent_workdir:/workdir
+
+    # Environment passthrough — secrets provided at runtime, never baked in
+    environment:
+      - ANTHROPIC_API_KEY
+      - GITHUB_TOKEN
+      - DATABASE_URL
+      - AGENT_MAX_WORKERS
+      - AGENT_POLL_INTERVAL
+      - AGENT_MAX_BUDGET
+      # Git identity for commits made by the agent
+      - GIT_AUTHOR_NAME=ai-social-agent
+      - GIT_AUTHOR_EMAIL=agent@ai-social.local
+      - GIT_COMMITTER_NAME=ai-social-agent
+      - GIT_COMMITTER_EMAIL=agent@ai-social.local
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Disk limit via tmpfs (for /tmp scratch space)
+    tmpfs:
+      - /tmp:size=1G
+
+    # Depends on local dev database (optional — remove if using external DB)
+    # depends_on:
+    #   db:
+    #     condition: service_healthy
+
+volumes:
+  agent_workdir:
