@@ -1099,6 +1099,7 @@ while true; do
     # Dead worker — clean up orphaned state and transition labels
     if ! kill -0 "$w_pid" 2>/dev/null; then
       log "Worker PID $w_pid for issue #${w_issue} is dead — cleaning up orphaned state"
+      commit_wip_if_needed "$w_issue"
       kill_worker_tmux_session "$w_issue"
 
       # Check if issue still has claude-wip label before transitioning
