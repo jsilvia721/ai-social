@@ -1304,7 +1304,7 @@ while true; do
           # Filter out issues with exclusion labels
           issue_labels=$(echo "$issue_json" | jq -r '.labels[].name' 2>/dev/null)
           skip=false
-          for exclude_label in "$LABEL_NEEDS_HUMAN_REVIEW" "$LABEL_WIP" "$LABEL_APPROVED" "$LABEL_BLOCKED" "$LABEL_DONE"; do
+          for exclude_label in "$LABEL_NEEDS_HUMAN_REVIEW" "$LABEL_WIP" "$LABEL_APPROVED" "$LABEL_BLOCKED" "$LABEL_DONE" "$LABEL_ACTIVE"; do
             if echo "$issue_labels" | grep -qx "$exclude_label"; then
               skip=true
               break
