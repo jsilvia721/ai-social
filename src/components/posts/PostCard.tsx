@@ -120,11 +120,12 @@ interface PostCardProps {
   };
   onDelete: (id: string) => Promise<void>;
   onRetry?: (id: string) => Promise<void>;
+  onRefreshMetrics?: (id: string) => Promise<void>;
 }
 
-export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
+export function PostCard({ post, onDelete, onRetry, onRefreshMetrics }: PostCardProps) {
   const router = useRouter();
-  const [activeOp, setActiveOp] = useState<"idle" | "deleting" | "retrying" | "repurposing">("idle");
+  const [activeOp, setActiveOp] = useState<"idle" | "deleting" | "retrying" | "repurposing" | "refreshing">("idle");
   const isBusy = activeOp !== "idle";
   const repurposeInFlight = useRef(false);
   const statusConfig = STATUS_CONFIG[post.status];
@@ -147,6 +148,16 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
     setActiveOp("retrying");
     try {
       await onRetry(post.id);
+    } finally {
+      setActiveOp("idle");
+    }
+  }
+
+  async function handleRefreshMetrics() {
+    if (!onRefreshMetrics || isBusy) return;
+    setActiveOp("refreshing");
+    try {
+      await onRefreshMetrics(post.id);
     } finally {
       setActiveOp("idle");
     }
@@ -175,6 +186,7 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
 
   const canEdit = post.status !== "PUBLISHED";
   const canRetry = post.status === "FAILED" && !!onRetry;
+  const canRefreshMetrics = post.status === "PUBLISHED" && !!onRefreshMetrics;
 
   return (
     <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-5 sm:p-4">
@@ -222,11 +234,30 @@ export function PostCard({ post, onDelete, onRetry }: PostCardProps) {
             </div>
           )}
           {post.status === "PUBLISHED" && (
-            <p className="text-[10px] text-zinc-500">
-              {post.metricsUpdatedAt
-                ? `Updated ${formatRelativeTime(post.metricsUpdatedAt)}`
-                : "Metrics pending"}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] text-zinc-500">
+                {post.metricsUpdatedAt
+                  ? `Updated ${formatRelativeTime(post.metricsUpdatedAt)}`
+                  : "Metrics pending"}
+              </p>
+              {canRefreshMetrics && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 sm:h-8 sm:w-8 text-zinc-600 hover:text-zinc-400 hover:bg-zinc-700/50"
+                  onClick={handleRefreshMetrics}
+                  disabled={isBusy}
+                  aria-label="Refresh metrics"
+                  title="Refresh metrics"
+                >
+                  {activeOp === "refreshing" ? (
+                    <Loader2 className="h-5 w-5 sm:h-4 sm:w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-5 w-5 sm:h-4 sm:w-4" />
+                  )}
+                </Button>
+              )}
+            </div>
           )}
         </div>
 

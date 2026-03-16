@@ -212,6 +212,92 @@ describe("PostCard", () => {
     });
   });
 
+  describe("refresh metrics button", () => {
+    const mockRefreshMetrics = jest.fn().mockResolvedValue(undefined);
+
+    it("renders refresh button for PUBLISHED posts when handler is provided", () => {
+      render(
+        <PostCard
+          post={makePost({ status: "PUBLISHED" })}
+          onDelete={mockDelete}
+          onRefreshMetrics={mockRefreshMetrics}
+        />
+      );
+      expect(screen.getByLabelText("Refresh metrics")).toBeInTheDocument();
+    });
+
+    it("does not render refresh button for SCHEDULED posts", () => {
+      render(
+        <PostCard
+          post={makePost({ status: "SCHEDULED" })}
+          onDelete={mockDelete}
+          onRefreshMetrics={mockRefreshMetrics}
+        />
+      );
+      expect(screen.queryByLabelText("Refresh metrics")).not.toBeInTheDocument();
+    });
+
+    it("does not render refresh button for DRAFT posts", () => {
+      render(
+        <PostCard
+          post={makePost({ status: "DRAFT" })}
+          onDelete={mockDelete}
+          onRefreshMetrics={mockRefreshMetrics}
+        />
+      );
+      expect(screen.queryByLabelText("Refresh metrics")).not.toBeInTheDocument();
+    });
+
+    it("does not render refresh button for FAILED posts", () => {
+      render(
+        <PostCard
+          post={makePost({ status: "FAILED", errorMessage: "err" })}
+          onDelete={mockDelete}
+          onRefreshMetrics={mockRefreshMetrics}
+        />
+      );
+      expect(screen.queryByLabelText("Refresh metrics")).not.toBeInTheDocument();
+    });
+
+    it("does not render refresh button when handler is not provided", () => {
+      render(
+        <PostCard
+          post={makePost({ status: "PUBLISHED" })}
+          onDelete={mockDelete}
+        />
+      );
+      expect(screen.queryByLabelText("Refresh metrics")).not.toBeInTheDocument();
+    });
+
+    it("calls onRefreshMetrics with post ID when clicked", async () => {
+      render(
+        <PostCard
+          post={makePost({ status: "PUBLISHED" })}
+          onDelete={mockDelete}
+          onRefreshMetrics={mockRefreshMetrics}
+        />
+      );
+      fireEvent.click(screen.getByLabelText("Refresh metrics"));
+      await waitFor(() => expect(mockRefreshMetrics).toHaveBeenCalledWith("post-1"));
+    });
+
+    it("disables refresh button while another operation is in flight", async () => {
+      // Make delete hang so we can check disabled state
+      const hangingDelete = jest.fn(() => new Promise<void>(() => {}));
+      render(
+        <PostCard
+          post={makePost({ status: "PUBLISHED" })}
+          onDelete={hangingDelete}
+          onRefreshMetrics={mockRefreshMetrics}
+        />
+      );
+      fireEvent.click(screen.getByLabelText("Delete post"));
+      await waitFor(() => {
+        expect(screen.getByLabelText("Refresh metrics")).toBeDisabled();
+      });
+    });
+  });
+
   // Mobile-specific layout tests
   describe("mobile layout", () => {
     it("uses larger padding on mobile (p-5) and normal on sm (sm:p-4)", () => {
