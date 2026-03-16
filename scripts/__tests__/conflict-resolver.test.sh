@@ -491,6 +491,156 @@ assert_file_exists "creates per-PR log file" "$log_file"
 assert_file_contains "log file contains message" "$log_file" "test log message"
 
 # =============================================================================
+# Test: acquire_conflict_ack — first call succeeds
+# =============================================================================
+echo ""
+echo "acquire_conflict_ack:"
+
+# Reset mocks — use simple git mock
+git() {
+  case "$*" in
+    *) command git "$@" ;;
+  esac
+}
+
+if acquire_conflict_ack 200; then
+  pass "first acquire succeeds"
+else
+  fail "first acquire succeeds" "exit 0" "exit 1"
+fi
+
+ack_file="$LOG_DIR/conflict-state/pr-200.ack"
+assert_file_exists "creates ACK file" "$ack_file"
+assert_file_contains "ACK file contains pid" "$ack_file" "^pid="
+assert_file_contains "ACK file contains ts" "$ack_file" "^ts="
+assert_file_contains "ACK file contains pr=200" "$ack_file" "^pr=200$"
+
+# =============================================================================
+# Test: acquire_conflict_ack — second call fails (already locked)
+# =============================================================================
+echo ""
+echo "acquire_conflict_ack — already locked:"
+
+if acquire_conflict_ack 200; then
+  fail "second acquire fails" "exit 1" "exit 0"
+else
+  pass "second acquire fails (already locked by live PID)"
+fi
+
+# =============================================================================
+# Test: release_conflict_ack — releases lock, allows re-acquire
+# =============================================================================
+echo ""
+echo "release_conflict_ack:"
+
+release_conflict_ack 200
+assert_file_not_exists "ACK file removed after release" "$ack_file"
+
+if acquire_conflict_ack 200; then
+  pass "re-acquire succeeds after release"
+else
+  fail "re-acquire succeeds after release" "exit 0" "exit 1"
+fi
+
+# Clean up for next tests
+release_conflict_ack 200
+
+# =============================================================================
+# Test: acquire_conflict_ack — stale ACK (dead PID) is cleaned up
+# =============================================================================
+echo ""
+echo "acquire_conflict_ack — stale ACK (dead PID):"
+
+# Write a fake ACK with a PID that doesn't exist (99999999)
+ensure_conflict_state_dir
+cat > "$LOG_DIR/conflict-state/pr-201.ack" <<STALE_ACK
+pid=99999999
+ts=$(date +%s)
+pr=201
+STALE_ACK
+
+if acquire_conflict_ack 201; then
+  pass "acquire succeeds when existing ACK has dead PID"
+else
+  fail "acquire succeeds when existing ACK has dead PID" "exit 0" "exit 1"
+fi
+
+release_conflict_ack 201
+
+# =============================================================================
+# Test: acquire_conflict_ack — ACK past TTL is treated as stale
+# =============================================================================
+echo ""
+echo "acquire_conflict_ack — expired TTL:"
+
+# Write ACK with a very old timestamp (TTL is 4500s, use ts from 5000s ago)
+old_ts=$(( $(date +%s) - 5000 ))
+cat > "$LOG_DIR/conflict-state/pr-202.ack" <<EXPIRED_ACK
+pid=$$
+ts=${old_ts}
+pr=202
+EXPIRED_ACK
+
+if acquire_conflict_ack 202; then
+  pass "acquire succeeds when existing ACK is past TTL"
+else
+  fail "acquire succeeds when existing ACK is past TTL" "exit 0" "exit 1"
+fi
+
+release_conflict_ack 202
+
+# =============================================================================
+# Test: acquire_conflict_ack — live PID within TTL blocks acquisition
+# =============================================================================
+echo ""
+echo "acquire_conflict_ack — live PID within TTL blocks:"
+
+# Write ACK with current PID and recent timestamp
+cat > "$LOG_DIR/conflict-state/pr-203.ack" <<LIVE_ACK
+pid=$$
+ts=$(date +%s)
+pr=203
+LIVE_ACK
+
+if acquire_conflict_ack 203; then
+  fail "acquire blocked by live PID within TTL" "exit 1" "exit 0"
+else
+  pass "acquire blocked by live PID within TTL"
+fi
+
+release_conflict_ack 203
+
+# =============================================================================
+# Test: cleanup_stale_ack_files — removes stale, keeps live
+# =============================================================================
+echo ""
+echo "cleanup_stale_ack_files:"
+
+ensure_conflict_state_dir
+
+# Create a stale ACK (dead PID)
+cat > "$LOG_DIR/conflict-state/pr-300.ack" <<DEAD_ACK
+pid=99999999
+ts=$(date +%s)
+pr=300
+DEAD_ACK
+
+# Create a live ACK (current PID, recent ts)
+cat > "$LOG_DIR/conflict-state/pr-301.ack" <<LIVE_ACK2
+pid=$$
+ts=$(date +%s)
+pr=301
+LIVE_ACK2
+
+cleanup_stale_ack_files
+
+assert_file_not_exists "stale ACK (dead PID) removed by cleanup" "$LOG_DIR/conflict-state/pr-300.ack"
+assert_file_exists "live ACK preserved by cleanup" "$LOG_DIR/conflict-state/pr-301.ack"
+
+# Clean up
+rm -f "$LOG_DIR/conflict-state/pr-301.ack"
+
+# =============================================================================
 # Test: Shellcheck
 # =============================================================================
 echo ""
