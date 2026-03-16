@@ -10,6 +10,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/block-brainstorm-work.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [
