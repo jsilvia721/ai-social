@@ -3,6 +3,8 @@ name: Close Completed Plans
 on:
   issues:
     types: [closed]
+  repository_dispatch:
+    types: [plan-issue-closed]
 
 permissions:
   issues: write
@@ -16,11 +18,28 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const closedIssueNumber = context.payload.issue.number;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
-            console.log(`Issue #${closedIssueNumber} was closed. Checking for parent plan issues...`);
+            // Resolve closed issue numbers based on event type
+            let closedIssueNumbers = [];
+            if (context.eventName === 'issues') {
+              closedIssueNumbers = [context.payload.issue.number];
+            } else if (context.eventName === 'repository_dispatch') {
+              const raw = (context.payload.client_payload && context.payload.client_payload.issue_numbers) || [];
+              if (!Array.isArray(raw)) {
+                console.log('client_payload.issue_numbers is not an array. Exiting.');
+                return;
+              }
+              closedIssueNumbers = raw.filter(n => Number.isInteger(n) && n > 0);
+            }
+
+            if (closedIssueNumbers.length === 0) {
+              console.log('No closed issue numbers resolved. Exiting.');
+              return;
+            }
+
+            console.log(`Issue(s) ${closedIssueNumbers.map(n => '#' + n).join(', ')} closed. Checking for parent plan issues...`);
 
             // --- Step 1: Find open plan issues with claude-active label ---
             const planIssues = await github.rest.issues.listForRepo({
@@ -78,13 +97,13 @@ jobs:
                 continue;
               }
 
-              // Check if the closed issue is among the work issues
-              if (!workIssueNumbers.includes(closedIssueNumber)) {
-                console.log(`#${planIssue.number}: does not reference closed issue #${closedIssueNumber}, skipping.`);
+              // Check if any of the closed issues are among the work issues
+              if (!closedIssueNumbers.some(n => workIssueNumbers.includes(n))) {
+                console.log(`#${planIssue.number}: does not reference any of the closed issues (${closedIssueNumbers.map(n => '#' + n).join(', ')}), skipping.`);
                 continue;
               }
 
-              console.log(`#${planIssue.number}: references closed issue #${closedIssueNumber}. Checking all work issues...`);
+              console.log(`#${planIssue.number}: references closed issue(s) from ${closedIssueNumbers.map(n => '#' + n).join(', ')}. Checking all work issues...`);
 
               // --- Step 3: Check if ALL work issues are closed ---
               let allClosed = true;
