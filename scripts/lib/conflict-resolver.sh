@@ -29,9 +29,6 @@ set -euo pipefail
 # The repo root can be overridden for testing.
 CONFLICT_RESOLVER_REPO_ROOT="${CONFLICT_RESOLVER_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
-# The bot login used to identify daemon-created commits.
-DAEMON_BOT_LOGIN="${DAEMON_BOT_LOGIN:-app/claude-code-bot}"
-
 # Maximum retry attempts before giving up.
 CONFLICT_MAX_RETRIES="${CONFLICT_MAX_RETRIES:-3}"
 
@@ -100,27 +97,10 @@ detect_conflicting_prs() {
   local candidates
   candidates=$(echo "$pr_json" | jq '[.[] | select(.headRefName | startswith("issue-")) | select(.mergeable == "CONFLICTING")]')
 
-  local result="[]"
-  local count
-  count=$(echo "$candidates" | jq 'length')
-
-  local i=0
-  while [ "$i" -lt "$count" ]; do
-    local pr_number
-    pr_number=$(echo "$candidates" | jq -r ".[$i].number")
-
-    # Check if the most recent commit was authored by the daemon
-    local last_author
-    last_author=$(gh pr view "$pr_number" --json commits 2>/dev/null | jq -r '.commits[-1].authors[0].login' 2>/dev/null || echo "")
-
-    if [ "$last_author" = "$DAEMON_BOT_LOGIN" ]; then
-      result=$(echo "$result" | jq --argjson pr "$(echo "$candidates" | jq ".[$i]")" '. + [$pr]')
-    fi
-
-    i=$((i + 1))
-  done
-
-  echo "$result"
+  # The issue-* branch prefix already ensures only daemon PRs are picked up,
+  # so no additional author filtering is needed. (Local Claude Code runs commit
+  # under the user's Git identity, not app/claude-code-bot.)
+  echo "$candidates"
 }
 
 # --- Rebase -------------------------------------------------------------------
