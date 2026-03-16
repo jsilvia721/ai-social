@@ -149,7 +149,10 @@ export default function PostsPage() {
   async function handleRefreshMetrics(id: string) {
     const res = await fetch(`/api/posts/${id}/refresh-metrics`, { method: "POST" });
     if (res.ok) {
-      const body = await res.json();
+      const body = (await res.json()) as {
+        metrics: { likes: number; comments: number; shares: number; impressions: number; reach: number; saves: number };
+        metricsUpdatedAt: string;
+      };
       setPosts((prev) =>
         prev.map((p) =>
           p.id === id
@@ -159,8 +162,8 @@ export default function PostsPage() {
                 metricsComments: body.metrics.comments,
                 metricsShares: body.metrics.shares,
                 metricsImpressions: body.metrics.impressions,
-                metricsReach: body.metrics.reach ?? p.metricsReach,
-                metricsSaves: body.metrics.saves ?? p.metricsSaves,
+                metricsReach: body.metrics.reach,
+                metricsSaves: body.metrics.saves,
                 metricsUpdatedAt: body.metricsUpdatedAt,
               }
             : p
