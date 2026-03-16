@@ -158,19 +158,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
         run: |
-          gh pr comment "${PR_NUMBER}" --body "$(cat <<'EOF'
-⚠️ **Auto-merge failed** — this PR has merge conflicts with the base branch.
+          BODY=$(cat <<'EOF'
+          ⚠️ **Auto-merge failed** — this PR has merge conflicts with the base branch.
 
-The daemon conflict resolver will attempt to resolve this automatically. If not resolved, manual intervention is needed:
+          The daemon conflict resolver will attempt to resolve this automatically. If not resolved, manual intervention is needed:
 
-1. Check out the PR branch locally
-2. Merge or rebase against the base branch
-3. Resolve conflicts and push
+          1. Check out the PR branch locally
+          2. Merge or rebase against the base branch
+          3. Resolve conflicts and push
 
-_This comment was posted by the auto-merge workflow._
-EOF
-          )"
-
+          _This comment was posted by the auto-merge workflow._
+          EOF
+          )
+          gh pr comment "${PR_NUMBER}" --body "$BODY"
           gh pr edit "${PR_NUMBER}" --add-label "merge-conflict"
           exit 1
 
