@@ -26,6 +26,7 @@ export async function getReviewPosts(session: ReviewPostsSession) {
   const posts = await prisma.post.findMany({
     where: {
       businessId: activeBusinessId,
+      socialAccount: { businessId: activeBusinessId },
       status: "PENDING_REVIEW",
       // Non-admin users must be a member of the business
       ...(!isAdmin && {

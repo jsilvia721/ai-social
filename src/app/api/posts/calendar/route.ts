@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
   const posts = await prisma.post.findMany({
     where: {
       ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
-      ...(businessId ? { businessId } : {}),
+      ...(businessId ? { businessId, socialAccount: { businessId } } : {}),
       scheduledAt: { gte: start, lt: end },
     },
     include: { socialAccount: { select: { platform: true, username: true } } },
