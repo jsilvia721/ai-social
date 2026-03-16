@@ -29,6 +29,13 @@ export interface GenerateVideoResult {
 
 const REPLICATE_TIMEOUT_MS = 60_000;
 
+// ── Allowed hostnames for Replicate media ────────────────────────────────────
+
+const ALLOWED_REPLICATE_HOSTNAMES = new Set([
+  "replicate.delivery",
+  "pbxt.replicate.delivery",
+]);
+
 /**
  * Generate an image from a text prompt using Flux 1.1 Pro via Replicate.
  * Returns raw buffer + mimeType so the caller doesn't assume format.
@@ -130,13 +137,6 @@ export async function generateVideo(
 
   return { predictionId: prediction.id };
 }
-
-// ── Allowed hostnames for Replicate media ────────────────────────────────────
-
-const ALLOWED_REPLICATE_HOSTNAMES = new Set([
-  "replicate.delivery",
-  "pbxt.replicate.delivery",
-]);
 
 /**
  * Download a video from Replicate and stream-upload it to S3 via multipart.
