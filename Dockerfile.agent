@@ -1,0 +1,59 @@
+# Dockerfile.agent — Container for running the issue-daemon agent worker
+#
+# Build:   docker build -f Dockerfile.agent -t ai-social-agent .
+# Run:     docker compose -f docker-compose.agent.yml up
+#
+# Secrets are passed via environment variables at runtime, never baked in.
+
+FROM node:22-bookworm-slim
+
+LABEL maintainer="ai-social team"
+LABEL description="Autonomous agent worker for ai-social issue daemon"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    jq \
+    ca-certificates \
+    openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude CLI (latest)
+RUN npm install -g @anthropic-ai/claude-code@latest
+
+# Create non-root user for agent execution
+RUN groupadd --gid 1000 agent \
+    && useradd --uid 1000 --gid agent --shell /bin/bash --create-home agent
+
+# Create directories for repo mount and worktree overlay
+RUN mkdir -p /repo /workdir /home/agent/.claude \
+    && chown -R agent:agent /workdir /home/agent
+
+# Health check script
+COPY scripts/agent-healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/healthcheck.sh
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD /usr/local/bin/healthcheck.sh
+
+# Set working directory to the writable worktree area
+WORKDIR /workdir
+
+# Switch to non-root user
+USER agent
+
+# Default entrypoint runs the issue daemon
+# Override with docker run ... <command> for other uses
+ENTRYPOINT ["/bin/bash"]
+CMD ["/repo/scripts/issue-daemon.sh"]
