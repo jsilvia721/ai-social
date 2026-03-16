@@ -1096,9 +1096,26 @@ while true; do
   while IFS=: read -r w_pid w_issue w_start w_type; do
     [ -n "$w_pid" ] || continue
 
-    # Dead worker — clean up orphaned state
+    # Dead worker — clean up orphaned state and transition labels
     if ! kill -0 "$w_pid" 2>/dev/null; then
-      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
+      log "Worker PID $w_pid for issue #${w_issue} is dead — cleaning up orphaned state"
+      kill_worker_tmux_session "$w_issue"
+
+      # Check if issue still has claude-wip label before transitioning
+      dead_labels=$(gh issue view "$w_issue" --json labels -q '.labels[].name' 2>/dev/null || true)
+      if echo "$dead_labels" | grep -q "$LABEL_WIP"; then
+        if [ "$w_type" = "worker" ]; then
+          # Workers are idempotent — transition to interrupted for auto-retry
+          gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
+          gh issue comment "$w_issue" --body "Worker process died unexpectedly (PID $w_pid no longer running). Transitioning to \`$LABEL_INTERRUPTED\` for auto-retry." 2>/dev/null || true
+        else
+          # Non-workers (plan, plan-writer, bug-investigate, conflict-resolver) are not idempotent — block for manual review
+          gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
+          gh issue comment "$w_issue" --body "Worker process died unexpectedly (PID $w_pid, type: $w_type). Transitioning to \`$LABEL_BLOCKED\` — manual review required since $w_type tasks are not idempotent." 2>/dev/null || true
+        fi
+      fi
+
+      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}" "$LOG_DIR/.pr-check-${w_issue}" "$LOG_DIR/.pr-discovered-${w_issue}"
       remove_worker "$w_pid"
       continue
     fi
