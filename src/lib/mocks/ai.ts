@@ -127,6 +127,20 @@ export function mockSynthesizeResearch(): ResearchSynthesis {
   };
 }
 
+export function mockRepurposeContent(
+  targetPlatforms: Platform[],
+): { coreMessage: string; variants: Array<{ platform: Platform; content: string; topicPillar?: string; tone?: string }> } {
+  return {
+    coreMessage: "[MOCK] Key insight distilled from source content",
+    variants: targetPlatforms.map((platform) => ({
+      platform,
+      content: `[MOCK] Platform-native content for ${platform}`,
+      topicPillar: "Industry insights and trends",
+      tone: "educational",
+    })),
+  };
+}
+
 export function mockGenerateVideoStoryboard(topic: string): {
   videoScript: string;
   videoPrompt: string;

@@ -1,17 +1,21 @@
 // Mock Anthropic SDK
-jest.mock("@anthropic-ai/sdk", () => {
-  const mockCreate = jest.fn();
-  return {
-    __esModule: true,
-    default: jest.fn().mockImplementation(() => ({
-      messages: { create: mockCreate },
-    })),
-    _mockCreate: mockCreate,
-  };
-});
+const anthropicCreate = jest.fn();
+jest.mock("@anthropic-ai/sdk", () => ({
+  __esModule: true,
+  default: jest.fn(),
+}));
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { _mockCreate: anthropicCreate } = require("@anthropic-ai/sdk");
+// Mock AI models module
+jest.mock("@/lib/ai/models", () => ({
+  getAnthropicClient: jest.fn(() => ({
+    messages: { create: (...args: unknown[]) => anthropicCreate(...args) },
+  })),
+  getModel: jest.fn((tier: string) =>
+    tier === "fast" ? "claude-haiku-4-5-20251001" : "claude-sonnet-4-6"
+  ),
+  MODEL_DEFAULT: "claude-sonnet-4-6",
+  MODEL_FAST: "claude-haiku-4-5-20251001",
+}));
 
 // Mock SES
 jest.mock("@aws-sdk/client-ses", () => ({

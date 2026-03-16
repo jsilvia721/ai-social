@@ -7,9 +7,19 @@
 const mockMessagesCreate = jest.fn();
 jest.mock("@anthropic-ai/sdk", () => ({
   __esModule: true,
-  default: jest.fn().mockImplementation(() => ({
+  default: jest.fn(),
+}));
+
+// Mock AI models module
+jest.mock("@/lib/ai/models", () => ({
+  getAnthropicClient: jest.fn(() => ({
     messages: { create: (...args: unknown[]) => mockMessagesCreate(...args) },
   })),
+  getModel: jest.fn((tier: string) =>
+    tier === "fast" ? "claude-haiku-4-5-20251001" : "claude-sonnet-4-6"
+  ),
+  MODEL_DEFAULT: "claude-sonnet-4-6",
+  MODEL_FAST: "claude-haiku-4-5-20251001",
 }));
 
 // Mock GitHub client — delegate to jest.fn() instances defined above the mock
@@ -36,6 +46,11 @@ jest.mock("@/lib/db", () => ({
   },
 }));
 
+// Mock system-metrics (trackApiCall is now used by generate.ts)
+jest.mock("@/lib/system-metrics", () => ({
+  trackApiCall: jest.fn(),
+}));
+
 // Mock config
 jest.mock("@/lib/mocks/config", () => ({
   shouldMockExternalApis: jest.fn().mockReturnValue(false),
@@ -52,6 +67,7 @@ jest.mock("@/env", () => ({
 
 import { generateBrainstorm } from "@/lib/brainstorm/generate";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
+import { MODEL_DEFAULT } from "@/lib/ai/models";
 import { prisma } from "@/lib/db";
 
 const mockBrainstormCreate = prisma.brainstormSession.create as jest.Mock;
@@ -160,7 +176,7 @@ describe("generateBrainstorm", () => {
       await generateBrainstorm();
       expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
       const callArgs = mockMessagesCreate.mock.calls[0][0];
-      expect(callArgs.model).toBe("claude-sonnet-4-6");
+      expect(callArgs.model).toBe(MODEL_DEFAULT);
       expect(callArgs.tools).toHaveLength(1);
       expect(callArgs.tools[0].name).toBe("generate_brainstorm");
       expect(callArgs.tool_choice).toEqual({

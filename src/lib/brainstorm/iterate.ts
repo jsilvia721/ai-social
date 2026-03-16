@@ -9,6 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { env } from "@/env";
 import * as github from "@/lib/github";
 import { prisma } from "@/lib/db";
+import { trackApiCall } from "@/lib/system-metrics";
 import { BrainstormOutputSchema } from "./types";
 import { renderBrainstormIssue, parseBrainstormIssue } from "./markdown";
 import {
@@ -17,8 +18,7 @@ import {
 } from "./prompts";
 import type { BrainstormSession } from "@prisma/client";
 import { reportServerError } from "@/lib/server-error-reporter";
-
-const client = new Anthropic();
+import { getAnthropicClient, getModel } from "@/lib/ai/models";
 
 /**
  * JSON Schema for the refine_brainstorm tool.
@@ -121,14 +121,36 @@ export async function iterateBrainstorm(session: BrainstormSession): Promise<voi
     // Call Claude with iteration prompt
     const prompt = buildIterationPrompt(currentBody, comment.body, visionDoc);
 
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
-      system: BRAINSTORM_ITERATION_SYSTEM_PROMPT,
-      tools: [refineTool],
-      tool_choice: { type: "tool", name: "refine_brainstorm" },
-      messages: [{ role: "user", content: prompt }],
-    });
+    const iterStartMs = Date.now();
+    let iterError: string | undefined;
+    const modelId = getModel("default");
+    let response;
+    try {
+      response = await getAnthropicClient().messages.create({
+        model: modelId,
+        max_tokens: 4096,
+        system: BRAINSTORM_ITERATION_SYSTEM_PROMPT,
+        tools: [refineTool],
+        tool_choice: { type: "tool", name: "refine_brainstorm" },
+        messages: [{ role: "user", content: prompt }],
+      });
+    } catch (err) {
+      iterError = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      trackApiCall({
+        service: "anthropic",
+        endpoint: "iterateBrainstorm",
+        statusCode: iterError ? undefined : 200,
+        latencyMs: Date.now() - iterStartMs,
+        error: iterError,
+        metadata: {
+          modelId,
+          inputTokens: response?.usage?.input_tokens,
+          outputTokens: response?.usage?.output_tokens,
+        },
+      });
+    }
 
     const toolUse = response.content.find((b) => b.type === "tool_use");
     if (!toolUse || toolUse.type !== "tool_use") {

@@ -2,9 +2,9 @@ import { NextRequest } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import Anthropic from "@anthropic-ai/sdk";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { trackApiCall } from "@/lib/system-metrics";
+import { getAnthropicClient, getModel } from "@/lib/ai/models";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
 import {
   buildFeedbackSystemPrompt,
@@ -98,7 +98,7 @@ function createAnthropicStream(
   startMs: number
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  const client = new Anthropic();
+  const client = getAnthropicClient();
   let stream: ReturnType<typeof client.messages.stream> | undefined;
 
   return new ReadableStream<Uint8Array>({
@@ -106,7 +106,7 @@ function createAnthropicStream(
       let errorMessage: string | undefined;
       try {
         stream = client.messages.stream({
-          model: "claude-sonnet-4-6",
+          model: getModel("default"),
           max_tokens: 1024,
           system: systemPrompt,
           messages,
@@ -170,7 +170,7 @@ function createAnthropicStream(
           statusCode: errorMessage ? undefined : 200,
           latencyMs: Date.now() - startMs,
           error: errorMessage,
-          metadata: tokenUsage,
+          metadata: { ...tokenUsage, modelId: getModel("default") },
         });
       }
     },

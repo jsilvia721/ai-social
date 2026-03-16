@@ -15,20 +15,27 @@ jest.mock("@/lib/mocks/config", () => ({
 const mockStreamIterator = jest.fn();
 const mockAbort = jest.fn();
 const mockFinalMessage = jest.fn();
-jest.mock("@anthropic-ai/sdk", () => {
-  return jest.fn().mockImplementation(() => ({
-    messages: {
-      stream: jest.fn().mockImplementation(() => {
-        const streamObj = {
-          [Symbol.asyncIterator]: () => mockStreamIterator(),
-          abort: mockAbort,
-          finalMessage: mockFinalMessage,
-        };
-        return streamObj;
-      }),
-    },
-  }));
+const mockStreamFn = jest.fn().mockImplementation(() => {
+  const streamObj = {
+    [Symbol.asyncIterator]: () => mockStreamIterator(),
+    abort: mockAbort,
+    finalMessage: mockFinalMessage,
+  };
+  return streamObj;
 });
+jest.mock("@anthropic-ai/sdk", () => {
+  return jest.fn();
+});
+
+// Mock AI models module — route now imports getAnthropicClient and getModel from here
+jest.mock("@/lib/ai/models", () => ({
+  getAnthropicClient: jest.fn(() => ({
+    messages: { stream: mockStreamFn },
+  })),
+  getModel: jest.fn(() => "claude-sonnet-4-6"),
+  MODEL_DEFAULT: "claude-sonnet-4-6",
+  MODEL_FAST: "claude-haiku-4-5-20251001",
+}));
 
 import { POST } from "@/app/api/feedback/chat/route";
 import { NextRequest } from "next/server";
@@ -379,7 +386,7 @@ describe("POST /api/feedback/chat", () => {
         service: "anthropic",
         endpoint: "feedbackChat",
         statusCode: 200,
-        metadata: { inputTokens: 100, outputTokens: 50 },
+        metadata: { inputTokens: 100, outputTokens: 50, modelId: "claude-sonnet-4-6" },
       })
     );
   });

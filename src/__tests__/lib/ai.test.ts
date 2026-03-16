@@ -1,30 +1,29 @@
-// Mock the Anthropic SDK before importing anything that uses it.
-// lib/ai/index.ts runs `const client = new Anthropic()` at module load,
-// so the mock must be in place before the module is evaluated.
-// __esModule: true is required for correct default import interop.
-jest.mock("@anthropic-ai/sdk", () => ({
-  __esModule: true,
-  default: jest.fn().mockImplementation(() => ({
-    messages: { create: jest.fn() },
-  })),
+// Mock the models module — all AI files now import from here
+const mockCreate = jest.fn();
+const mockClient = { messages: { create: mockCreate } };
+
+jest.mock("@/lib/ai/models", () => ({
+  getAnthropicClient: jest.fn(() => mockClient),
+  getModel: jest.fn((tier: string) =>
+    tier === "fast" ? "claude-haiku-4-5-20251001" : "claude-sonnet-4-6"
+  ),
+  MODEL_DEFAULT: "claude-sonnet-4-6",
+  MODEL_FAST: "claude-haiku-4-5-20251001",
 }));
 
-import Anthropic from "@anthropic-ai/sdk";
-// lib/ai/index.ts calls `new Anthropic()` at module load time.
-// mock.results[0].value is the return value of that constructor call
-// (the object with messages.create), not the `this` object (mock.instances[0]).
-const getCreateSpy = (): jest.Mock =>
-  (Anthropic as unknown as jest.Mock).mock.results[0]?.value?.messages?.create;
+// Still need to mock the SDK for Anthropic.Tool type usage
+jest.mock("@anthropic-ai/sdk", () => ({
+  __esModule: true,
+  default: jest.fn(),
+}));
 
 import { generatePostContent, suggestOptimalTimes } from "@/lib/ai";
+import { getModel } from "@/lib/ai/models";
 import type { Platform } from "@/types";
 
 describe("generatePostContent", () => {
-  let mockCreate: jest.Mock;
-
   beforeEach(() => {
-    mockCreate = getCreateSpy();
-    mockCreate?.mockReset();
+    mockCreate.mockReset();
   });
 
   function makeTextResponse(text: string) {
@@ -38,6 +37,16 @@ describe("generatePostContent", () => {
 
     expect(result).toBe("Check out this cool thing! #tech");
     expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses getModel('fast') for generatePostContent (Haiku)", async () => {
+    mockCreate.mockResolvedValue(makeTextResponse("tweet text"));
+
+    await generatePostContent("AI tools", "TWITTER");
+
+    const call = mockCreate.mock.calls[0][0];
+    expect(call.model).toBe("claude-haiku-4-5-20251001");
+    expect(getModel).toHaveBeenCalledWith("fast");
   });
 
   it("includes TWITTER platform guide in the prompt", async () => {

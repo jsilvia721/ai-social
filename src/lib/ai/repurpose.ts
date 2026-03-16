@@ -1,10 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { Platform } from "@/types";
+import { shouldMockExternalApis } from "@/lib/mocks/config";
 import { trackApiCall } from "@/lib/system-metrics";
+import { mockRepurposeContent } from "@/lib/mocks/ai";
 import type { StrategyContext } from "./types";
-
-const client = new Anthropic();
+import { getAnthropicClient, getModel } from "./models";
 
 // ── Zod schemas ─────────────────────────────────────────────────────────────
 
@@ -131,6 +132,9 @@ export async function repurposeContent(input: {
   targetPlatforms: Platform[];
   strategy: StrategyContext;
 }): Promise<RepurposeResult> {
+  if (shouldMockExternalApis()) {
+    return mockRepurposeContent(input.targetPlatforms);
+  }
   const systemPrompt = `You are a social media content strategist who adapts content
 for maximum platform-native impact while maintaining brand voice consistency.
 
@@ -173,10 +177,11 @@ Call generate_platform_variants with the results.`;
   const timeout = setTimeout(() => controller.abort(), 15_000);
   const startMs = Date.now();
   let errorMessage: string | undefined;
+  const modelId = getModel("default");
   try {
-    const response = await client.messages.create(
+    const response = await getAnthropicClient().messages.create(
       {
-        model: "claude-sonnet-4-6",
+        model: modelId,
         max_tokens: 4096,
         system: systemPrompt,
         tools: [generateVariantsTool],
@@ -202,6 +207,7 @@ Call generate_platform_variants with the results.`;
       statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
       error: errorMessage,
+      metadata: { modelId },
     });
     clearTimeout(timeout);
   }

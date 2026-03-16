@@ -6,9 +6,17 @@
 const mockMessagesCreate = jest.fn();
 jest.mock("@anthropic-ai/sdk", () => ({
   __esModule: true,
-  default: jest.fn().mockImplementation(() => ({
+  default: jest.fn(),
+}));
+
+// Mock AI models module
+jest.mock("@/lib/ai/models", () => ({
+  getAnthropicClient: jest.fn(() => ({
     messages: { create: (...args: unknown[]) => mockMessagesCreate(...args) },
   })),
+  getModel: jest.fn(() => "claude-sonnet-4-6"),
+  MODEL_DEFAULT: "claude-sonnet-4-6",
+  MODEL_FAST: "claude-haiku-4-5-20251001",
 }));
 
 // Mock GitHub client
@@ -34,6 +42,11 @@ jest.mock("@/lib/db", () => ({
       update: (...args: unknown[]) => mockSessionUpdate(...args),
     },
   },
+}));
+
+// Mock system-metrics (trackApiCall is now used by iterate.ts)
+jest.mock("@/lib/system-metrics", () => ({
+  trackApiCall: jest.fn(),
 }));
 
 // Mock env
