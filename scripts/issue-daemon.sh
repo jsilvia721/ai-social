@@ -319,6 +319,52 @@ handle_rate_limit_exit() {
 
   gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
   gh issue comment "$issue_number" --body "${worker_type} interrupted by API usage limit (runtime: ${runtime}s). ${comment_suffix}" 2>/dev/null || true
+
+  # Kill all other active workers — rate limit is account-wide
+  kill_all_active_workers_for_rate_limit "$issue_number"
+}
+
+# --- Global rate limit halt ---------------------------------------------------
+# When one worker detects a rate limit, kill ALL other active workers since the
+# API limit is account-wide. Commits WIP, transitions labels, and cleans up.
+# Arguments: $1=triggering_issue_number (skip this worker — already handled by caller)
+kill_all_active_workers_for_rate_limit() {
+  local triggering_issue="$1"
+
+  [ -f "$PID_FILE" ] || return 0
+
+  while IFS=: read -r w_pid w_issue w_start w_type; do
+    [ -n "$w_pid" ] || continue
+    [ -n "$w_issue" ] || continue
+
+    # Skip the triggering issue's worker (already handled by caller)
+    if [ "$w_issue" = "$triggering_issue" ]; then
+      continue
+    fi
+
+    # Only kill live workers
+    if ! kill -0 "$w_pid" 2>/dev/null; then
+      continue
+    fi
+
+    log "Rate limit halt: killing worker PID $w_pid for issue #${w_issue} (type: ${w_type})"
+
+    # Commit WIP before killing
+    commit_wip_if_needed "$w_issue"
+
+    # Kill the process group
+    kill_process_group "$w_pid"
+
+    # Clean up tmux session
+    kill_worker_tmux_session "$w_issue"
+
+    # Transition labels: claude-wip → claude-interrupted
+    gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
+    gh issue comment "$w_issue" --body "Worker interrupted by account-wide API rate limit (triggered by issue #${triggering_issue}). Will auto-retry after cooldown." 2>/dev/null || true
+
+    # Remove heartbeat and stale marker files
+    rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
+  done < "$PID_FILE"
 }
 
 # --- Circuit breaker configuration --------------------------------------------
@@ -1178,6 +1224,8 @@ while true; do
     fi
 
     # --- Priority 0.5: Retry interrupted issues (auto rate-limit retries) ---
+    # Re-check rate limit pause (may have been set by kill_all_active_workers_for_rate_limit mid-cycle)
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
     interrupted_issues=$(gh issue list \
       --state open \
@@ -1215,6 +1263,7 @@ while true; do
     fi
 
     # --- Priority 0.75a: CI failure investigation (elevated) ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       ci_bug_issues=$(gh issue list \
         --state open \
@@ -1253,6 +1302,7 @@ while true; do
     fi
 
     # --- Priority 0.75b: CI failure implementation (elevated) ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       ci_ready_issues=$(gh issue list \
         --state open \
@@ -1291,6 +1341,7 @@ while true; do
     fi
 
     # --- Priority 1: Approved plans (create work issues quickly) ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       approved_issues=$(gh issue list \
         --state open \
@@ -1337,6 +1388,7 @@ while true; do
     fi
 
     # --- Priority 1.25: Stub plan issues (plan-writer) ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       # Find issues labeled "plan" that are not already in progress or completed
       plan_issues=$(gh issue list \
@@ -1383,6 +1435,7 @@ while true; do
     fi
 
     # --- Priority 1.5: Bug investigation issues ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       bug_issues=$(gh issue list \
         --state open \
@@ -1420,6 +1473,7 @@ while true; do
     fi
 
     # --- Priority 2: Ready work issues ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       issues=$(gh issue list \
         --state open \
