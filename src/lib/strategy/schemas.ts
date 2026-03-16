@@ -1,16 +1,21 @@
 import { z } from "zod";
 
+/** Strip HTML tags from a string. Used as a Zod transform for free-text fields. */
+export function stripHtml(value: string): string {
+  return value.replace(/<[^>]*>/g, "");
+}
+
 // ── Wizard Validation ────────────────────────────────────────────────────────
 // Keys match the onboarding wizard step keys in businesses/[id]/onboard/page.tsx
 // Claude maps these to ContentStrategy model fields during extraction.
 
 export const WizardAnswersSchema = z
   .object({
-    businessType: z.string().min(1).max(500),
-    targetAudience: z.string().min(1).max(1000),
-    tonePreference: z.string().min(1).max(500),
-    primaryGoal: z.string().min(1).max(500),
-    competitors: z.string().max(500).optional().default(""),
+    businessType: z.string().min(1).max(500).transform(stripHtml),
+    targetAudience: z.string().min(1).max(1000).transform(stripHtml),
+    tonePreference: z.string().min(1).max(500).transform(stripHtml),
+    primaryGoal: z.string().min(1).max(500).transform(stripHtml),
+    competitors: z.string().max(500).optional().default("").transform(stripHtml),
   })
   .strict();
 
@@ -108,14 +113,14 @@ export function flattenFormatMix(
 export const StrategyPatchSchema = z
   .object({
     updatedAt: z.string().datetime(),
-    industry: z.string().min(1).max(200).optional(),
-    targetAudience: z.string().min(1).max(1000).optional(),
+    industry: z.string().min(1).max(200).transform(stripHtml).optional(),
+    targetAudience: z.string().min(1).max(1000).transform(stripHtml).optional(),
     contentPillars: z
-      .array(z.string().min(1).max(100))
+      .array(z.string().min(1).max(100).transform(stripHtml))
       .min(1)
       .max(10)
       .optional(),
-    brandVoice: z.string().min(1).max(2000).optional(),
+    brandVoice: z.string().min(1).max(2000).transform(stripHtml).optional(),
     optimizationGoal: z
       .enum(["ENGAGEMENT", "REACH", "CONVERSIONS", "BRAND_AWARENESS"])
       .optional(),
@@ -125,7 +130,7 @@ export const StrategyPatchSchema = z
     formatMix: PlatformFormatMixSchema.optional(),
     researchSources: ResearchSourcesSchema.optional(),
     accountType: z.enum(["BUSINESS", "INFLUENCER", "MEME"]).optional(),
-    visualStyle: z.string().max(500).nullable().optional(),
+    visualStyle: z.string().max(500).transform(stripHtml).nullable().optional(),
   })
   .strict();
 

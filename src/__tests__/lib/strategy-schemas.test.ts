@@ -1,4 +1,10 @@
-import { flattenFormatMix, PLATFORM_FORMATS } from "@/lib/strategy/schemas";
+import {
+  flattenFormatMix,
+  PLATFORM_FORMATS,
+  StrategyPatchSchema,
+  WizardAnswersSchema,
+  stripHtml,
+} from "@/lib/strategy/schemas";
 
 describe("flattenFormatMix", () => {
   it("returns null for null/undefined input", () => {
@@ -53,6 +59,109 @@ describe("flattenFormatMix", () => {
 
   it("returns null for empty object", () => {
     expect(flattenFormatMix({})).toBeNull();
+  });
+});
+
+describe("stripHtml", () => {
+  it("removes HTML tags from strings", () => {
+    expect(stripHtml("<b>bold</b>")).toBe("bold");
+    expect(stripHtml("<script>alert('xss')</script>")).toBe("alert('xss')");
+    expect(stripHtml("no tags here")).toBe("no tags here");
+  });
+
+  it("handles nested and self-closing tags", () => {
+    expect(stripHtml("<div><p>hello</p></div>")).toBe("hello");
+    expect(stripHtml("line<br/>break")).toBe("linebreak");
+    expect(stripHtml('<img src="x.png" />')).toBe("");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(stripHtml("")).toBe("");
+  });
+});
+
+describe("StrategyPatchSchema HTML stripping", () => {
+  const basePayload = {
+    updatedAt: new Date().toISOString(),
+  };
+
+  it("strips HTML from industry field", () => {
+    const result = StrategyPatchSchema.parse({
+      ...basePayload,
+      industry: "<b>Tech</b>",
+    });
+    expect(result.industry).toBe("Tech");
+  });
+
+  it("strips HTML from targetAudience field", () => {
+    const result = StrategyPatchSchema.parse({
+      ...basePayload,
+      targetAudience: "<script>alert('xss')</script>Developers",
+    });
+    expect(result.targetAudience).toBe("alert('xss')Developers");
+  });
+
+  it("strips HTML from brandVoice field", () => {
+    const result = StrategyPatchSchema.parse({
+      ...basePayload,
+      brandVoice: "<em>Professional</em> and <strong>authoritative</strong>",
+    });
+    expect(result.brandVoice).toBe("Professional and authoritative");
+  });
+
+  it("strips HTML from visualStyle field", () => {
+    const result = StrategyPatchSchema.parse({
+      ...basePayload,
+      visualStyle: "<div>Minimalist</div>",
+    });
+    expect(result.visualStyle).toBe("Minimalist");
+  });
+
+  it("strips HTML from contentPillars array items", () => {
+    const result = StrategyPatchSchema.parse({
+      ...basePayload,
+      contentPillars: ["<b>Leadership</b>", "Plain text", "<i>Innovation</i>"],
+    });
+    expect(result.contentPillars).toEqual([
+      "Leadership",
+      "Plain text",
+      "Innovation",
+    ]);
+  });
+
+  it("preserves null visualStyle", () => {
+    const result = StrategyPatchSchema.parse({
+      ...basePayload,
+      visualStyle: null,
+    });
+    expect(result.visualStyle).toBeNull();
+  });
+
+  it("passes through fields without HTML unchanged", () => {
+    const result = StrategyPatchSchema.parse({
+      ...basePayload,
+      industry: "Technology",
+      targetAudience: "B2B SaaS founders",
+    });
+    expect(result.industry).toBe("Technology");
+    expect(result.targetAudience).toBe("B2B SaaS founders");
+  });
+});
+
+describe("WizardAnswersSchema HTML stripping", () => {
+  it("strips HTML from all string fields", () => {
+    const result = WizardAnswersSchema.parse({
+      businessType: "<b>SaaS</b>",
+      targetAudience: "<script>xss</script>Devs",
+      tonePreference: "<em>Casual</em>",
+      primaryGoal: "<strong>Growth</strong>",
+      competitors: "<a href='x'>Rival</a>",
+    });
+    expect(result.businessType).toBe("SaaS");
+    expect(result.targetAudience).toBe("xssDevs");
+    expect(result.tonePreference).toBe("Casual");
+    expect(result.primaryGoal).toBe("Growth");
+    expect(result.competitors).toBe("Rival");
   });
 });
 
