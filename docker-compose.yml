@@ -27,6 +27,16 @@ services:
         limits:
           cpus: "2"
           memory: 4g
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
     volumes:
       - .:/repo:ro
       - agent_workdir:/workdir
