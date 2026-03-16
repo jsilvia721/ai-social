@@ -38,7 +38,7 @@ CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 PLAN_FILE=""
 if [[ -n "$ARGS" ]]; then
   # Look for a docs/plans/*.md path in the args
-  PLAN_FILE=$(echo "$ARGS" | grep -o 'docs/plans/[^ ]*\.md' | head -1 || true)
+  PLAN_FILE=$(echo "$ARGS" | grep -o -m 1 'docs/plans/[^ ]*\.md' || true)
 fi
 
 # Fallback: find most recently modified plan file

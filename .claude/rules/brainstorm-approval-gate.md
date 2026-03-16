@@ -37,7 +37,11 @@ Brainstorms explore possibilities — they may contain speculative ideas, multip
 ### What's Allowed
 
 - ✅ Direct `/ce:plan` → `/ce:work` for plans that did NOT originate from a brainstorm (no `origin: docs/brainstorms/...` field)
-- ✅ `/ce:work` on any plan after human approval via `/go`
+- ✅ After `/go` approval, work proceeds through the issue-worker agent (which picks up the GitHub issue and implements it directly — it does not invoke `/ce:work` on the plan file)
+
+### Post-Approval Flow
+
+After human approval via `/go`, the work is executed by the **issue-worker agent** operating on the GitHub issue, not by re-running `/ce:work` on the original plan file. This means the hook does not need an "approved" bypass — the approved workflow never triggers the hook because it takes a different execution path entirely.
 
 ## Enforcement
 
