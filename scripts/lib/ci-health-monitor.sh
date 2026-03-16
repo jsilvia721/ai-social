@@ -77,6 +77,11 @@ truncate_ci_logs() {
   # Cap at 150 lines
   filtered=$(echo "$filtered" | head -150)
 
+  # Redact potential secrets from log output
+  filtered=$(echo "$filtered" | sed -E \
+    -e 's/(DATABASE_URL|SECRET|TOKEN|PASSWORD|KEY|PRIVATE_KEY|API_KEY)=[^ ]*/\1=***REDACTED***/g' \
+    -e 's/(Bearer |token |sk-)[A-Za-z0-9+/=_-]{20,}/\1***REDACTED***/g')
+
   # Cap at 4000 characters
   if [ ${#filtered} -gt 4000 ]; then
     filtered="${filtered:0:3985}
@@ -97,26 +102,18 @@ format_ci_issue_body() {
   local fingerprint="$5"
   local rerun_result="$6"
 
-  cat <<EOF
-## CI Failure Details
-
-| Field | Value |
-|-------|-------|
-| **Run URL** | $run_url |
-| **Workflow** | $workflow |
-| **Commit SHA** | \`$sha\` |
-| **Rerun result** | $rerun_result |
-| **Fingerprint** | \`$fingerprint\` |
-
-## Error Logs
-
-\`\`\`
-$error_logs
-\`\`\`
-
----
-*Filed automatically by the issue daemon CI health monitor.*
-EOF
+  # Use printf to avoid shell expansion of log content (security: CI logs
+  # could contain $() or backticks that would execute in an unquoted heredoc)
+  printf '## CI Failure Details\n\n'
+  printf '| Field | Value |\n'
+  printf '|-------|-------|\n'
+  printf '| **Run URL** | %s |\n' "$run_url"
+  printf '| **Workflow** | %s |\n' "$workflow"
+  printf '| **Commit SHA** | `%s` |\n' "$sha"
+  printf '| **Rerun result** | %s |\n' "$rerun_result"
+  printf '| **Fingerprint** | `%s` |\n' "$fingerprint"
+  printf '\n## Error Logs\n\n```\n%s\n```\n' "$error_logs"
+  printf '\n---\n*Filed automatically by the issue daemon CI health monitor.*\n'
 }
 
 # --- Main check function ------------------------------------------------------
@@ -212,13 +209,23 @@ check_ci_health() {
     return 0
   fi
 
-  # Process each new failure
+  # Process each new failure (cap at 3 per cycle to avoid burst filing)
   local i=0
-  while [ "$i" -lt "$failure_count" ]; do
+  local processed_this_cycle=0
+  local MAX_NEW_FAILURES_PER_CYCLE=3
+  while [ "$i" -lt "$failure_count" ] && [ "$processed_this_cycle" -lt "$MAX_NEW_FAILURES_PER_CYCLE" ]; do
     local run_id workflow sha
     run_id=$(echo "$new_failures" | jq -r ".[$i].databaseId")
     workflow=$(echo "$new_failures" | jq -r ".[$i].workflowName")
     sha=$(echo "$new_failures" | jq -r ".[$i].headSha")
+
+    # Validate run_id is numeric (defense against unexpected API responses)
+    case "$run_id" in
+      *[!0-9]*|""|"null") log "CI monitor: invalid run_id at index $i, skipping"; i=$((i + 1)); continue ;;
+    esac
+
+    # Sanitize workflow name — allow only safe characters
+    workflow=$(echo "$workflow" | tr -cd '[:alnum:] ._-')
 
     local fingerprint
     fingerprint=$(generate_ci_fingerprint "$workflow" "$sha")
@@ -251,8 +258,13 @@ check_ci_health() {
       _ci_green_check_and_file "$run_id" "$workflow" "$fingerprint" "Rerun could not be triggered"
     fi
 
+    processed_this_cycle=$((processed_this_cycle + 1))
     i=$((i + 1))
   done
+
+  if [ "$processed_this_cycle" -ge "$MAX_NEW_FAILURES_PER_CYCLE" ] && [ "$i" -lt "$failure_count" ]; then
+    log "CI monitor: hit per-cycle cap ($MAX_NEW_FAILURES_PER_CYCLE), deferring $((failure_count - i)) remaining failures"
+  fi
 
   # Prune old entries periodically
   ci_monitor_prune 2>/dev/null || true
