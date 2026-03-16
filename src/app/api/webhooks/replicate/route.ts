@@ -117,12 +117,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       url: "/api/webhooks/replicate",
       metadata: {
         predictionId: prediction.id,
-        output: JSON.stringify(prediction.output),
+        output: JSON.stringify(prediction.output).slice(0, 500),
         zodError: outputValidation.error.message,
       },
     });
     return NextResponse.json(
-      { error: "Unexpected output format", details: outputValidation.error.flatten() },
+      { error: "Unexpected output format" },
       { status: 422 }
     );
   }
