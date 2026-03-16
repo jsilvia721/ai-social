@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to check out'
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -39,6 +45,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || '' }}
 
       - uses: actions/setup-node@v4
         with:
@@ -91,6 +99,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || '' }}
 
       - uses: actions/setup-node@v4
         with:
@@ -115,7 +125,7 @@ jobs:
     if: |
       always() &&
       !cancelled() &&
-      (github.event_name == 'push' || needs.changes.outputs.ui == 'true' || contains(github.event.pull_request.labels.*.name, 'run-e2e'))
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.ui == 'true' || contains(github.event.pull_request.labels.*.name, 'run-e2e'))
     runs-on: ubuntu-latest
 
     services:
@@ -151,6 +161,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || '' }}
 
       - uses: actions/setup-node@v4
         with:
