@@ -2,15 +2,28 @@ import { z } from "zod";
 
 // ── HTML Sanitization ──────────────────────────────────────────────────────────
 // Strips HTML tags from free-text fields to prevent XSS and injection.
-const stripHtml = (val: string) => val.replace(/<[^>]*>/g, "");
+// Iterates until stable to handle nested tags like <<script>script>.
+// Also strips unclosed tags (e.g., "<script" without closing ">").
+function stripHtml(val: string): string {
+  let result = val;
+  let prev: string;
+  do {
+    prev = result;
+    result = result.replace(/<[^>]*>/g, "");
+  } while (result !== prev);
+  // Strip unclosed tags at end and orphaned closing fragments at start
+  return result.replace(/<[^>]*$/g, "").replace(/^[^<]*>/g, "");
+}
 
 // ── Voice Sliders ──────────────────────────────────────────────────────────────
-const VoiceSlidersSchema = z.object({
-  formality: z.number().int().min(1).max(10),
-  humor: z.number().int().min(1).max(10),
-  technicality: z.number().int().min(1).max(10),
-  boldness: z.number().int().min(1).max(10),
-});
+const VoiceSlidersSchema = z
+  .object({
+    formality: z.number().int().min(1).max(10),
+    humor: z.number().int().min(1).max(10),
+    technicality: z.number().int().min(1).max(10),
+    boldness: z.number().int().min(1).max(10),
+  })
+  .strict();
 
 // ── Wizard Validation ────────────────────────────────────────────────────────
 // Keys match the onboarding wizard step keys in businesses/[id]/onboard/page.tsx

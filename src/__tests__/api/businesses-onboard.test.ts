@@ -323,6 +323,36 @@ describe("POST /api/businesses/[id]/onboard", () => {
     );
   });
 
+  it("strips nested/malformed HTML tags from text fields", async () => {
+    mockOwner();
+    (prismaMock.contentStrategy.findUnique as jest.Mock).mockResolvedValue(null);
+    mockExtract.mockResolvedValue(STRATEGY_DATA);
+    (prismaMock.contentStrategy.create as jest.Mock).mockResolvedValue({
+      id: "cs-nested",
+      businessId: BUSINESS_ID,
+      ...STRATEGY_DATA,
+    });
+
+    const res = await POST(
+      makeReq({
+        answers: {
+          ...VALID_ANSWERS,
+          businessType: "<<script>script>alert(1)<</script>/script>Gym",
+        },
+      }),
+      mockParams
+    );
+
+    expect(res.status).toBe(201);
+    // Nested tags are fully stripped — "alert(1)" is between tag fragments
+    // so only "Gym" survives after iterative stripping
+    expect(mockExtract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessType: "Gym",
+      })
+    );
+  });
+
   it("returns 500 when Claude extraction fails", async () => {
     mockOwner();
     (prismaMock.contentStrategy.findUnique as jest.Mock).mockResolvedValue(null);
