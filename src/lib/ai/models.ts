@@ -17,23 +17,11 @@ export const MODEL_FAST = "claude-haiku-4-5-20251001" as const;
 /** Union of all supported model IDs */
 export type ModelId = typeof MODEL_DEFAULT | typeof MODEL_FAST;
 
-type ModelTier = "default" | "fast";
-
 /**
  * Get the model ID for a given tier.
- * Scaffolds future per-business overrides via the options parameter.
  */
-export function getModel(
-  tier: ModelTier,
-  _options?: { businessId?: string },
-): ModelId {
-  switch (tier) {
-    case "fast":
-      return MODEL_FAST;
-    case "default":
-    default:
-      return MODEL_DEFAULT;
-  }
+export function getModel(tier: "default" | "fast"): ModelId {
+  return tier === "fast" ? MODEL_FAST : MODEL_DEFAULT;
 }
 
 // ── Lazy client singleton ───────────────────────────────────────────────────

@@ -43,11 +43,6 @@ describe("getModel", () => {
   it('returns MODEL_FAST for "fast" tier', () => {
     expect(getModel("fast")).toBe(MODEL_FAST);
   });
-
-  it("accepts optional businessId for future per-business overrides", () => {
-    expect(getModel("default", { businessId: "biz_123" })).toBe(MODEL_DEFAULT);
-    expect(getModel("fast", { businessId: "biz_123" })).toBe(MODEL_FAST);
-  });
 });
 
 describe("getAnthropicClient", () => {
