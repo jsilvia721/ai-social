@@ -23,7 +23,7 @@ export interface PlatformIntelligence {
   cadence: {
     maxPerDay: number;
     notes: string;
-    byGrowthStage?: Record<string, number>;
+    byGrowthStage?: GrowthStageThreshold[];
   };
   /** Content format best practices */
   bestPractices: string[];
@@ -35,11 +35,22 @@ export interface PlatformIntelligence {
   doNot: string[];
 }
 
+export interface GrowthStageThreshold {
+  /** Upper bound (exclusive). Omit for no upper bound. */
+  maxFollowers?: number;
+  /** Lower bound (inclusive). Omit for no lower bound. */
+  minFollowers?: number;
+  postsPerDay: number;
+  label: string;
+}
+
 export interface BuildPlatformPromptOptions {
   followerCount?: number;
 }
 
 // ── Platform Intelligence Data ───────────────────────────────────────────────
+// SECURITY: Values are embedded directly into LLM prompts.
+// Never populate from untrusted/user-controlled sources without sanitization.
 
 export const PLATFORM_INTELLIGENCE: Record<Platform, PlatformIntelligence> = {
   TWITTER: {
@@ -64,10 +75,10 @@ export const PLATFORM_INTELLIGENCE: Record<Platform, PlatformIntelligence> = {
       maxPerDay: 15,
       notes:
         "5/day if under 10k followers, up to 15/day if over 10k. Quality over quantity for smaller accounts.",
-      byGrowthStage: {
-        "<10k": 5,
-        ">10k": 15,
-      },
+      byGrowthStage: [
+        { maxFollowers: 10_000, postsPerDay: 5, label: "<10k followers" },
+        { minFollowers: 10_000, postsPerDay: 15, label: ">10k followers" },
+      ],
     },
     bestPractices: [
       "Threads get 3x engagement — use for longer ideas.",
@@ -288,16 +299,12 @@ export function buildPlatformPrompt(
 
   // Determine cadence based on growth stage
   let cadenceStr = `Max ${intel.cadence.maxPerDay} per day.`;
-  if (options?.followerCount && intel.cadence.byGrowthStage) {
-    const stages = Object.entries(intel.cadence.byGrowthStage);
-    for (const [stage, limit] of stages) {
-      if (
-        (stage.startsWith("<") &&
-          options.followerCount < parseInt(stage.slice(1))) ||
-        (stage.startsWith(">") &&
-          options.followerCount > parseInt(stage.slice(1)))
-      ) {
-        cadenceStr = `${limit} per day (for ${stage} followers).`;
+  if (options?.followerCount != null && intel.cadence.byGrowthStage) {
+    for (const stage of intel.cadence.byGrowthStage) {
+      const aboveMin = stage.minFollowers == null || options.followerCount >= stage.minFollowers;
+      const belowMax = stage.maxFollowers == null || options.followerCount < stage.maxFollowers;
+      if (aboveMin && belowMax) {
+        cadenceStr = `${stage.postsPerDay} per day (for ${stage.label}).`;
         break;
       }
     }
@@ -312,36 +319,28 @@ export function buildPlatformPrompt(
 
   const sections = [
     `## ${platform} Intelligence`,
-    "",
-    `### Character Limits`,
-    `- Maximum: ${intel.limits.maxChars} characters`,
-    `- Optimal: ${intel.limits.optimalChars} characters`,
-    "",
-    `### Tone & Voice`,
-    intel.tone,
-    "",
-    `### Algorithm Signals (relative weights)`,
-    weightsStr,
-    intel.algorithm.timeDecay ? `- Time decay: ${intel.algorithm.timeDecay}` : "",
-    intel.algorithm.notes ? `- Notes: ${intel.algorithm.notes}` : "",
-    "",
-    `### Hashtag Strategy (${intel.hashtags.recommended})`,
-    intel.hashtags.strategy,
-    "",
-    `### Cadence`,
-    cadenceStr,
-    "",
-    `### Best Practices`,
-    ...intel.bestPractices.map((bp) => `- ${bp}`),
-    "",
-    `### What Makes Content Native`,
-    ...intel.nativeRules.map((rule) => `- ${rule}`),
-    "",
-    `### Avoid (Do Not)`,
-    ...intel.doNot.map((rule) => `- ${rule}`),
+    [`### Character Limits`,
+      `- Maximum: ${intel.limits.maxChars} characters`,
+      `- Optimal: ${intel.limits.optimalChars} characters`].join("\n"),
+    [`### Tone & Voice`,
+      intel.tone].join("\n"),
+    [`### Algorithm Signals (relative weights)`,
+      weightsStr,
+      ...(intel.algorithm.timeDecay ? [`- Time decay: ${intel.algorithm.timeDecay}`] : []),
+      ...(intel.algorithm.notes ? [`- Notes: ${intel.algorithm.notes}`] : [])].join("\n"),
+    [`### Hashtag Strategy (${intel.hashtags.recommended})`,
+      intel.hashtags.strategy].join("\n"),
+    [`### Cadence`,
+      cadenceStr].join("\n"),
+    [`### Best Practices`,
+      ...intel.bestPractices.map((bp) => `- ${bp}`)].join("\n"),
+    [`### What Makes Content Native`,
+      ...intel.nativeRules.map((rule) => `- ${rule}`)].join("\n"),
+    [`### Avoid (Do Not)`,
+      ...intel.doNot.map((rule) => `- ${rule}`)].join("\n"),
   ];
 
-  return sections.filter((s) => s !== "").join("\n");
+  return sections.join("\n\n");
 }
 
 /**

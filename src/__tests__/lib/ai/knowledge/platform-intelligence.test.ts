@@ -162,16 +162,17 @@ describe("buildPlatformPrompt", () => {
     expect(prompt).toMatch(/native|original/i);
   });
 
-  it("accepts options for growth stage", () => {
+  it("adjusts cadence based on follower count (growth stage)", () => {
     const smallPrompt = buildPlatformPrompt("TWITTER", {
       followerCount: 5000,
     });
     const largePrompt = buildPlatformPrompt("TWITTER", {
       followerCount: 50000,
     });
-    // Both should be valid prompts
-    expect(smallPrompt.length).toBeGreaterThan(0);
-    expect(largePrompt.length).toBeGreaterThan(0);
+    expect(smallPrompt).toContain("5 per day");
+    expect(largePrompt).toContain("15 per day");
+    // Small account should NOT show 15/day
+    expect(smallPrompt).not.toContain("15 per day");
   });
 });
 
