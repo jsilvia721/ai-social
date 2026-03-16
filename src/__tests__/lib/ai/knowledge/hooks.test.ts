@@ -83,7 +83,7 @@ describe("selectHooks", () => {
     expect(hasHighAffinity).toBe(true);
   });
 
-  it("adjusts selection for different optimization goals", () => {
+  it("produces different results for different optimization goals", () => {
     const engagementHooks = selectHooks("INSTAGRAM", "ENGAGEMENT", "BUSINESS");
     const conversionHooks = selectHooks(
       "INSTAGRAM",
@@ -91,25 +91,41 @@ describe("selectHooks", () => {
       "BUSINESS"
     );
 
-    // Different goals should produce at least some different hooks
     const engagementNames = engagementHooks.map((h) => h.name);
     const conversionNames = conversionHooks.map((h) => h.name);
 
-    // Both return valid results with potentially different selections
-    expect(engagementNames.length).toBeGreaterThanOrEqual(3);
-    expect(conversionNames.length).toBeGreaterThanOrEqual(3);
+    // The two sets should not be identical — different goals weight different hooks
+    const identical =
+      engagementNames.length === conversionNames.length &&
+      engagementNames.every((n, i) => n === conversionNames[i]);
+    expect(identical).toBe(false);
   });
 
-  it("adjusts selection for different account types", () => {
+  it("produces different results for different account types", () => {
     const memeHooks = selectHooks("TIKTOK", "ENGAGEMENT", "MEME");
     const businessHooks = selectHooks("TIKTOK", "ENGAGEMENT", "BUSINESS");
 
     const memeNames = memeHooks.map((h) => h.name);
     const businessNames = businessHooks.map((h) => h.name);
 
-    // Both return valid results
-    expect(memeNames.length).toBeGreaterThanOrEqual(3);
-    expect(businessNames.length).toBeGreaterThanOrEqual(3);
+    // Different account types should produce at least some different hooks
+    const identical =
+      memeNames.length === businessNames.length &&
+      memeNames.every((n, i) => n === businessNames[i]);
+    expect(identical).toBe(false);
+  });
+
+  it("returns deterministic top hooks for a known input", () => {
+    // TWITTER + ENGAGEMENT + BUSINESS:
+    // Pattern Interrupt: 0.9 (platform) + 0.3 (engagement) + 0 (business) = 1.2
+    // Myth Buster: 0.9 + 0.2 + 0 = 1.1
+    // Quick Win: 0.85 + 0.15 + 0 = 1.0
+    // FOMO: 0.8 + 0.2 + 0 = 1.0
+    // Authority Builder: 0.8 + 0 + 0.2 = 1.0
+    const hooks = selectHooks("TWITTER", "ENGAGEMENT", "BUSINESS");
+    const names = hooks.map((h) => h.name);
+    expect(names[0]).toBe("Pattern Interrupt");
+    expect(names[1]).toBe("Myth Buster");
   });
 
   it("returns unique hooks (no duplicates)", () => {

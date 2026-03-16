@@ -5,12 +5,9 @@
  * with platform affinity scores and contextual selection logic.
  */
 
-export type Platform =
-  | "TWITTER"
-  | "INSTAGRAM"
-  | "FACEBOOK"
-  | "TIKTOK"
-  | "YOUTUBE";
+import type { Platform } from "@prisma/client";
+
+export type { Platform };
 
 export type OptimizationGoal =
   | "ENGAGEMENT"
@@ -20,8 +17,20 @@ export type OptimizationGoal =
 
 export type AccountType = "BUSINESS" | "INFLUENCER" | "MEME";
 
+export type HookName =
+  | "Pattern Interrupt"
+  | "Authority Builder"
+  | "Problem-Agitate-Solution"
+  | "Hidden Secret"
+  | "Before/After Bridge"
+  | "Educational"
+  | "Social Proof"
+  | "Myth Buster"
+  | "Quick Win"
+  | "FOMO";
+
 export interface HookFramework {
-  name: string;
+  name: HookName;
   description: string;
   examples: string[];
   platformAffinity: Record<Platform, number>;
@@ -31,7 +40,7 @@ export interface HookFramework {
  * Goal boost: how much each hook type benefits from a given optimization goal.
  * Values are additive bonuses (0–0.3) applied on top of platform affinity.
  */
-const GOAL_BOOSTS: Record<OptimizationGoal, Record<string, number>> = {
+const GOAL_BOOSTS: Record<OptimizationGoal, Partial<Record<HookName, number>>> = {
   ENGAGEMENT: {
     "Pattern Interrupt": 0.3,
     "Myth Buster": 0.2,
@@ -65,7 +74,7 @@ const GOAL_BOOSTS: Record<OptimizationGoal, Record<string, number>> = {
 /**
  * Account type boost: adjusts scoring based on content creator type.
  */
-const ACCOUNT_TYPE_BOOSTS: Record<AccountType, Record<string, number>> = {
+const ACCOUNT_TYPE_BOOSTS: Record<AccountType, Partial<Record<HookName, number>>> = {
   BUSINESS: {
     "Authority Builder": 0.2,
     "Problem-Agitate-Solution": 0.15,
@@ -262,8 +271,8 @@ export function selectHooks(
   optimizationGoal: OptimizationGoal,
   accountType: AccountType
 ): HookFramework[] {
-  const goalBoosts = GOAL_BOOSTS[optimizationGoal] ?? {};
-  const accountBoosts = ACCOUNT_TYPE_BOOSTS[accountType] ?? {};
+  const goalBoosts = GOAL_BOOSTS[optimizationGoal];
+  const accountBoosts = ACCOUNT_TYPE_BOOSTS[accountType];
 
   const scored = HOOK_FRAMEWORKS.map((hook) => {
     const platformScore = hook.platformAffinity[platform];
@@ -276,6 +285,7 @@ export function selectHooks(
   scored.sort((a, b) => b.score - a.score);
 
   // Return top 3 always, plus 4th if its score is close to 3rd (within 0.15)
+  // Safe: HOOK_FRAMEWORKS has 10 entries, so top always has 4 elements
   const top = scored.slice(0, 4);
   const thirdScore = top[2].score;
   const fourthScore = top[3].score;
