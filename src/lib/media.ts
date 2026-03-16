@@ -70,7 +70,11 @@ export async function generateImage(prompt: string): Promise<GeneratedImage> {
       }
       imageBuffer = Buffer.concat(chunks);
     } else if (typeof output === "string") {
-      // URL string — fetch the image
+      // URL string — validate hostname before fetching (SSRF guard)
+      const parsedUrl = new URL(output);
+      if (!ALLOWED_REPLICATE_HOSTNAMES.has(parsedUrl.hostname)) {
+        throw new Error(`Untrusted image source hostname: ${parsedUrl.hostname}`);
+      }
       const res = await fetch(output);
       if (!res.ok) throw new Error(`Failed to fetch image from Replicate: ${res.status}`);
       imageBuffer = Buffer.from(await res.arrayBuffer());
@@ -127,9 +131,9 @@ export async function generateVideo(
   return { predictionId: prediction.id };
 }
 
-// ── Allowed hostnames for video download ────────────────────────────────────
+// ── Allowed hostnames for Replicate media ────────────────────────────────────
 
-const ALLOWED_VIDEO_HOSTNAMES = new Set([
+const ALLOWED_REPLICATE_HOSTNAMES = new Set([
   "replicate.delivery",
   "pbxt.replicate.delivery",
 ]);
@@ -148,13 +152,19 @@ export async function downloadAndUploadVideo(
 ): Promise<string> {
   // Validate source URL hostname
   const parsed = new URL(sourceUrl);
-  if (!ALLOWED_VIDEO_HOSTNAMES.has(parsed.hostname)) {
+  if (!ALLOWED_REPLICATE_HOSTNAMES.has(parsed.hostname)) {
     throw new Error(`Untrusted video source hostname: ${parsed.hostname}`);
   }
 
   const response = await fetch(sourceUrl);
   if (!response.ok) {
     throw new Error(`Failed to download video: HTTP ${response.status}`);
+  }
+
+  // Validate Content-Type before streaming to S3
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (!contentType.startsWith("video/")) {
+    throw new Error(`Expected video/* Content-Type, got: ${contentType}`);
   }
 
   if (!response.body) {

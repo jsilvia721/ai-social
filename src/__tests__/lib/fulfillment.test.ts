@@ -951,7 +951,7 @@ describe("reconcileStuckRendering", () => {
 
     const result = await reconcileStuckRendering();
 
-    expect(mockReplicateGet).toHaveBeenCalledWith("pred-123");
+    expect(mockReplicateGet).toHaveBeenCalledWith("pred-123", { signal: expect.any(AbortSignal) });
     // Atomic claim: RENDERING → FULFILLING
     expect(prismaMock.contentBrief.updateMany).toHaveBeenCalledWith({
       where: { id: "brief-render-1", status: "RENDERING" },
@@ -1127,6 +1127,22 @@ describe("reconcileStuckRendering", () => {
       expect.stringContaining("reconcile"),
       expect.any(Error)
     );
+    expect(result).toEqual({ reconciled: 0, failed: 0, skipped: 1 });
+    consoleSpy.mockRestore();
+  });
+
+  it("uses AbortController timeout for predictions.get()", async () => {
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+
+    // Simulate an abort error (what happens when AbortController fires)
+    const abortError = new DOMException("The operation was aborted", "AbortError");
+    mockReplicateGet.mockRejectedValue(abortError);
+
+    const result = await reconcileStuckRendering();
+
+    // Abort errors should be caught and skipped like other API errors
     expect(result).toEqual({ reconciled: 0, failed: 0, skipped: 1 });
     consoleSpy.mockRestore();
   });
