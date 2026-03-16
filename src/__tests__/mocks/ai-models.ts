@@ -44,11 +44,14 @@ export function anthropicSdkMock() {
  * with a constructor whose `.messages.stream` delegates to `mockStream`.
  */
 export function anthropicStreamMock() {
-  return jest.fn().mockImplementation(() => ({
-    messages: {
-      stream: (...args: unknown[]) => mockStream(...args),
-    },
-  }));
+  return {
+    __esModule: true,
+    default: jest.fn().mockImplementation(() => ({
+      messages: {
+        stream: (...args: unknown[]) => mockStream(...args),
+      },
+    })),
+  };
 }
 
 /** Reset all AI mocks — call in `beforeEach`. */
