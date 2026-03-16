@@ -52,6 +52,7 @@ describe("generateImage", () => {
       const originalFetch = global.fetch;
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
+        headers: new Headers({ "Content-Type": "image/webp" }),
         arrayBuffer: () => Promise.resolve(fakeImageData.buffer),
       }) as unknown as typeof fetch;
 
@@ -160,6 +161,25 @@ describe("generateImage", () => {
       );
     });
 
+    it("rejects image URL with non-image Content-Type", async () => {
+      holder.run.mockResolvedValue("https://replicate.delivery/image.webp");
+
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "Content-Type": "text/html" }),
+        arrayBuffer: () => Promise.resolve(Buffer.from("not an image").buffer),
+      }) as unknown as typeof fetch;
+
+      try {
+        await expect(generateImage("test prompt")).rejects.toThrow(
+          "Expected image/* Content-Type, got: text/html"
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
     it("allows image URL from replicate.delivery", async () => {
       const fakeImageData = Buffer.from("fake-image-data");
       holder.run.mockResolvedValue("https://replicate.delivery/image.webp");
@@ -167,6 +187,7 @@ describe("generateImage", () => {
       const originalFetch = global.fetch;
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
+        headers: new Headers({ "Content-Type": "image/webp" }),
         arrayBuffer: () => Promise.resolve(fakeImageData.buffer),
       }) as unknown as typeof fetch;
 
@@ -185,6 +206,7 @@ describe("generateImage", () => {
       const originalFetch = global.fetch;
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
+        headers: new Headers({ "Content-Type": "image/webp" }),
         arrayBuffer: () => Promise.resolve(fakeImageData.buffer),
       }) as unknown as typeof fetch;
 

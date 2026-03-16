@@ -84,6 +84,10 @@ export async function generateImage(prompt: string): Promise<GeneratedImage> {
       }
       const res = await fetch(output);
       if (!res.ok) throw new Error(`Failed to fetch image from Replicate: ${res.status}`);
+      const ct = res.headers.get("Content-Type") ?? "";
+      if (!ct.startsWith("image/")) {
+        throw new Error(`Expected image/* Content-Type, got: ${ct}`);
+      }
       imageBuffer = Buffer.from(await res.arrayBuffer());
     } else {
       throw new Error("Replicate returned unexpected output format");
