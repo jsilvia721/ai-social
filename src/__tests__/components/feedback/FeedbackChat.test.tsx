@@ -295,6 +295,96 @@ describe("FeedbackChat", () => {
     expect(screen.getByRole("button", { name: /wrap up/i })).toBeInTheDocument();
   });
 
+  it("converts object error from API to a string", async () => {
+    const greetingResponse = createMockSSEResponse(["Hello!"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse);
+
+    openChat();
+    await waitFor(() => {
+      expect(screen.getByText(/Hello!/)).toBeInTheDocument();
+    });
+
+    const input = screen.getByPlaceholderText(/type your message/i);
+    fireEvent.change(input, { target: { value: "Another message" } });
+
+    // Mock a non-ok response where data.error is an object (e.g. Zod fieldErrors)
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      headers: new Headers(),
+      json: () =>
+        Promise.resolve({
+          error: { messages: ["Too short"], classification: ["Invalid"] },
+        }),
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+
+    // Should render a string error, not crash with [object Object]
+    await waitFor(() => {
+      const alert = screen.getByRole("alert");
+      expect(alert).toBeInTheDocument();
+      // Should NOT contain [object Object]
+      expect(alert.textContent).not.toContain("[object Object]");
+      // Should contain a readable representation
+      expect(alert.textContent).toContain("Too short");
+    });
+  });
+
+  it("converts object error from submit API to a string", async () => {
+    const greetingResponse = createMockSSEResponse(["Hello!"]);
+    mockFetch.mockResolvedValueOnce(greetingResponse);
+
+    openChat();
+    await waitFor(() => {
+      expect(screen.getByText(/Hello!/)).toBeInTheDocument();
+    });
+
+    const input = screen.getByPlaceholderText(/type your message/i);
+    fireEvent.change(input, { target: { value: "Bug report" } });
+
+    const summaryText = JSON.stringify({
+      type: "summary",
+      classification: "bug",
+      title: "Test bug",
+      description: "Test description",
+      priority: "medium",
+    });
+    mockFetch.mockResolvedValueOnce(createMockSSEResponse([summaryText]));
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("chat-summary")).toBeInTheDocument();
+    });
+
+    // Mock submit returning an object error
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      headers: new Headers(),
+      json: () =>
+        Promise.resolve({
+          error: { summary: ["Required field"] },
+        }),
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /looks good/i }));
+    });
+
+    await waitFor(() => {
+      const alert = screen.getByRole("alert");
+      expect(alert).toBeInTheDocument();
+      expect(alert.textContent).not.toContain("[object Object]");
+      expect(alert.textContent).toContain("Required field");
+    });
+  });
+
   it("handles rate limit (429) with friendly message", async () => {
     const greetingResponse = createMockSSEResponse(["Hello!"]);
     mockFetch.mockResolvedValueOnce(greetingResponse);
