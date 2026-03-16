@@ -15,6 +15,9 @@ Run the autonomous issue-daemon agent in a Docker container with resource limits
 # Build the image
 docker build -f Dockerfile.agent -t ai-social-agent .
 
+# Build with pinned Claude CLI version (recommended for production)
+docker build -f Dockerfile.agent --build-arg CLAUDE_CLI_VERSION=1.0.0 -t ai-social-agent .
+
 # Run with docker-compose (recommended)
 ANTHROPIC_API_KEY=sk-... GITHUB_TOKEN=ghp_... \
   docker compose -f docker-compose.agent.yml up --build
@@ -94,6 +97,8 @@ docker inspect --format='{{.State.Health.Status}}' ai-social-agent
 - **Read-only repo mount** — the host repo cannot be modified by the agent.
 - **Resource limits** — CPU, memory, and disk are capped to prevent runaway processes.
 - **Log rotation** — container logs are limited to 150MB (3 x 50MB files).
+- **Network access** — the container has outbound network access by design (it needs GitHub API and Anthropic API). No egress filtering is applied. If running in a sensitive environment, consider adding a network policy or egress proxy.
+- **Pinnable dependencies** — the Dockerfile supports a `CLAUDE_CLI_VERSION` build arg for supply-chain safety. Pin base image to a digest for production use (see comments in Dockerfile).
 
 ## Troubleshooting
 

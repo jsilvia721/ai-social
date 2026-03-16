@@ -10,6 +10,8 @@
 # Run:
 #   See docker-compose.agent.yml for the recommended way to run.
 
+# Pin to tag for reproducibility. Update periodically.
+# To pin to digest: docker pull node:22-bookworm-slim && docker inspect --format='{{index .RepoDigests 0}}' node:22-bookworm-slim
 FROM node:22-bookworm-slim
 
 LABEL maintainer="ai-social team"
@@ -25,7 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     gnupg \
-    openssh-client \
     tmux \
     procps \
     && rm -rf /var/lib/apt/lists/*
@@ -41,7 +42,9 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude CLI via npm (global)
-RUN npm install -g @anthropic-ai/claude-code@latest
+# Pin to explicit version for supply-chain safety. Update intentionally.
+ARG CLAUDE_CLI_VERSION=latest
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}
 
 # Create a non-root user for running the agent
 RUN groupadd --gid 1000 agent \

@@ -27,7 +27,7 @@ fi
 
 # Check 3: gh CLI works (if token is set)
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-  if ! gh auth status > /dev/null 2>&1; then
+  if ! gh api /rate_limit > /dev/null 2>&1; then
     echo "UNHEALTHY: gh CLI not authenticated"
     exit 1
   fi

@@ -65,6 +65,14 @@ describe("Dockerfile.agent", () => {
     it("uses the issue-daemon as entrypoint", () => {
       expect(content).toMatch(/issue-daemon/);
     });
+
+    it("supports pinnable Claude CLI version via build arg", () => {
+      expect(content).toMatch(/ARG\s+CLAUDE_CLI_VERSION/);
+    });
+
+    it("does NOT install openssh-client (minimal attack surface)", () => {
+      expect(content).not.toMatch(/openssh-client/);
+    });
   });
 });
 
