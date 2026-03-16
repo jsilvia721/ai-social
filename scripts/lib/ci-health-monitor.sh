@@ -278,9 +278,9 @@ _ci_green_check_and_file() {
   local fingerprint="$3"
   local rerun_result="$4"
 
-  # Green-check: is the latest main run now passing?
+  # Green-check: is the latest main run for this workflow now passing?
   local latest_runs
-  latest_runs=$(gh run list --branch main --limit 1 \
+  latest_runs=$(gh run list --branch main --workflow "$workflow" --limit 1 \
     --json databaseId,conclusion,workflowName,event 2>/dev/null || echo "[]")
 
   local latest_conclusion
@@ -311,14 +311,11 @@ _ci_green_check_and_file() {
 
   # Get run URL
   local run_url
-  run_url=$(gh run view "$run_id" --json url -q '.url' 2>/dev/null || echo "https://github.com/actions/runs/$run_id")
+  run_url=$(gh run view "$run_id" --json url -q '.url' 2>/dev/null || echo "(URL unavailable)")
 
-  # Get commit SHA from state
-  local sha=""
-  if [ -f "${CI_MONITOR_STATE_FILE:-${DAEMON_STATE_DIR}/ci-monitor-state}" ]; then
-    # SHA isn't in state file — fetch from API
-    sha=$(gh run view "$run_id" --json headSha -q '.headSha' 2>/dev/null || echo "unknown")
-  fi
+  # Get commit SHA from API
+  local sha
+  sha=$(gh run view "$run_id" --json headSha -q '.headSha' 2>/dev/null || echo "unknown")
 
   local body
   body=$(format_ci_issue_body "$run_url" "$workflow" "$sha" "$error_logs" "$fingerprint" "$rerun_result")
@@ -334,7 +331,7 @@ _ci_green_check_and_file() {
   if [ -n "$issue_url" ]; then
     local issue_number
     issue_number=$(echo "$issue_url" | grep -o '[0-9]*$' || echo "")
-    ci_monitor_update "$run_id" "filed" "$issue_number" ""
+    ci_monitor_update "$run_id" "filed" "$issue_number"
     log "CI monitor: filed issue $issue_url for run $run_id ($workflow)"
   else
     log "CI monitor: API error filing issue for run $run_id, will retry next cycle"
