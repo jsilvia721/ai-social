@@ -127,6 +127,9 @@ describe("POST /api/feedback/submit", () => {
     const body = await res.json();
     expect(typeof body.error).toBe("string");
     expect(body.error.length).toBeGreaterThan(0);
+    // Ensure it's a meaningful message, not "[object Object]"
+    expect(body.error).not.toContain("[object Object]");
+    expect(body.error).toMatch(/expected|invalid|required/i);
   });
 
   it("returns 400 for invalid classification", async () => {
