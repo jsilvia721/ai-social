@@ -119,6 +119,36 @@ describe("GET /api/posts", () => {
     );
   });
 
+  it("filters by socialAccount.businessId when businessId is provided", async () => {
+    mockAuthenticated();
+    prismaMock.$transaction.mockResolvedValue([[], 0] as any);
+
+    await GET(makeGetRequest({ businessId: "biz-1" }));
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          socialAccount: { businessId: "biz-1" },
+        }),
+      })
+    );
+  });
+
+  it("does not add socialAccount filter when businessId is absent", async () => {
+    mockAuthenticated();
+    prismaMock.$transaction.mockResolvedValue([[], 0] as any);
+
+    await GET(makeGetRequest());
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({
+          socialAccount: expect.anything(),
+        }),
+      })
+    );
+  });
+
   it("does not add businessId filter when param is absent", async () => {
     mockAuthenticated();
     prismaMock.$transaction.mockResolvedValue([[], 0] as any);
