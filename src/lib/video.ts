@@ -124,7 +124,8 @@ export async function processCompletedPrediction(
     const errorMessage = err instanceof Error ? err.message : String(err);
     await reportServerError("Video processing failed", {
       url: "/api/webhooks/replicate",
-      metadata: { briefId: brief.id, businessId: brief.businessId, outputUrl },
+      stack: err instanceof Error ? err.stack : undefined,
+      metadata: { briefId: brief.id, businessId: brief.businessId, outputUrl, error: errorMessage },
     });
 
     // Mark brief as FAILED

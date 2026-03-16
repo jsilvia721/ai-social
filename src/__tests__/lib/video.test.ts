@@ -188,7 +188,29 @@ describe("processCompletedPrediction", () => {
     expect(mockReportError).toHaveBeenCalledWith(
       "Video processing failed",
       expect.objectContaining({
-        metadata: expect.objectContaining({ briefId: "brief-1" }),
+        metadata: expect.objectContaining({ briefId: "brief-1", error: "Download failed: HTTP 500" }),
+        stack: expect.any(String),
+      })
+    );
+  });
+
+  it("passes full error stack to reportServerError for stack traces", async () => {
+    const brief = makeBrief();
+    const originalError = new Error("S3 upload timeout");
+    mockDownload.mockRejectedValue(originalError);
+
+    prismaMock.contentBrief.update.mockResolvedValue({} as any);
+
+    await processCompletedPrediction(
+      brief,
+      "https://replicate.delivery/output/video.mp4"
+    );
+
+    expect(mockReportError).toHaveBeenCalledWith(
+      "Video processing failed",
+      expect.objectContaining({
+        stack: originalError.stack,
+        metadata: expect.objectContaining({ error: "S3 upload timeout" }),
       })
     );
   });
