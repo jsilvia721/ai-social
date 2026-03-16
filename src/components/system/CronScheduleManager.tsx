@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { Play, Loader2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -104,12 +105,18 @@ interface CronCardProps {
       hourUtc?: number;
     }
   ) => Promise<boolean>;
+  onTrigger: (cronName: CronName) => Promise<void>;
 }
 
-function CronCard({ config, onToggle, onSave }: CronCardProps) {
+function CronCard({ config, onToggle, onSave, onTrigger }: CronCardProps) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [triggering, setTriggering] = useState(false);
+  const [triggerFeedback, setTriggerFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
 
   // Rate cron editing state
   const [editValue, setEditValue] = useState(config.intervalValue ?? 1);
@@ -124,6 +131,26 @@ function CronCard({ config, onToggle, onSave }: CronCardProps) {
   const isRate = RATE_CRON_NAMES.has(config.cronName);
   const isWeekly = WEEKLY_CRON_NAMES.has(config.cronName);
   const desc = CRON_DESCRIPTIONS[config.cronName];
+
+  async function handleRunNow() {
+    setTriggering(true);
+    setTriggerFeedback(null);
+    try {
+      await onTrigger(config.cronName);
+      setTriggerFeedback({ type: "success", message: "Triggered" });
+      setTimeout(() => setTriggerFeedback(null), 5000);
+    } catch (err) {
+      // Don't show error for user-cancelled confirmations
+      if (err instanceof Error && err.message === "cancelled") {
+        setTriggering(false);
+        return;
+      }
+      setTriggerFeedback({ type: "error", message: "Failed to trigger" });
+      setTimeout(() => setTriggerFeedback(null), 5000);
+    } finally {
+      setTriggering(false);
+    }
+  }
 
   function handleStartEdit() {
     // Reset to current values
@@ -175,6 +202,31 @@ function CronCard({ config, onToggle, onSave }: CronCardProps) {
           <p className="text-xs text-zinc-400">{desc.description}</p>
         </div>
         <div className="flex items-center gap-3">
+          {/* Trigger feedback */}
+          {triggerFeedback && (
+            <span
+              className={`text-xs font-medium ${
+                triggerFeedback.type === "success"
+                  ? "text-green-400"
+                  : "text-red-400"
+              }`}
+            >
+              {triggerFeedback.message}
+            </span>
+          )}
+          {/* Run Now button */}
+          <button
+            onClick={handleRunNow}
+            disabled={triggering}
+            aria-label={`Run ${desc.label} now`}
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-400 hover:text-violet-400 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+          >
+            {triggering ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )}
+          </button>
           {/* Sync status badge */}
           <span
             className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -347,6 +399,8 @@ interface ConfirmDialogProps {
   message: string;
   onConfirm: () => void;
   onCancel: () => void;
+  confirmLabel?: string;
+  confirmClassName?: string;
 }
 
 function ConfirmDialog({
@@ -355,6 +409,8 @@ function ConfirmDialog({
   message,
   onConfirm,
   onCancel,
+  confirmLabel = "Disable",
+  confirmClassName = "bg-red-600 text-white hover:bg-red-700",
 }: ConfirmDialogProps) {
   if (!open) return null;
   return (
@@ -371,9 +427,9 @@ function ConfirmDialog({
           </button>
           <button
             onClick={onConfirm}
-            className="px-3 py-1.5 text-xs font-medium rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors"
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${confirmClassName}`}
           >
-            Disable
+            {confirmLabel}
           </button>
         </div>
       </div>
@@ -390,11 +446,18 @@ export function CronScheduleManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Confirmation dialog state
+  // Confirmation dialog state (for disable)
   const [confirmDialog, setConfirmDialog] = useState<{
     cronName: CronName;
     message: string;
   } | null>(null);
+
+  // Trigger confirmation dialog state (for publish run)
+  const [triggerConfirmDialog, setTriggerConfirmDialog] = useState(false);
+  // Track which card should receive trigger feedback after publish confirm
+  const [publishTriggerCallback, setPublishTriggerCallback] = useState<
+    ((success: boolean) => void) | null
+  >(null);
 
   const fetchConfigs = useCallback(async () => {
     setLoading(true);
@@ -502,6 +565,51 @@ export function CronScheduleManager() {
     }
   }
 
+  async function executeTrigger(cronName: CronName) {
+    const res = await fetch("/api/system/cron/trigger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cronName }),
+    });
+    if (!res.ok) {
+      throw new Error("Failed to trigger cron");
+    }
+  }
+
+  async function handleTrigger(cronName: CronName) {
+    // Show confirmation dialog for publish cron
+    if (cronName === "publish") {
+      return new Promise<void>((resolve, reject) => {
+        setTriggerConfirmDialog(true);
+        setPublishTriggerCallback(() => (success: boolean) => {
+          if (success) resolve();
+          else reject(new Error("cancelled"));
+        });
+      });
+    }
+    await executeTrigger(cronName);
+  }
+
+  async function handleConfirmTrigger() {
+    setTriggerConfirmDialog(false);
+    const callback = publishTriggerCallback;
+    setPublishTriggerCallback(null);
+    try {
+      await executeTrigger("publish");
+      callback?.(true);
+    } catch {
+      callback?.(false);
+    }
+  }
+
+  function handleCancelTrigger() {
+    setTriggerConfirmDialog(false);
+    const callback = publishTriggerCallback;
+    setPublishTriggerCallback(null);
+    // Reject with "cancelled" so the card knows not to show error feedback
+    callback?.(false);
+  }
+
   async function handleConfirmDisable() {
     if (confirmDialog) {
       const cronName = confirmDialog.cronName;
@@ -549,6 +657,7 @@ export function CronScheduleManager() {
             config={config}
             onToggle={handleToggle}
             onSave={handleSave}
+            onTrigger={handleTrigger}
           />
         ))}
       </div>
@@ -559,6 +668,16 @@ export function CronScheduleManager() {
         message={confirmDialog?.message ?? ""}
         onConfirm={handleConfirmDisable}
         onCancel={() => setConfirmDialog(null)}
+      />
+
+      <ConfirmDialog
+        open={triggerConfirmDialog}
+        title="Run Publisher Now?"
+        message="This will immediately attempt to publish any scheduled posts that are due. Are you sure?"
+        onConfirm={handleConfirmTrigger}
+        onCancel={handleCancelTrigger}
+        confirmLabel="Run Now"
+        confirmClassName="bg-violet-600 text-white hover:bg-violet-700"
       />
     </div>
   );
