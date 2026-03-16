@@ -45,6 +45,7 @@ See `.claude/rules/visual-testing.md` for Playwright MCP, design-iterator, desig
 - **Every `schema.prisma` change MUST have a migration** — run `npx prisma migrate dev --name <name>`, never just `npx prisma generate`. CI enforces with `prisma migrate diff --exit-code`.
 - **New SST secrets require environment setup** — PR description MUST list every new secret and the exact `npx sst secret set` commands. If not ready, make optional following the BlotatoApiKey pattern. See `docs/solutions/deployment-issues/sst-secret-not-set-causes-deploy-failure.md`.
 - **Always use `/create-issue` skill for GitHub issues** — never use `gh issue create` directly.
+- **Brainstorm plans require human approval** — if a plan has an `origin:` frontmatter field referencing `docs/brainstorms/`, it MUST go through issue creation (`/create-issue`) and `/go` approval before work begins. Never offer "Start `/ce:work`" for brainstorm-originated plans.
 - **Workspace hygiene** — clean up temp files before finishing. Run `git status` to verify no stray files remain.
 - **After any correction** — update auto-memory with the pattern to prevent recurrence.
 - **Auto-compound after non-trivial work** — after completing any bug fix or Moderate+ feature, run `/ce:compound` to document the solution in `docs/solutions/` before declaring done.
