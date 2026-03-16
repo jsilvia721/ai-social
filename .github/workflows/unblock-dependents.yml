@@ -5,6 +5,8 @@ on:
     types: [closed]
   issues:
     types: [closed]
+  repository_dispatch:
+    types: [plan-issue-closed]
 
 permissions:
   issues: write
@@ -53,6 +55,17 @@ jobs:
 
               closedIssueNumbers.add(issue.number);
               triggerDescription = `issue #${issue.number} closed`;
+            } else if (context.eventName === 'repository_dispatch') {
+              const raw = (context.payload.client_payload && context.payload.client_payload.issue_numbers) || [];
+              if (!Array.isArray(raw)) {
+                console.log('client_payload.issue_numbers is not an array. Skipping.');
+                return;
+              }
+              const validNumbers = raw.filter(n => Number.isInteger(n) && n > 0);
+              for (const num of validNumbers) {
+                closedIssueNumbers.add(num);
+              }
+              triggerDescription = `repository_dispatch plan-issue-closed [${validNumbers.map(n => '#' + n).join(', ')}]`;
             }
 
             if (closedIssueNumbers.size === 0) {
