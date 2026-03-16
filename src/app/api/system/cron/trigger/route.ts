@@ -70,6 +70,18 @@ export async function POST(req: NextRequest) {
   const { cronName } = parsed.data;
 
   try {
+    // Concurrency guard: reject if the same cron is already running
+    const alreadyRunning = await prisma.cronRun.findFirst({
+      where: { cronName, status: "RUNNING" },
+      select: { id: true },
+    });
+    if (alreadyRunning) {
+      return NextResponse.json(
+        { error: `${cronName} is already running` },
+        { status: 409 }
+      );
+    }
+
     // Create a RUNNING CronRun entry with manual trigger metadata
     const cronRun = await prisma.cronRun.create({
       data: {

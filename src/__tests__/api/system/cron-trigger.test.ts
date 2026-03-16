@@ -100,6 +100,7 @@ describe("POST /api/system/cron/trigger", () => {
     "returns 200 and creates CronRun for %s",
     async (cronName) => {
       mockAuthenticatedAsAdmin();
+      (prismaMock.cronRun.findFirst as jest.Mock).mockResolvedValue(null);
 
       const mockCronRun = {
         id: `cr-${cronName}`,
@@ -153,6 +154,20 @@ describe("POST /api/system/cron/trigger", () => {
         metadata: { triggerSource: "manual" },
       },
     });
+  });
+
+  // ─── Concurrency guard ─────────────────────────────────────────────────
+
+  it("returns 409 when cron is already running", async () => {
+    mockAuthenticatedAsAdmin();
+    (prismaMock.cronRun.findFirst as jest.Mock).mockResolvedValue({
+      id: "cr-existing",
+    });
+
+    const res = await POST(makePostRequest({ cronName: "publish" }));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain("already running");
   });
 
   // ─── Async handler execution ──────────────────────────────────────────
