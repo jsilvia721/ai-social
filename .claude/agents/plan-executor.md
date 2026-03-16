@@ -70,6 +70,21 @@ Feature branch created: `feat/plan-<N>-<slug>`
 
 **If branch creation fails:** Add the `claude-blocked` label to the plan issue and comment with the error. Stop — do not create work issues or proceed further.
 
+### 3.5. Check for Existing Child Issues (Idempotency)
+
+Before creating any issues, check if a previous run already created some or all child issues. This prevents duplicates when re-running after a partial failure.
+
+```bash
+EXISTING_ISSUES=$(gh issue list --state open --search "PARENT_PLAN: #<plan-issue-number> in:body" --json number,title --limit 100)
+```
+
+Compare existing issue titles against the plan items:
+- **All items already have issues:** Skip to Step 5 (Post Summary) using the existing issue numbers, then proceed to Step 6 (Close Out). Do not create any new issues.
+- **Some items have issues:** Create only the missing ones. When writing dependency references for new issues, use the actual issue numbers from both existing and newly created issues.
+- **No existing issues found:** Proceed normally to Step 4.
+
+When matching, compare titles case-insensitively and use fuzzy matching (the existing title should contain the key terms from the plan item title). Log which items were found as existing and which need to be created.
+
 ### 4. Create Issues in Topological Order
 
 Process items in topological order (roots first, then dependents). For each item, create a GitHub issue.
