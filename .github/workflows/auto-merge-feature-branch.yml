@@ -176,6 +176,7 @@ jobs:
 
       - name: Close referenced issues
         if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outcome == 'success'
+        id: close-issues
         uses: actions/github-script@v7
         env:
           PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
@@ -207,12 +208,16 @@ jobs:
               issueNumbers.add(parseInt(match[1], 10));
             }
 
+            // Output resolved issue numbers for downstream steps
+            const issueArray = [...issueNumbers];
+            core.setOutput('issue_numbers', JSON.stringify(issueArray));
+
             if (issueNumbers.size === 0) {
               console.log('No issue references found in PR body. Skipping issue closure.');
               return;
             }
 
-            console.log(`Found issue references: ${[...issueNumbers].map(n => '#' + n).join(', ')}`);
+            console.log(`Found issue references: ${issueArray.map(n => '#' + n).join(', ')}`);
 
             for (const issueNum of issueNumbers) {
               try {
@@ -245,3 +250,30 @@ jobs:
                 console.log(`Failed to close issue #${issueNum}: ${error.message}`);
               }
             }
+
+      - name: Fire repository_dispatch for plan completion check
+        if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outcome == 'success'
+        uses: actions/github-script@v7
+        env:
+          CLOSED_ISSUES: ${{ steps.close-issues.outputs.issue_numbers }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const issueNumbers = JSON.parse(process.env.CLOSED_ISSUES || '[]');
+
+            if (issueNumbers.length === 0) {
+              console.log('No issue references found. Skipping repository_dispatch.');
+              return;
+            }
+
+            console.log(`Dispatching plan-issue-closed for issues: ${issueNumbers.map(n => '#' + n).join(', ')}`);
+
+            await github.rest.repos.createDispatchEvent({
+              owner, repo,
+              event_type: 'plan-issue-closed',
+              client_payload: { issue_numbers: issueNumbers }
+            });
+
+            console.log('repository_dispatch event fired successfully.');
