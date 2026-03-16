@@ -118,7 +118,7 @@ describe("computeEngagementRate", () => {
 
   it("weights shares much more heavily on Twitter than on YouTube", () => {
     // Twitter shares weight=20 vs YouTube shares weight=4
-    // Same metrics, but Twitter should value shares more relative to baseline
+    // For a shares-dominated post, Twitter should score higher
     const twitterPost = makePost({
       platform: "TWITTER",
       metricsShares: 50,
@@ -129,13 +129,10 @@ describe("computeEngagementRate", () => {
       metricsShares: 50,
       metricsLikes: 10,
     });
-    // The raw weighted score for shares is much higher on Twitter
-    // but baselines differ, so we check the ratio of share contribution
     const twitterScore = computeEngagementRate(twitterPost);
     const youtubeScore = computeEngagementRate(youtubePost);
-    // Both should be > 0
-    expect(twitterScore).toBeGreaterThan(0);
-    expect(youtubeScore).toBeGreaterThan(0);
+    // Twitter score should be higher because shares are weighted 5x more (20 vs 4)
+    expect(twitterScore).toBeGreaterThan(youtubeScore);
   });
 
   it("produces different scores per platform for identical metrics due to different weights", () => {

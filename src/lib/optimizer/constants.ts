@@ -43,4 +43,4 @@ export const PLATFORM_ENGAGEMENT_WEIGHTS: Record<
   TIKTOK: { likes: 1, comments: 5, shares: 8, saves: 6 },
   FACEBOOK: { likes: 1, comments: 3, shares: 5, saves: 4 },
   YOUTUBE: { likes: 1, comments: 5, shares: 4, saves: 3 },
-};
+} as const;
