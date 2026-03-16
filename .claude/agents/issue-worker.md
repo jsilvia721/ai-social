@@ -340,6 +340,40 @@ When your prompt mentions "retrying interrupted issue" or "RETRY", check for an 
 
 **Important:** When resuming, re-read the issue body and parse `TARGET_BRANCH` the same way as in Step 1 — do not default to `origin/main`.
 
+## Error Recovery Taxonomy
+
+When a step fails, follow this decision tree before retrying or escalating. Max **3 retries per category** before labeling `claude-blocked`.
+
+### 1. CI Lint/Format Failure
+- **Detection:** `npm run ci:check` fails with ESLint or Prettier errors.
+- **Recovery:** Read the error output → fix each reported issue → re-run `npm run ci:check`.
+- **Max retries:** 3
+- **Escalation:** If lint rules conflict or require config changes outside scope, comment on issue and label `claude-blocked`.
+
+### 2. Type Error
+- **Detection:** `npm run ci:check` fails on `tsc --noEmit`, or TypeScript errors in build output.
+- **Recovery:** Run `npx tsc --noEmit` to get the full error list → fix type issues starting from the root cause (earliest error) → re-run.
+- **Max retries:** 3
+- **Escalation:** If the type error stems from an upstream type definition or requires architectural changes, comment with the error details and label `claude-blocked`.
+
+### 3. Test Failure
+- **Detection:** Jest test failures in `npm run test` or `npm run test:coverage`.
+- **Recovery:** Read the failure output → determine if the **test expectation** or the **implementation** is wrong → fix the correct side → re-run the specific test file first, then full suite.
+- **Max retries:** 3
+- **Escalation:** If the failure is in an unrelated test (pre-existing), note it in the PR description and proceed. If the failure is in your code and unfixable after 3 attempts, label `claude-blocked`.
+
+### 4. Timeout / Wall-Clock Budget
+- **Detection:** Elapsed time reaches 40–45 minutes.
+- **Recovery:** Immediately stop implementation → `git add .` → commit with WIP message describing done/remaining → `git push -u origin HEAD` → comment progress summary on issue.
+- **Max retries:** 0 (no retry — save and stop)
+- **Escalation:** The next agent invocation will resume from the WIP branch.
+
+### 5. Merge Conflict
+- **Detection:** `git merge` or `git rebase` reports conflicts, or PR has conflict status.
+- **Recovery:** Run `git fetch origin && git merge origin/<target_branch>` → resolve conflicts in files you modified (accept upstream for files you didn't touch) → run `npm run ci:check` to verify → commit the merge.
+- **Max retries:** 1 (conflicts are deterministic — if auto-resolve fails once, manual intervention is needed)
+- **Escalation:** If conflicts are in files outside your change scope or involve complex logic, label `claude-blocked` with a comment listing the conflicting files.
+
 ## Rules
 
 - **If stuck for more than 3 failed attempts at the same problem, stop.** Comment on the issue and label it `claude-blocked`.
