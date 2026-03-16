@@ -111,6 +111,7 @@ describe("POST /api/errors", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBeDefined();
+    expect(typeof body.error).toBe("string");
   });
 
   it("returns 400 when source is invalid", async () => {
@@ -120,6 +121,7 @@ describe("POST /api/errors", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBeDefined();
+    expect(typeof body.error).toBe("string");
   });
 
   it("returns 400 for malformed JSON body", async () => {

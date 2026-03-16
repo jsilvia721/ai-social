@@ -134,6 +134,9 @@ assert_grep "filters out claude-blocked" \
 assert_grep "filters out claude-done" \
   'LABEL_DONE' "$DAEMON_SCRIPT"
 
+assert_grep "filters out claude-active" \
+  'LABEL_ACTIVE' "$DAEMON_SCRIPT"
+
 # --- Priority ordering --------------------------------------------------------
 echo ""
 echo "Priority ordering:"
