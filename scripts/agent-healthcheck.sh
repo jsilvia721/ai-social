@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # Check 1: issue-daemon or node process is running
-if ! pgrep -f "issue-daemon\|node\|claude" > /dev/null 2>&1; then
+if ! pgrep -f "issue-daemon\.sh" > /dev/null 2>&1; then
   echo "UNHEALTHY: No agent process found"
   exit 1
 fi

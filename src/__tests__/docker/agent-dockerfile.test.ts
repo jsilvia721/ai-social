@@ -28,20 +28,20 @@ describe("Dockerfile.agent", () => {
       expect(content).toMatch(/FROM node:22/);
     });
 
-    it("installs git", () => {
-      expect(content).toMatch(/\bgit\b/);
+    it("installs git via apt-get", () => {
+      expect(content).toMatch(/apt-get.*install[\s\S]*?\bgit\b/);
     });
 
-    it("installs jq", () => {
-      expect(content).toMatch(/\bjq\b/);
+    it("installs jq via apt-get", () => {
+      expect(content).toMatch(/apt-get.*install[\s\S]*?\bjq\b/);
     });
 
-    it("installs GitHub CLI", () => {
-      expect(content).toMatch(/\bgh\b/);
+    it("installs GitHub CLI via apt-get", () => {
+      expect(content).toMatch(/apt-get.*install.*\bgh\b/);
     });
 
-    it("installs Claude CLI", () => {
-      expect(content).toMatch(/@anthropic-ai\/claude-code/);
+    it("installs Claude CLI via npm", () => {
+      expect(content).toMatch(/npm install.*@anthropic-ai\/claude-code/);
     });
 
     it("does NOT contain any secrets or API keys", () => {
@@ -58,12 +58,22 @@ describe("Dockerfile.agent", () => {
       expect(content).toMatch(/USER\s+agent/);
     });
 
+    it("does not re-escalate to root after switching to agent user", () => {
+      const lines = content.split("\n");
+      const userAgentIndex = lines.findIndex((l) => /^USER\s+agent/.test(l));
+      expect(userAgentIndex).toBeGreaterThan(-1);
+      const laterRootLines = lines
+        .slice(userAgentIndex + 1)
+        .filter((l) => /^USER\s+root/.test(l));
+      expect(laterRootLines).toHaveLength(0);
+    });
+
     it("includes a HEALTHCHECK instruction", () => {
       expect(content).toMatch(/HEALTHCHECK/);
     });
 
     it("uses the issue-daemon as entrypoint", () => {
-      expect(content).toMatch(/issue-daemon/);
+      expect(content).toMatch(/ENTRYPOINT.*issue-daemon/);
     });
 
     it("supports pinnable Claude CLI version via build arg", () => {
@@ -72,6 +82,11 @@ describe("Dockerfile.agent", () => {
 
     it("does NOT install openssh-client (minimal attack surface)", () => {
       expect(content).not.toMatch(/openssh-client/);
+    });
+
+    it("uses ARG not ENV for DEBIAN_FRONTEND", () => {
+      expect(content).toMatch(/ARG\s+DEBIAN_FRONTEND/);
+      expect(content).not.toMatch(/ENV\s+DEBIAN_FRONTEND/);
     });
   });
 });
@@ -128,6 +143,7 @@ describe("docker-compose.agent.yml", () => {
 
 describe("scripts/agent-healthcheck.sh", () => {
   const healthcheckPath = resolve(ROOT, "scripts/agent-healthcheck.sh");
+  let content: string;
 
   it("exists", () => {
     expect(existsSync(healthcheckPath)).toBe(true);
@@ -139,43 +155,51 @@ describe("scripts/agent-healthcheck.sh", () => {
     }).not.toThrow();
   });
 
+  beforeAll(() => {
+    content = readFileSync(healthcheckPath, "utf-8");
+  });
+
   it("has a bash shebang", () => {
-    const content = readFileSync(healthcheckPath, "utf-8");
     expect(content.startsWith("#!/usr/bin/env bash")).toBe(true);
   });
 
-  it("checks for running processes", () => {
-    const content = readFileSync(healthcheckPath, "utf-8");
-    expect(content).toMatch(/pgrep/);
+  it("checks for the issue-daemon process specifically", () => {
+    expect(content).toMatch(/pgrep.*issue-daemon/);
   });
 
   it("checks workspace mount", () => {
-    const content = readFileSync(healthcheckPath, "utf-8");
     expect(content).toMatch(/\/workspace\/package\.json/);
   });
 });
 
 describe("docs/agent-docker.md", () => {
   const docsPath = resolve(ROOT, "docs/agent-docker.md");
+  let content: string;
 
   it("exists", () => {
     expect(existsSync(docsPath)).toBe(true);
   });
 
+  beforeAll(() => {
+    content = readFileSync(docsPath, "utf-8");
+  });
+
   it("documents required environment variables", () => {
-    const content = readFileSync(docsPath, "utf-8");
     expect(content).toMatch(/ANTHROPIC_API_KEY/);
     expect(content).toMatch(/GITHUB_TOKEN/);
   });
 
   it("documents resource limits", () => {
-    const content = readFileSync(docsPath, "utf-8");
     expect(content).toMatch(/CPU/i);
     expect(content).toMatch(/memory/i);
   });
 
   it("documents health check", () => {
-    const content = readFileSync(docsPath, "utf-8");
     expect(content).toMatch(/[Hh]ealth/);
+  });
+
+  it("documents security model", () => {
+    expect(content).toMatch(/[Nn]etwork/);
+    expect(content).toMatch(/[Nn]on-root/);
   });
 });
