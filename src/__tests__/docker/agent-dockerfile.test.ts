@@ -32,8 +32,11 @@ describe("Dockerfile.agent", () => {
     expect(dockerfile).toMatch(/apt-get install[\s\S]*\bgh\b/);
   });
 
-  it("installs Claude CLI via npm", () => {
+  it("installs Claude CLI via npm with a pinned version", () => {
     expect(dockerfile).toMatch(/npm install -g @anthropic-ai\/claude-code/);
+    // Should not use @latest — version should be pinned via ARG
+    expect(dockerfile).not.toMatch(/claude-code@latest/);
+    expect(dockerfile).toMatch(/ARG CLAUDE_CLI_VERSION=/);
   });
 
   it("does not contain any hardcoded secrets", () => {
@@ -105,6 +108,11 @@ describe("docker-compose.agent.yml", () => {
 
   it("references Dockerfile.agent", () => {
     expect(compose).toContain("Dockerfile.agent");
+  });
+
+  it("includes security hardening (no-new-privileges, cap_drop)", () => {
+    expect(compose).toMatch(/no-new-privileges/);
+    expect(compose).toMatch(/cap_drop/);
   });
 });
 

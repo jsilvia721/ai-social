@@ -16,7 +16,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     jq \
     ca-certificates \
-    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -29,8 +28,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude CLI (latest)
-RUN npm install -g @anthropic-ai/claude-code@latest
+# Install Claude CLI — pin version for reproducible builds
+# Update deliberately via PR when upgrading
+ARG CLAUDE_CLI_VERSION=2.1.76
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}
 
 # Create non-root user for agent execution
 RUN groupadd --gid 1000 agent \

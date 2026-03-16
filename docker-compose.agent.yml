@@ -52,6 +52,12 @@ services:
       - GIT_COMMITTER_NAME=ai-social-agent
       - GIT_COMMITTER_EMAIL=agent@ai-social.local
 
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
     # Disk limit via tmpfs (for /tmp scratch space)
     tmpfs:
       - /tmp:size=1G
