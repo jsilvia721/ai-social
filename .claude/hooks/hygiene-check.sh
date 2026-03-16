@@ -19,6 +19,12 @@ if [[ "$STOP_ACTIVE" == "true" ]]; then
   exit 0
 fi
 
+# Warn if too many worktrees are active
+WORKTREE_COUNT=$(git worktree list 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$WORKTREE_COUNT" -gt 20 ]]; then
+  echo "⚠️  $WORKTREE_COUNT git worktrees active (>20). Consider cleaning up stale worktrees." >&2
+fi
+
 # Get stray files from git status, filtering out sensitive patterns
 STRAY_FILES=$(git status --short 2>/dev/null | grep -v -E '\.(env|pem|key)' || true)
 
