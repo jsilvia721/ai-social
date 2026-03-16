@@ -618,16 +618,6 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    commit_wip_if_needed "$issue_number"
-    handle_rate_limit_exit "$issue_number" "$runtime" "Worker" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    clean_worktree "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   # Verify a PR was actually created for this issue (regardless of exit code)
   local pr_url
   pr_url=$(gh pr list --search "Closes #${issue_number}" --json url -q '.[0].url' 2>/dev/null || echo "")
@@ -653,6 +643,15 @@ EOF
     log "Worker for issue #${issue_number} completed — no PR needed (issue already marked done/closed)"
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
     clear_session_id "$issue_number"
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    # but catches rate limits that exit 0 (e.g., "You've hit your limit" graceful shutdown)
+    commit_wip_if_needed "$issue_number"
+    handle_rate_limit_exit "$issue_number" "$runtime" "Worker" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    clean_worktree "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     if [ $exit_code -eq 0 ] && [ -z "$pr_url" ]; then
@@ -741,20 +740,18 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    clean_worktree "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   if [ $exit_code -eq 0 ]; then
     log "Plan-executor for issue #${issue_number} completed successfully"
     # plan-executor handles its own label transitions (approved -> done)
     # but ensure WIP is removed if still present
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    clean_worktree "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     log "Plan-executor for issue #${issue_number} failed (exit code: $exit_code)"
@@ -827,19 +824,17 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   if [ $exit_code -eq 0 ]; then
     log "Bug-investigator for issue #${issue_number} completed successfully"
     # bug-investigator handles its own label transitions (bug-investigate -> bug-planned)
     # but ensure WIP is removed if still present
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     log "Bug-investigator for issue #${issue_number} failed (exit code: $exit_code)"
@@ -1007,18 +1002,16 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-writer" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   if [ $exit_code -eq 0 ]; then
     log "Plan-writer for issue #${issue_number} completed successfully"
     # plan-writer adds needs-human-review itself; just remove WIP
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-writer" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     log "Plan-writer for issue #${issue_number} failed (exit code: $exit_code)"
@@ -1096,9 +1089,26 @@ while true; do
   while IFS=: read -r w_pid w_issue w_start w_type; do
     [ -n "$w_pid" ] || continue
 
-    # Dead worker — clean up orphaned state
+    # Dead worker — clean up orphaned state and transition labels
     if ! kill -0 "$w_pid" 2>/dev/null; then
-      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
+      log "Worker PID $w_pid for issue #${w_issue} is dead — cleaning up orphaned state"
+      kill_worker_tmux_session "$w_issue"
+
+      # Check if issue still has claude-wip label before transitioning
+      dead_labels=$(gh issue view "$w_issue" --json labels -q '.labels[].name' 2>/dev/null || true)
+      if echo "$dead_labels" | grep -q "$LABEL_WIP"; then
+        if [ "$w_type" = "worker" ]; then
+          # Workers are idempotent — transition to interrupted for auto-retry
+          gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
+          gh issue comment "$w_issue" --body "Worker process died unexpectedly (PID $w_pid no longer running). Transitioning to \`$LABEL_INTERRUPTED\` for auto-retry." 2>/dev/null || true
+        else
+          # Non-workers (plan, plan-writer, bug-investigate, conflict-resolver) are not idempotent — block for manual review
+          gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
+          gh issue comment "$w_issue" --body "Worker process died unexpectedly (PID $w_pid, type: $w_type). Transitioning to \`$LABEL_BLOCKED\` — manual review required since $w_type tasks are not idempotent." 2>/dev/null || true
+        fi
+      fi
+
+      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}" "$LOG_DIR/.pr-check-${w_issue}" "$LOG_DIR/.pr-discovered-${w_issue}"
       remove_worker "$w_pid"
       continue
     fi
