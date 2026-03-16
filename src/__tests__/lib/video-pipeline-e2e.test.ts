@@ -187,7 +187,7 @@ describe("video pipeline E2E lifecycle", () => {
     expect(result.created).toBe(1);
   });
 
-  it("RENDERING → FULFILLED: webhook processes completed prediction and creates Post", async () => {
+  it("FULFILLING → FULFILLED: processCompletedPrediction downloads video, creates Post", async () => {
     const brief = makeVideoBrief({
       status: "FULFILLING",
       videoScript: "Scene 1: Dramatic reveal...",
@@ -197,7 +197,7 @@ describe("video pipeline E2E lifecycle", () => {
     }) as unknown as BriefWithRelations;
 
     const mockPost = { id: "post-v1" };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma interactive transaction callback has no exported type
     prismaMock.$transaction.mockImplementation(async (fn: any) => {
       if (typeof fn === "function") {
         return fn({
@@ -233,12 +233,12 @@ describe("video pipeline E2E lifecycle", () => {
     }) as unknown as BriefWithRelations;
 
     let capturedPostData: Record<string, unknown> | undefined;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma interactive transaction callback has no exported type
     prismaMock.$transaction.mockImplementation(async (fn: any) => {
       if (typeof fn === "function") {
         return fn({
           post: {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- capturing dynamic mock args
             create: jest.fn().mockImplementation((args: any) => {
               capturedPostData = args.data;
               return { id: "post-v1" };
@@ -270,7 +270,7 @@ describe("video pipeline E2E lifecycle", () => {
 // ── Webhook Idempotency ─────────────────────────────────────────────────────────
 
 describe("webhook idempotency", () => {
-  it("duplicate webhook delivery does not create a second Post", async () => {
+  it("atomic claim prevents duplicate processing when brief moved past RENDERING", async () => {
     const brief = makeVideoBrief({
       status: "FULFILLING",
       videoScript: "Scene 1: Dramatic reveal...",
@@ -282,7 +282,7 @@ describe("webhook idempotency", () => {
     const mockPost = { id: "post-v1" };
     let postCreateCallCount = 0;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma interactive transaction callback has no exported type
     prismaMock.$transaction.mockImplementation(async (fn: any) => {
       if (typeof fn === "function") {
         return fn({
@@ -358,14 +358,7 @@ describe("reconciliation of stuck RENDERING briefs", () => {
       output: "https://replicate.delivery/reconciled-video.mp4",
     });
 
-    const mockProcessResult = { outcome: "created" as const, postId: "post-reconciled" };
-    // processCompletedPrediction is mocked at the module level via jest.mock("@/lib/video")
-    // But we imported the real one... Let's use the mock from fulfillment.test.ts pattern.
-    // Actually, in fulfillment.ts, processCompletedPrediction is imported and called directly.
-    // Since we're calling reconcileStuckRendering which uses the real processCompletedPrediction,
-    // and we mocked @/lib/media (downloadAndUploadVideo), it should work.
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma interactive transaction callback has no exported type
     prismaMock.$transaction.mockImplementation(async (fn: any) => {
       if (typeof fn === "function") {
         return fn({
