@@ -117,12 +117,14 @@ gh pr comment <pr-number> --body "❌ Automated conflict resolution failed: ci:c
 exit 1
 ```
 
-### 5. Push and Notify
+### 5. Push
 
 ```bash
 git push --force-with-lease
-gh pr comment <pr-number> --body "✅ Merge conflicts resolved automatically by conflict-resolver agent. Force-pushed rebased branch."
 ```
+
+> **Note:** Do NOT comment on the PR here. The daemon's `handle_resolution_success` posts the
+> comment on the confirmed-success exit path (including the new HEAD SHA).
 
 ## Resolution Strategy
 

@@ -89,6 +89,9 @@ done
 # Clean up stale conflict worktrees from a previous run (crash recovery)
 cleanup_stale_conflict_worktrees
 
+# Clean up stale ACK files from a previous run (crash recovery)
+cleanup_stale_ack_files
+
 # Reap orphaned processes matching a pattern with ppid=1 (parent daemon died).
 # $1 — pgrep pattern, $2 — label for log messages
 reap_orphans() {
@@ -106,6 +109,16 @@ reap_orphans "docker (compose|ps|info)" "Docker process"
 reap_orphans "shell-snapshots/snapshot-zsh" "Claude shell wrapper"
 
 DAEMON_PID_FILE="$LOG_DIR/.issue-daemon.pid"
+
+# Singleton guard — prevent multiple daemon instances from running simultaneously
+if [ -f "$DAEMON_PID_FILE" ]; then
+  existing_pid=$(cat "$DAEMON_PID_FILE" 2>/dev/null || echo "")
+  if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
+    echo "ERROR: Another daemon instance is already running (PID $existing_pid). Exiting." >&2
+    exit 1
+  fi
+fi
+
 echo $$ > "$DAEMON_PID_FILE"
 
 # Kill a tmux session for a given issue number (if it exists).
@@ -1342,66 +1355,85 @@ while true; do
 
     # Process the selected conflict PR (at most 1 per cycle)
     if [ -n "$conflict_pr" ] && [ -n "$conflict_branch" ]; then
-      log "Processing conflict PR #${conflict_pr} (branch: ${conflict_branch})"
-      ensure_conflict_state_dir
+      # Acquire ACK lock — skip if another instance/cycle is already processing this PR
+      if ! acquire_conflict_ack "$conflict_pr"; then
+        log "Skipping conflict PR #${conflict_pr} — ACK already held"
+      else
+        log "Processing conflict PR #${conflict_pr} (branch: ${conflict_branch})"
+        ensure_conflict_state_dir
 
-      # Step 1: Attempt clean rebase
-      rebase_result=0
-      attempt_clean_rebase "$conflict_pr" "$conflict_branch" || rebase_result=$?
+        # Step 1: Attempt clean rebase
+        rebase_result=0
+        attempt_clean_rebase "$conflict_pr" "$conflict_branch" || rebase_result=$?
 
-      if [ "$rebase_result" -eq 0 ]; then
-        # Clean rebase succeeded — push and poll CI in-process (no worker slot)
-        log "Clean rebase succeeded for PR #${conflict_pr}, pushing..."
-        push_and_verify_conflict "$conflict_pr"
-        cleanup_conflict_worktree "$conflict_pr"
-
-      elif [ "$rebase_result" -eq 1 ]; then
-        # Rebase has conflicts — attempt_clean_rebase aborted the rebase, so we
-        # need to go through handle_mechanical_conflicts which re-runs the rebase
-        # to get back into conflicted state and can properly classify conflicts.
-        # handle_mechanical_conflicts checks is_mechanical_conflict internally;
-        # if non-mechanical conflicts exist it aborts and returns 1.
-        mechanical_result=0
-        handle_mechanical_conflicts "$conflict_pr" || mechanical_result=$?
-
-        if [ "$mechanical_result" -eq 0 ]; then
-          # Mechanical resolution succeeded — push and poll CI in-process
-          log "Mechanical conflict resolution succeeded for PR #${conflict_pr}, pushing..."
+        if [ "$rebase_result" -eq 0 ]; then
+          # Clean rebase succeeded — push and poll CI in-process (no worker slot)
+          log "Clean rebase succeeded for PR #${conflict_pr}, pushing..."
           push_and_verify_conflict "$conflict_pr"
           cleanup_conflict_worktree "$conflict_pr"
-        else
-          # Non-mechanical conflicts — check for excluded files before spawning agent.
-          # Re-run rebase to get into conflicted state for is_excluded_conflict check.
-          worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${conflict_pr}"
-          git -C "$worktree_path" rebase origin/main 2>/dev/null || true
+          release_conflict_ack "$conflict_pr"
 
-          if is_excluded_conflict "$conflict_pr" "$worktree_path"; then
-            log "PR #${conflict_pr} has excluded file conflicts — labeling for manual rebase"
-            git -C "$worktree_path" rebase --abort 2>/dev/null || true
-            handle_resolution_failure "$conflict_pr" "Conflicts in excluded files (prisma migrations, sst.config.ts, etc.)"
+        elif [ "$rebase_result" -eq 1 ]; then
+          # Rebase has conflicts — attempt_clean_rebase aborted the rebase, so we
+          # need to go through handle_mechanical_conflicts which re-runs the rebase
+          # to get back into conflicted state and can properly classify conflicts.
+          # handle_mechanical_conflicts checks is_mechanical_conflict internally;
+          # if non-mechanical conflicts exist it aborts and returns 1.
+          mechanical_result=0
+          handle_mechanical_conflicts "$conflict_pr" || mechanical_result=$?
+
+          if [ "$mechanical_result" -eq 0 ]; then
+            # Mechanical resolution succeeded — push and poll CI in-process
+            log "Mechanical conflict resolution succeeded for PR #${conflict_pr}, pushing..."
+            push_and_verify_conflict "$conflict_pr"
             cleanup_conflict_worktree "$conflict_pr"
+            release_conflict_ack "$conflict_pr"
           else
-            git -C "$worktree_path" rebase --abort 2>/dev/null || true
-            # Spawn agent if slot available
-            active=$(active_worker_count)
-            available_slots=$(( MAX_WORKERS - active ))
-            if [ "$available_slots" -gt 0 ]; then
-              log "Spawning conflict-resolver agent for PR #${conflict_pr}"
-              run_conflict_resolver "$conflict_pr" "$conflict_branch" &
-              record_worker "$!" "$conflict_pr" "conflict-resolver"
-              log "Spawned conflict-resolver PID $! for PR #${conflict_pr}"
-            else
-              log "No worker slots available for conflict-resolver on PR #${conflict_pr}, will retry next cycle"
+            # Non-mechanical conflicts — check for excluded files before spawning agent.
+            # Re-run rebase to get into conflicted state for is_excluded_conflict check.
+            worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${conflict_pr}"
+            git -C "$worktree_path" rebase origin/main 2>/dev/null || true
+
+            if is_excluded_conflict "$conflict_pr" "$worktree_path"; then
+              log "PR #${conflict_pr} has excluded file conflicts — labeling for manual rebase"
+              git -C "$worktree_path" rebase --abort 2>/dev/null || true
+              handle_resolution_failure "$conflict_pr" "Conflicts in excluded files (prisma migrations, sst.config.ts, etc.)"
               cleanup_conflict_worktree "$conflict_pr"
+              release_conflict_ack "$conflict_pr"
+            else
+              git -C "$worktree_path" rebase --abort 2>/dev/null || true
+              # Defense-in-depth: check PID_FILE for existing conflict-resolver on same PR
+              if grep -q ":${conflict_pr}:.*:conflict-resolver$" "$PID_FILE" 2>/dev/null; then
+                log "PID_FILE already has conflict-resolver entry for PR #${conflict_pr} — skipping"
+                release_conflict_ack "$conflict_pr"
+                cleanup_conflict_worktree "$conflict_pr"
+              else
+                # Spawn agent if slot available
+                active=$(active_worker_count)
+                available_slots=$(( MAX_WORKERS - active ))
+                if [ "$available_slots" -gt 0 ]; then
+                  log "Spawning conflict-resolver agent for PR #${conflict_pr}"
+                  run_conflict_resolver "$conflict_pr" "$conflict_branch" &
+                  record_worker "$!" "$conflict_pr" "conflict-resolver"
+                  log "Spawned conflict-resolver PID $! for PR #${conflict_pr}"
+                  # NOTE: ACK is intentionally NOT released here — the agent process
+                  # holds the lock. It will be cleaned up by TTL expiry or stale cleanup.
+                else
+                  log "No worker slots available for conflict-resolver on PR #${conflict_pr}, will retry next cycle"
+                  cleanup_conflict_worktree "$conflict_pr"
+                  release_conflict_ack "$conflict_pr"
+                fi
+              fi
             fi
           fi
-        fi
 
-      else
-        # rebase_result == 2 — unexpected error
-        log "Unexpected error during rebase for PR #${conflict_pr}"
-        handle_resolution_failure "$conflict_pr" "Unexpected error during rebase"
-        cleanup_conflict_worktree "$conflict_pr"
+        else
+          # rebase_result == 2 — unexpected error
+          log "Unexpected error during rebase for PR #${conflict_pr}"
+          handle_resolution_failure "$conflict_pr" "Unexpected error during rebase"
+          cleanup_conflict_worktree "$conflict_pr"
+          release_conflict_ack "$conflict_pr"
+        fi
       fi
     fi
   else
