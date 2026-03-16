@@ -157,6 +157,7 @@ export default $config({
       schedule: "rate(6 hours)",
       job: {
         handler: "src/cron/fulfill.handler",
+        link: [bucket],
         environment,
         timeout: "5 minutes",
         logging: { retention: "1 month" },
