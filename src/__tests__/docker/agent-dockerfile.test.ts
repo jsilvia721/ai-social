@@ -25,12 +25,11 @@ describe("Dockerfile.agent", () => {
     expect(dockerfile).toMatch(/^FROM node:22/m);
   });
 
-  it("installs required tools: git, jq, gh CLI", () => {
-    expect(dockerfile).toContain("git");
-    expect(dockerfile).toContain("jq");
-    // gh CLI installed via GitHub's apt repository
-    expect(dockerfile).toContain("apt-get install");
-    expect(dockerfile).toContain("gh");
+  it("references git, jq, and gh in apt-get install commands", () => {
+    // Verify each tool appears in an install context
+    expect(dockerfile).toMatch(/apt-get install[\s\S]*\bgit\b/);
+    expect(dockerfile).toMatch(/apt-get install[\s\S]*\bjq\b/);
+    expect(dockerfile).toMatch(/apt-get install[\s\S]*\bgh\b/);
   });
 
   it("installs Claude CLI via npm", () => {
@@ -48,7 +47,7 @@ describe("Dockerfile.agent", () => {
       .filter((l) => l.match(/^\s*ENV\s/));
     for (const line of envLines) {
       expect(line).not.toMatch(
-        /ANTHROPIC_API_KEY|GITHUB_TOKEN|DATABASE_URL.*=\s*\S/
+        /(ANTHROPIC_API_KEY|GITHUB_TOKEN|DATABASE_URL).*=\s*\S/
       );
     }
   });
@@ -121,25 +120,28 @@ describe("agent-healthcheck.sh", () => {
     expect(existsSync(healthcheckPath)).toBe(true);
   });
 
-  it("checks for required binaries", () => {
+  it("checks for required binaries via command -v", () => {
+    // The script uses `command -v "$cmd"` in a loop over tool names
+    expect(healthcheck).toMatch(/command -v/);
+    // Verify each required tool is listed in the check
     for (const cmd of ["node", "git", "gh", "jq", "claude"]) {
-      expect(healthcheck).toContain(cmd);
+      expect(healthcheck).toMatch(new RegExp(`\\b${cmd}\\b`));
     }
   });
 
-  it("checks for repo mount", () => {
-    expect(healthcheck).toContain("/repo");
+  it("checks for repo mount at /repo", () => {
+    expect(healthcheck).toMatch(/\/repo\b/);
   });
 
-  it("checks workdir is writable", () => {
-    expect(healthcheck).toContain("/workdir");
+  it("checks workdir is writable at /workdir", () => {
+    expect(healthcheck).toMatch(/\/workdir\b/);
   });
 
   it("uses bash strict mode", () => {
     expect(healthcheck).toContain("set -euo pipefail");
   });
 
-  it("exits with appropriate codes", () => {
+  it("exits 0 for healthy and 1 for unhealthy", () => {
     expect(healthcheck).toContain("exit 0");
     expect(healthcheck).toContain("exit 1");
   });
@@ -147,26 +149,28 @@ describe("agent-healthcheck.sh", () => {
 
 describe("docs/agent-docker.md", () => {
   const docsPath = resolve(ROOT, "docs/agent-docker.md");
+  let docs: string;
+
+  beforeAll(() => {
+    docs = readFileSync(docsPath, "utf-8");
+  });
 
   it("exists", () => {
     expect(existsSync(docsPath)).toBe(true);
   });
 
   it("documents required environment variables", () => {
-    const docs = readFileSync(docsPath, "utf-8");
     expect(docs).toContain("ANTHROPIC_API_KEY");
     expect(docs).toContain("GITHUB_TOKEN");
   });
 
   it("documents resource limits", () => {
-    const docs = readFileSync(docsPath, "utf-8");
     expect(docs).toMatch(/resource/i);
     expect(docs).toMatch(/cpu/i);
     expect(docs).toMatch(/memory/i);
   });
 
   it("documents health check", () => {
-    const docs = readFileSync(docsPath, "utf-8");
     expect(docs).toMatch(/health/i);
   });
 });
