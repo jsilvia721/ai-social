@@ -23,6 +23,9 @@
 #   cleanup_stale_conflict_worktrees — remove all conflict worktrees (crash recovery)
 #   ensure_conflict_state_dir       — create state directory
 #   conflict_log                    — log to per-PR log file
+#   acquire_conflict_ack            — atomic ACK lock for a PR (prevents concurrent processing)
+#   release_conflict_ack            — release ACK lock for a PR
+#   cleanup_stale_ack_files         — remove expired/orphaned ACK files (startup cleanup)
 
 set -euo pipefail
 
@@ -497,5 +500,110 @@ cleanup_stale_conflict_worktrees() {
     local pr_num="${dir##*conflict-pr-}"
     log "Cleaning up stale conflict worktree: $dir (PR #$pr_num)"
     git worktree remove "$dir" --force 2>/dev/null || rm -rf "$dir"
+  done
+}
+
+# --- ACK locking (prevents concurrent processing of same PR) -----------------
+
+# ACK TTL in seconds — 75 minutes (exceeds WALL_TIMEOUT of 60 min).
+CONFLICT_ACK_TTL="${CONFLICT_ACK_TTL:-4500}"
+
+# Acquire an exclusive ACK lock for a PR.
+# Uses set -o noclobber for atomic creation (fails if file already exists).
+# $1 — PR number
+# Returns: 0 = acquired, 1 = already locked (by a live process within TTL)
+acquire_conflict_ack() {
+  local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
+
+  ensure_conflict_state_dir
+  local ack_file="$LOG_DIR/conflict-state/pr-${pr_number}.ack"
+
+  # If ACK file exists, check if it's stale
+  if [ -f "$ack_file" ]; then
+    local ack_pid ack_ts
+    ack_pid=$(grep '^pid=' "$ack_file" 2>/dev/null | cut -d= -f2 || echo "")
+    ack_ts=$(grep '^ts=' "$ack_file" 2>/dev/null | cut -d= -f2 || echo "0")
+
+    local now
+    now=$(date +%s)
+    local age=$(( now - ack_ts ))
+
+    # Check if ACK is expired (past TTL)
+    if [ "$age" -ge "$CONFLICT_ACK_TTL" ]; then
+      conflict_log "$pr_number" "ACK file expired (age=${age}s, TTL=${CONFLICT_ACK_TTL}s) — removing stale ACK"
+      rm -f "$ack_file"
+    elif [ -n "$ack_pid" ] && ! kill -0 "$ack_pid" 2>/dev/null; then
+      # PID is dead — stale ACK from crashed daemon
+      conflict_log "$pr_number" "ACK file has dead PID ${ack_pid} — removing stale ACK"
+      rm -f "$ack_file"
+    else
+      # ACK is live and within TTL — cannot acquire
+      conflict_log "$pr_number" "ACK already held by PID ${ack_pid} (age=${age}s) — skipping"
+      return 1
+    fi
+  fi
+
+  # Atomic creation with noclobber — prevents TOCTOU race between instances
+  local ack_content
+  ack_content="pid=$$
+ts=$(date +%s)
+pr=${pr_number}"
+
+  if ( set -o noclobber; echo "$ack_content" > "$ack_file" ) 2>/dev/null; then
+    conflict_log "$pr_number" "ACK acquired (PID=$$)"
+    return 0
+  else
+    conflict_log "$pr_number" "ACK creation race lost — another process acquired it"
+    return 1
+  fi
+}
+
+# Release an ACK lock for a PR.
+# $1 — PR number
+release_conflict_ack() {
+  local pr_number="$1"
+  _validate_pr_number "$pr_number" || return 1
+
+  local ack_file="$LOG_DIR/conflict-state/pr-${pr_number}.ack"
+  if [ -f "$ack_file" ]; then
+    rm -f "$ack_file"
+    conflict_log "$pr_number" "ACK released"
+  fi
+}
+
+# Clean up stale ACK files at daemon startup.
+# Removes ACK files with dead PIDs or expired TTL.
+cleanup_stale_ack_files() {
+  local ack_dir="$LOG_DIR/conflict-state"
+  [ -d "$ack_dir" ] || return 0
+
+  for ack_file in "$ack_dir"/pr-*.ack; do
+    [ -f "$ack_file" ] || continue
+
+    local ack_pid ack_ts pr_num
+    ack_pid=$(grep '^pid=' "$ack_file" 2>/dev/null | cut -d= -f2 || echo "")
+    ack_ts=$(grep '^ts=' "$ack_file" 2>/dev/null | cut -d= -f2 || echo "0")
+    pr_num=$(grep '^pr=' "$ack_file" 2>/dev/null | cut -d= -f2 || echo "?")
+
+    local now
+    now=$(date +%s)
+    local age=$(( now - ack_ts ))
+    local stale=false
+
+    # Expired TTL
+    if [ "$age" -ge "$CONFLICT_ACK_TTL" ]; then
+      stale=true
+    fi
+
+    # Dead PID
+    if [ -n "$ack_pid" ] && ! kill -0 "$ack_pid" 2>/dev/null; then
+      stale=true
+    fi
+
+    if [ "$stale" = "true" ]; then
+      log "Cleaning up stale ACK file for PR #${pr_num} (pid=${ack_pid}, age=${age}s)"
+      rm -f "$ack_file"
+    fi
   done
 }
