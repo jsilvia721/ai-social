@@ -71,8 +71,8 @@ if [[ ! -f "$PLAN_FILE" ]]; then
   exit 0
 fi
 
-# Check the first 10 lines for brainstorm origin in YAML frontmatter
-if head -10 "$PLAN_FILE" | grep -q 'origin:.*docs/brainstorms/'; then
+# Extract YAML frontmatter (between --- delimiters) and check for brainstorm origin
+if sed -n '2,/^---$/p' "$PLAN_FILE" | grep -q 'origin:.*docs/brainstorms/'; then
   echo "BLOCKED: This plan originated from a brainstorm (has 'origin: docs/brainstorms/...' in frontmatter)." >&2
   echo "Brainstorm plans require human approval before work begins." >&2
   echo "Use /create-issue to create a work issue, then wait for /go approval." >&2
