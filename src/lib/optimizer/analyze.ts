@@ -1,5 +1,5 @@
 import type { Platform } from "@/types";
-import { PLATFORM_BASELINES, ENGAGEMENT_WEIGHTS, METRICS_MATURE_HOURS } from "./constants";
+import { PLATFORM_BASELINES, ENGAGEMENT_WEIGHTS, PLATFORM_ENGAGEMENT_WEIGHTS, METRICS_MATURE_HOURS } from "./constants";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,20 +43,22 @@ export function computeEngagementRate(post: AnalyzablePost): number {
   const shares = post.metricsShares ?? 0;
   const saves = post.metricsSaves ?? 0;
 
+  const weights = PLATFORM_ENGAGEMENT_WEIGHTS[post.platform] ?? ENGAGEMENT_WEIGHTS;
+
   const raw =
-    likes * ENGAGEMENT_WEIGHTS.likes +
-    comments * ENGAGEMENT_WEIGHTS.comments +
-    shares * ENGAGEMENT_WEIGHTS.shares +
-    saves * ENGAGEMENT_WEIGHTS.saves;
+    likes * weights.likes +
+    comments * weights.comments +
+    shares * weights.shares +
+    saves * weights.saves;
 
   if (raw === 0) return 0;
 
   const baseline = PLATFORM_BASELINES[post.platform];
   const baselineScore =
-    baseline.likes * ENGAGEMENT_WEIGHTS.likes +
-    baseline.comments * ENGAGEMENT_WEIGHTS.comments +
-    baseline.shares * ENGAGEMENT_WEIGHTS.shares +
-    baseline.saves * ENGAGEMENT_WEIGHTS.saves;
+    baseline.likes * weights.likes +
+    baseline.comments * weights.comments +
+    baseline.shares * weights.shares +
+    baseline.saves * weights.saves;
 
   // Normalize against platform baseline
   return raw / baselineScore;
