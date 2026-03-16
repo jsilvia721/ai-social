@@ -80,6 +80,36 @@ describe("GET /api/posts/calendar", () => {
     );
   });
 
+  it("filters by socialAccount.businessId when businessId is provided", async () => {
+    mockAuthenticated();
+    prismaMock.post.findMany.mockResolvedValue([]);
+
+    await GET(makeRequest({ year: "2025", month: "5", businessId: "biz-1" }));
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          socialAccount: { businessId: "biz-1" },
+        }),
+      })
+    );
+  });
+
+  it("does not add socialAccount filter when businessId is absent", async () => {
+    mockAuthenticated();
+    prismaMock.post.findMany.mockResolvedValue([]);
+
+    await GET(makeRequest({ year: "2025", month: "5" }));
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({
+          socialAccount: expect.anything(),
+        }),
+      })
+    );
+  });
+
   it("always scopes to the user's business membership", async () => {
     mockAuthenticated();
     prismaMock.post.findMany.mockResolvedValue([]);

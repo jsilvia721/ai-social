@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     // Admins bypass membership check; non-admins scoped to their businesses
     ...(isAdmin ? {} : { business: { members: { some: { userId: session.user.id } } } }),
     // Narrow to active workspace when provided
-    ...(businessId ? { businessId } : {}),
+    ...(businessId ? { businessId, socialAccount: { businessId } } : {}),
     ...(status ? { status: status as import("@prisma/client").PostStatus } : {}),
     ...(repurposeGroupId ? { repurposeGroupId } : {}),
   };
