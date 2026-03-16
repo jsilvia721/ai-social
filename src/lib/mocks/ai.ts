@@ -32,12 +32,12 @@ export function mockExtractContentStrategy(
   wizardAnswers: Record<string, unknown>,
 ): ContentStrategyInput {
   const industry =
-    (wizardAnswers["Business type"] as string) ||
-    (wizardAnswers["industry"] as string) ||
+    (typeof wizardAnswers["Business type"] === "string" ? wizardAnswers["Business type"] : undefined) ||
+    (typeof wizardAnswers["industry"] === "string" ? wizardAnswers["industry"] : undefined) ||
     "Technology & SaaS";
   const audience =
-    (wizardAnswers["Target audience"] as string) ||
-    (wizardAnswers["targetAudience"] as string) ||
+    (typeof wizardAnswers["Target audience"] === "string" ? wizardAnswers["Target audience"] : undefined) ||
+    (typeof wizardAnswers["targetAudience"] === "string" ? wizardAnswers["targetAudience"] : undefined) ||
     "Tech-savvy professionals aged 25-45";
 
   return {
