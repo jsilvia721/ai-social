@@ -176,6 +176,7 @@ jobs:
 
       - name: Close referenced issues
         if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outcome == 'success'
+        id: close-issues
         uses: actions/github-script@v7
         env:
           PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
@@ -207,12 +208,16 @@ jobs:
               issueNumbers.add(parseInt(match[1], 10));
             }
 
+            // Output resolved issue numbers for downstream steps
+            const issueArray = [...issueNumbers];
+            core.setOutput('issue_numbers', JSON.stringify(issueArray));
+
             if (issueNumbers.size === 0) {
               console.log('No issue references found in PR body. Skipping issue closure.');
               return;
             }
 
-            console.log(`Found issue references: ${[...issueNumbers].map(n => '#' + n).join(', ')}`);
+            console.log(`Found issue references: ${issueArray.map(n => '#' + n).join(', ')}`);
 
             for (const issueNum of issueNumbers) {
               try {
@@ -250,42 +255,16 @@ jobs:
         if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outcome == 'success'
         uses: actions/github-script@v7
         env:
-          PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+          CLOSED_ISSUES: ${{ steps.close-issues.outputs.issue_numbers }}
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const prNumber = process.env.PR_NUMBER;
 
-            const prNum = parseInt(prNumber, 10);
-            if (isNaN(prNum)) {
-              console.log('PR_NUMBER environment variable is missing or invalid. Skipping dispatch.');
-              return;
-            }
-
-            // Fetch the PR to get the latest body
-            const { data: pr } = await github.rest.pulls.get({
-              owner, repo,
-              pull_number: prNum
-            });
-
-            const text = `${pr.title}\n${pr.body || ''}`;
-
-            // Parse "Closes #N", "Fixes #N", "Resolves #N" from PR body and title
-            const closingPattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
-            const issueNumbers = [];
-            const seen = new Set();
-            let match;
-            while ((match = closingPattern.exec(text)) !== null) {
-              const num = parseInt(match[1], 10);
-              if (!seen.has(num)) {
-                seen.add(num);
-                issueNumbers.push(num);
-              }
-            }
+            const issueNumbers = JSON.parse(process.env.CLOSED_ISSUES || '[]');
 
             if (issueNumbers.length === 0) {
-              console.log('No issue references found in PR. Skipping repository_dispatch.');
+              console.log('No issue references found. Skipping repository_dispatch.');
               return;
             }
 
