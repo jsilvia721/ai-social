@@ -70,6 +70,34 @@ Feature branch created: `feat/plan-<N>-<slug>`
 
 **If branch creation fails:** Add the `claude-blocked` label to the plan issue and comment with the error. Stop — do not create work issues or proceed further.
 
+### 3.5. Check for Existing Child Issues (Idempotency)
+
+Before creating any issues, check if a previous run already created some or all child issues. This prevents duplicates when the plan-executor re-runs after a partial failure, daemon restart, or concurrent invocation.
+
+Query GitHub for all issues (open and closed) whose body contains the `PARENT_PLAN` marker for this plan:
+
+```bash
+EXISTING_ISSUES=$(gh issue list --state all --search "PARENT_PLAN: #<plan-issue-number> in:body" --json number,title --limit 100)
+```
+
+Build a map of already-created plan items by comparing existing issue titles against plan item titles. Normalize both sides for comparison: lowercase, trim whitespace. An existing issue matches a plan item if the normalized titles are equal.
+
+**Three possible outcomes:**
+
+- **All items already have issues:** Log which existing issues matched. Skip directly to Step 5 (Post Summary) using the existing issue numbers, then proceed to Step 6 (Close Out). Do not create any new issues.
+- **Some items have issues, some do not:** Create only the missing items in Step 4. When writing dependency references (`### Dependencies` section) for newly created issues, use the actual issue numbers from both existing issues and newly created issues.
+- **No existing issues found:** Proceed normally to Step 4.
+
+Log which items were found as existing and which need to be created:
+
+```
+Found 2 existing child issues for plan #<N>:
+  - #201 matches plan item 1: "Add Widget model"
+  - #202 matches plan item 3: "Add Widget tests"
+Creating 1 remaining item:
+  - Plan item 2: "Add Widget API"
+```
+
 ### 4. Create Issues in Topological Order
 
 Process items in topological order (roots first, then dependents). For each item, create a GitHub issue.
