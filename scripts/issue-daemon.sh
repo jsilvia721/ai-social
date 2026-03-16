@@ -84,8 +84,13 @@ if [ -f "$DAEMON_PID_FILE" ]; then
     echo "ERROR: Another daemon instance is already running (PID $existing_pid). Exiting." >&2
     exit 1
   fi
+  rm -f "$DAEMON_PID_FILE"
 fi
-echo $$ > "$DAEMON_PID_FILE"
+# Atomic PID file creation — noclobber prevents TOCTOU race between simultaneous starts
+if ! ( set -o noclobber; echo $$ > "$DAEMON_PID_FILE" ) 2>/dev/null; then
+  echo "ERROR: Race condition — another daemon instance claimed the PID file. Exiting." >&2
+  exit 1
+fi
 
 : > "$PID_FILE"  # truncate on start
 
@@ -1416,8 +1421,17 @@ while true; do
                   run_conflict_resolver "$conflict_pr" "$conflict_branch" &
                   record_worker "$!" "$conflict_pr" "conflict-resolver"
                   log "Spawned conflict-resolver PID $! for PR #${conflict_pr}"
-                  # NOTE: ACK is intentionally NOT released here — the agent process
-                  # holds the lock. It will be cleaned up by TTL expiry or stale cleanup.
+                  # Update ACK to record the agent's PID (not the daemon's) so that
+                  # liveness checks track the actual lock holder. If the daemon restarts
+                  # while the agent is running, the ACK won't be prematurely cleaned up.
+                  local ack_file="$LOG_DIR/conflict-state/pr-${conflict_pr}.ack"
+                  if [ -f "$ack_file" ]; then
+                    cat > "$ack_file" <<ACK_UPDATE
+pid=$!
+ts=$(date +%s)
+pr=${conflict_pr}
+ACK_UPDATE
+                  fi
                 else
                   log "No worker slots available for conflict-resolver on PR #${conflict_pr}, will retry next cycle"
                   cleanup_conflict_worktree "$conflict_pr"

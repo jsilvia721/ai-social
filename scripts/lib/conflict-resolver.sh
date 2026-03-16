@@ -524,6 +524,7 @@ acquire_conflict_ack() {
     local ack_pid ack_ts
     ack_pid=$(grep '^pid=' "$ack_file" 2>/dev/null | cut -d= -f2 || echo "")
     ack_ts=$(grep '^ts=' "$ack_file" 2>/dev/null | cut -d= -f2 || echo "0")
+    [[ "$ack_ts" =~ ^[0-9]+$ ]] || ack_ts=0
 
     local now
     now=$(date +%s)
@@ -584,6 +585,7 @@ cleanup_stale_ack_files() {
     local ack_pid ack_ts pr_num
     ack_pid=$(grep '^pid=' "$ack_file" 2>/dev/null | cut -d= -f2 || echo "")
     ack_ts=$(grep '^ts=' "$ack_file" 2>/dev/null | cut -d= -f2 || echo "0")
+    [[ "$ack_ts" =~ ^[0-9]+$ ]] || ack_ts=0
     pr_num=$(grep '^pr=' "$ack_file" 2>/dev/null | cut -d= -f2 || echo "?")
 
     local now
