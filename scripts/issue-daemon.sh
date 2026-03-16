@@ -33,7 +33,7 @@ LABEL_BUG_INVESTIGATE="bug-investigate"
 LABEL_BUG_PLANNED="bug-planned"
 LABEL_PLAN="plan"
 LABEL_NEEDS_HUMAN_REVIEW="needs-human-review"
-LOG_DIR="./logs/issue-daemon"
+LOG_DIR="./logs/issue-daemon"  # made absolute after REPO_ROOT is set below
 RATE_LIMIT_PAUSE_SECONDS=900
 WALL_TIMEOUT=60            # wall-clock timeout in minutes per worker
 HEARTBEAT_INTERVAL=30      # seconds between heartbeat writes
@@ -56,6 +56,7 @@ done
 # --- Setup --------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+LOG_DIR="$REPO_ROOT/logs/issue-daemon"
 mkdir -p "$LOG_DIR"
 
 # Source the shared state library
