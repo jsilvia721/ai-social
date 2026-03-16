@@ -627,6 +627,15 @@ run_plan_executor() {
 
   log "Starting plan-executor for issue #${issue_number}: ${issue_title}"
 
+  # Idempotency guard: if plan already has claude-active, it was already executed
+  local current_labels
+  current_labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
+  if echo "$current_labels" | grep -q "$LABEL_ACTIVE"; then
+    log "Plan #${issue_number} already has '$LABEL_ACTIVE' label — skipping (already executed)"
+    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+    return
+  fi
+
   # Label as in-progress
   gh issue edit "$issue_number" --remove-label "$LABEL_APPROVED" --add-label "$LABEL_WIP" 2>/dev/null || true
 
@@ -989,6 +998,9 @@ log "Watching for issues labeled '${LABEL_RESUME}', '${LABEL_INTERRUPTED}', '${L
 log "PID file: ${DAEMON_PID_FILE} (send SIGUSR1 to toggle drain mode)"
 
 while true; do
+  # Reset per-cycle spawn deduplication set
+  spawned_this_cycle=""
+
   # --- 1. Drain mode check ---
   if is_drain_mode; then
     active=$(active_worker_count)
@@ -1141,8 +1153,14 @@ while true; do
           continue
         fi
 
+        if echo "$spawned_this_cycle" | grep -qw "$number"; then
+          log "Skipping issue #${number} (already spawned this cycle)"
+          continue
+        fi
+
         run_worker "$number" "$title" "false" "true" &
         record_worker "$!" "$number" "worker"
+        spawned_this_cycle="$spawned_this_cycle $number"
         log "Spawned resume worker PID $! for issue #${number}"
       done <<< "$resume_issues"
 
@@ -1171,8 +1189,14 @@ while true; do
           continue
         fi
 
+        if echo "$spawned_this_cycle" | grep -qw "$number"; then
+          log "Skipping issue #${number} (already spawned this cycle)"
+          continue
+        fi
+
         run_worker "$number" "$title" "true" "false" &
         record_worker "$!" "$number" "worker"
+        spawned_this_cycle="$spawned_this_cycle $number"
         log "Spawned retry worker PID $! for interrupted issue #${number}"
       done <<< "$interrupted_issues"
 
