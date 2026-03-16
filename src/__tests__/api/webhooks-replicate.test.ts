@@ -289,6 +289,35 @@ describe("POST /api/webhooks/replicate", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("returns 422 for succeeded prediction with unexpected output format (number)", async () => {
+      const prediction = { id: "pred_1", status: "succeeded", output: 12345 };
+      const req = makeWebhookRequest(prediction);
+
+      const res = await POST(req);
+
+      expect(res.status).toBe(422);
+      const body = await res.json();
+      expect(body.error).toContain("output");
+    });
+
+    it("returns 422 for succeeded prediction with unexpected output format (object)", async () => {
+      const prediction = { id: "pred_1", status: "succeeded", output: { url: "https://example.com" } };
+      const req = makeWebhookRequest(prediction);
+
+      const res = await POST(req);
+
+      expect(res.status).toBe(422);
+    });
+
+    it("returns 422 for succeeded prediction with array of non-strings", async () => {
+      const prediction = { id: "pred_1", status: "succeeded", output: [123, 456] };
+      const req = makeWebhookRequest(prediction);
+
+      const res = await POST(req);
+
+      expect(res.status).toBe(422);
+    });
   });
 
   describe("concurrent race condition", () => {

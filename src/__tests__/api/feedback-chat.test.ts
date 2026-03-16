@@ -159,6 +159,23 @@ describe("POST /api/feedback/chat", () => {
     expect(typeof body.error).toBe("string");
   });
 
+  it("returns error as a string (not object) for Zod validation failure", async () => {
+    // Send messages with invalid structure to trigger Zod fieldErrors
+    const res = await POST(
+      makeRequest({
+        messages: [{ role: 123, content: false }],
+        context: { pageUrl: "not-a-url" },
+      })
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(typeof body.error).toBe("string");
+    expect(body.error.length).toBeGreaterThan(0);
+    // Ensure it's a meaningful message, not "[object Object]"
+    expect(body.error).not.toContain("[object Object]");
+    expect(body.error).toMatch(/expected|invalid|required/i);
+  });
+
   it("returns 400 when messages do not alternate correctly", async () => {
     const res = await POST(
       makeRequest(

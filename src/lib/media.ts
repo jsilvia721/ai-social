@@ -10,6 +10,7 @@ import { s3, bucket, getPublicUrl } from "@/lib/storage";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
 import { getReplicateClient } from "@/lib/replicate-client";
 import { VIDEO_DURATION_DEFAULT, VIDEO_MODEL_DEFAULT, VIDEO_PROMPT_MAX_LENGTH } from "@/lib/video";
+import { trackApiCall } from "@/lib/system-metrics";
 
 export interface GeneratedImage {
   buffer: Buffer;
@@ -126,20 +127,35 @@ export async function generateVideo(
   console.log("[video-gen] prompt:", sanitizedPrompt.slice(0, 200));
 
   const replicate = getReplicateClient();
-  const prediction = await replicate.predictions.create({
-    model: VIDEO_MODEL_DEFAULT,
-    input: {
-      prompt: sanitizedPrompt,
-      aspect_ratio: options.aspectRatio,
-      duration: options.duration ?? VIDEO_DURATION_DEFAULT,
-      mode: "pro",
-      generate_audio: true,
-    },
-    webhook: options.webhookUrl,
-    webhook_events_filter: ["completed"],
-  });
+  const start = Date.now();
+  let statusCode = 200;
+  try {
+    const prediction = await replicate.predictions.create({
+      model: VIDEO_MODEL_DEFAULT,
+      input: {
+        prompt: sanitizedPrompt,
+        aspect_ratio: options.aspectRatio,
+        duration: options.duration ?? VIDEO_DURATION_DEFAULT,
+        mode: "pro",
+        generate_audio: true,
+      },
+      webhook: options.webhookUrl,
+      webhook_events_filter: ["completed"],
+    });
 
-  return { predictionId: prediction.id };
+    return { predictionId: prediction.id };
+  } catch (err) {
+    statusCode = 500;
+    throw err;
+  } finally {
+    await trackApiCall({
+      service: "replicate",
+      endpoint: "predictions.create",
+      method: "POST",
+      statusCode,
+      latencyMs: Date.now() - start,
+    });
+  }
 }
 
 /**

@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { env } from "@/env";
 import { prisma } from "@/lib/db";
 import { verifyReplicateWebhook } from "@/lib/webhook";
@@ -16,7 +17,7 @@ import { processCompletedPrediction } from "@/lib/video";
 import { reportServerError } from "@/lib/server-error-reporter";
 import type { BriefWithRelations } from "@/lib/video";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Types & Validation ──────────────────────────────────────────────────────────
 
 interface ReplicatePrediction {
   id: string;
@@ -24,6 +25,13 @@ interface ReplicatePrediction {
   output?: string | string[] | null;
   error?: string | null;
 }
+
+/** Zod schema for validating Replicate prediction output field at runtime. */
+const replicateOutputSchema = z.union([
+  z.string(),
+  z.array(z.string()),
+  z.null(),
+]).optional();
 
 // ── Route Handler ──────────────────────────────────────────────────────────────
 
@@ -102,6 +110,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // Handle succeeded predictions
+  // Validate output field at runtime with Zod
+  const outputValidation = replicateOutputSchema.safeParse(prediction.output);
+  if (!outputValidation.success) {
+    await reportServerError("Webhook: unexpected output format from Replicate", {
+      url: "/api/webhooks/replicate",
+      metadata: {
+        predictionId: prediction.id,
+        output: JSON.stringify(prediction.output).slice(0, 500),
+        zodError: outputValidation.error.message,
+      },
+    });
+    return NextResponse.json(
+      { error: "Unexpected output format" },
+      { status: 422 }
+    );
+  }
+
   // Extract output URL — Replicate returns a single URL string or array
   const outputUrl = Array.isArray(prediction.output)
     ? prediction.output[0]

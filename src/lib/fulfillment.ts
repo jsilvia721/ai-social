@@ -242,8 +242,19 @@ export async function reconcileStuckRendering(): Promise<ReconcileResult> {
         },
       });
       result.failed++;
+    } else if (
+      prediction.status === "processing" ||
+      prediction.status === "starting"
+    ) {
+      // Known non-terminal statuses — leave alone
+      result.skipped++;
     } else {
-      // Still starting or processing — leave alone
+      // Unknown status — log warning for observability, skip
+      console.warn("[fulfillment] Unknown prediction status", {
+        status: prediction.status,
+        predictionId: brief.replicatePredictionId,
+        briefId: brief.id,
+      });
       result.skipped++;
     }
   }
