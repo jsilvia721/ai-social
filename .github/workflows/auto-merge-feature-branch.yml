@@ -245,3 +245,56 @@ jobs:
                 console.log(`Failed to close issue #${issueNum}: ${error.message}`);
               }
             }
+
+      - name: Fire repository_dispatch for plan completion check
+        if: steps.find-pr.outputs.found == 'true' && steps.merge-pr.outcome == 'success'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = process.env.PR_NUMBER;
+
+            const prNum = parseInt(prNumber, 10);
+            if (isNaN(prNum)) {
+              console.log('PR_NUMBER environment variable is missing or invalid. Skipping dispatch.');
+              return;
+            }
+
+            // Fetch the PR to get the latest body
+            const { data: pr } = await github.rest.pulls.get({
+              owner, repo,
+              pull_number: prNum
+            });
+
+            const text = `${pr.title}\n${pr.body || ''}`;
+
+            // Parse "Closes #N", "Fixes #N", "Resolves #N" from PR body and title
+            const closingPattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
+            const issueNumbers = [];
+            const seen = new Set();
+            let match;
+            while ((match = closingPattern.exec(text)) !== null) {
+              const num = parseInt(match[1], 10);
+              if (!seen.has(num)) {
+                seen.add(num);
+                issueNumbers.push(num);
+              }
+            }
+
+            if (issueNumbers.length === 0) {
+              console.log('No issue references found in PR. Skipping repository_dispatch.');
+              return;
+            }
+
+            console.log(`Dispatching plan-issue-closed for issues: ${issueNumbers.map(n => '#' + n).join(', ')}`);
+
+            await github.rest.repos.createDispatchEvent({
+              owner, repo,
+              event_type: 'plan-issue-closed',
+              client_payload: { issue_numbers: issueNumbers }
+            });
+
+            console.log('repository_dispatch event fired successfully.');
