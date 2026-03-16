@@ -26,7 +26,12 @@ jobs:
             if (context.eventName === 'issues') {
               closedIssueNumbers = [context.payload.issue.number];
             } else if (context.eventName === 'repository_dispatch') {
-              closedIssueNumbers = (context.payload.client_payload && context.payload.client_payload.issue_numbers) || [];
+              const raw = (context.payload.client_payload && context.payload.client_payload.issue_numbers) || [];
+              if (!Array.isArray(raw)) {
+                console.log('client_payload.issue_numbers is not an array. Exiting.');
+                return;
+              }
+              closedIssueNumbers = raw.filter(n => Number.isInteger(n) && n > 0);
             }
 
             if (closedIssueNumbers.length === 0) {
