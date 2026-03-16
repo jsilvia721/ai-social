@@ -52,6 +52,7 @@ describe("generateImage", () => {
       const originalFetch = global.fetch;
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
+        headers: new Headers({ "Content-Type": "image/webp" }),
         arrayBuffer: () => Promise.resolve(fakeImageData.buffer),
       }) as unknown as typeof fetch;
 
@@ -149,6 +150,72 @@ describe("generateImage", () => {
 
       const calledPrompt = holder.run.mock.calls[0][1].input.prompt;
       expect(calledPrompt.length).toBe(1900);
+    });
+
+    it("rejects image URL from untrusted hostname (SSRF guard)", async () => {
+      // Replicate returns a URL from an untrusted domain
+      holder.run.mockResolvedValue("https://evil.com/malicious-image.webp");
+
+      await expect(generateImage("test prompt")).rejects.toThrow(
+        "Untrusted image source hostname: evil.com"
+      );
+    });
+
+    it("rejects image URL with non-image Content-Type", async () => {
+      holder.run.mockResolvedValue("https://replicate.delivery/image.webp");
+
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "Content-Type": "text/html" }),
+        arrayBuffer: () => Promise.resolve(Buffer.from("not an image").buffer),
+      }) as unknown as typeof fetch;
+
+      try {
+        await expect(generateImage("test prompt")).rejects.toThrow(
+          "Expected image/* Content-Type, got: text/html"
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it("allows image URL from replicate.delivery", async () => {
+      const fakeImageData = Buffer.from("fake-image-data");
+      holder.run.mockResolvedValue("https://replicate.delivery/image.webp");
+
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "Content-Type": "image/webp" }),
+        arrayBuffer: () => Promise.resolve(fakeImageData.buffer),
+      }) as unknown as typeof fetch;
+
+      try {
+        const result = await generateImage("test prompt");
+        expect(result.buffer).toBeInstanceOf(Buffer);
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it("allows image URL from pbxt.replicate.delivery", async () => {
+      const fakeImageData = Buffer.from("fake-image-data");
+      holder.run.mockResolvedValue("https://pbxt.replicate.delivery/image.webp");
+
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "Content-Type": "image/webp" }),
+        arrayBuffer: () => Promise.resolve(fakeImageData.buffer),
+      }) as unknown as typeof fetch;
+
+      try {
+        const result = await generateImage("test prompt");
+        expect(result.buffer).toBeInstanceOf(Buffer);
+      } finally {
+        global.fetch = originalFetch;
+      }
     });
   });
 });

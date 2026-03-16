@@ -42,6 +42,7 @@ type FulfillableBrief = ContentBrief & {
 const LOOKAHEAD_MS = 48 * 60 * 60_000; // 48 hours
 const STUCK_THRESHOLD_MS = 10 * 60_000; // 10 minutes
 const RENDERING_STUCK_MS = 15 * 60_000; // 15 minutes
+const RECONCILE_TIMEOUT_MS = 30_000; // 30s timeout for prediction polling
 const WALL_CLOCK_BUDGET_MS = 4.5 * 60_000; // 4.5 minutes (Lambda timeout = 5 min)
 const WALL_CLOCK_BUFFER_MS = 90_000; // reserve for one media gen + upload + tx
 const MAX_RETRIES = 2;
@@ -179,13 +180,20 @@ export async function reconcileStuckRendering(): Promise<ReconcileResult> {
     }
 
     let prediction: { status: string; output?: unknown; error?: unknown };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), RECONCILE_TIMEOUT_MS);
     try {
-      prediction = await getReplicateClient().predictions.get(brief.replicatePredictionId);
+      prediction = await getReplicateClient().predictions.get(
+        brief.replicatePredictionId,
+        { signal: controller.signal }
+      );
     } catch (err) {
-      // API error — skip this brief, try again next cycle
+      // API error or timeout — skip this brief, try again next cycle
       console.error(`[fulfillment] Failed to reconcile brief ${brief.id}:`, err);
       result.skipped++;
       continue;
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (prediction.status === "succeeded") {

@@ -372,7 +372,7 @@ describe("reconciliation of stuck RENDERING briefs", () => {
     const result = await reconcileStuckRendering();
 
     // Replicate was polled
-    expect(mockReplicateGet).toHaveBeenCalledWith("pred-stuck");
+    expect(mockReplicateGet).toHaveBeenCalledWith("pred-stuck", expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     // Atomic claim: RENDERING → FULFILLING
     expect(prismaMock.contentBrief.updateMany).toHaveBeenCalledWith({

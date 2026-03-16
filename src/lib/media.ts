@@ -30,6 +30,13 @@ export interface GenerateVideoResult {
 
 const REPLICATE_TIMEOUT_MS = 60_000;
 
+// ── Allowed hostnames for Replicate media ────────────────────────────────────
+
+const ALLOWED_REPLICATE_HOSTNAMES = new Set([
+  "replicate.delivery",
+  "pbxt.replicate.delivery",
+]);
+
 /**
  * Generate an image from a text prompt using Flux 1.1 Pro via Replicate.
  * Returns raw buffer + mimeType so the caller doesn't assume format.
@@ -71,9 +78,17 @@ export async function generateImage(prompt: string): Promise<GeneratedImage> {
       }
       imageBuffer = Buffer.concat(chunks);
     } else if (typeof output === "string") {
-      // URL string — fetch the image
+      // URL string — validate hostname before fetching (SSRF guard)
+      const parsedUrl = new URL(output);
+      if (!ALLOWED_REPLICATE_HOSTNAMES.has(parsedUrl.hostname)) {
+        throw new Error(`Untrusted image source hostname: ${parsedUrl.hostname}`);
+      }
       const res = await fetch(output);
       if (!res.ok) throw new Error(`Failed to fetch image from Replicate: ${res.status}`);
+      const ct = res.headers.get("Content-Type") ?? "";
+      if (!ct.startsWith("image/")) {
+        throw new Error(`Expected image/* Content-Type, got: ${ct}`);
+      }
       imageBuffer = Buffer.from(await res.arrayBuffer());
     } else {
       throw new Error("Replicate returned unexpected output format");
@@ -143,13 +158,6 @@ export async function generateVideo(
   }
 }
 
-// ── Allowed hostnames for video download ────────────────────────────────────
-
-const ALLOWED_VIDEO_HOSTNAMES = new Set([
-  "replicate.delivery",
-  "pbxt.replicate.delivery",
-]);
-
 /**
  * Download a video from Replicate and stream-upload it to S3 via multipart.
  * Uses @aws-sdk/lib-storage Upload for ~16MB memory footprint (8MB parts, queue of 2).
@@ -164,13 +172,19 @@ export async function downloadAndUploadVideo(
 ): Promise<string> {
   // Validate source URL hostname
   const parsed = new URL(sourceUrl);
-  if (!ALLOWED_VIDEO_HOSTNAMES.has(parsed.hostname)) {
+  if (!ALLOWED_REPLICATE_HOSTNAMES.has(parsed.hostname)) {
     throw new Error(`Untrusted video source hostname: ${parsed.hostname}`);
   }
 
   const response = await fetch(sourceUrl);
   if (!response.ok) {
     throw new Error(`Failed to download video: HTTP ${response.status}`);
+  }
+
+  // Validate Content-Type before streaming to S3
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (!contentType.startsWith("video/")) {
+    throw new Error(`Expected video/* Content-Type, got: ${contentType}`);
   }
 
   if (!response.body) {
