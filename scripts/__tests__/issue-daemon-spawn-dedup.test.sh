@@ -50,6 +50,16 @@ echo "spawned_this_cycle variable:"
 assert_grep "spawned_this_cycle is declared/reset at top of poll cycle" \
   'declare -A spawned_this_cycle' "$DAEMON_SCRIPT"
 
+# --- already_spawned helper ---------------------------------------------------
+echo ""
+echo "already_spawned helper function:"
+
+assert_grep "already_spawned function defined" \
+  '^already_spawned\(\)' "$DAEMON_SCRIPT"
+
+assert_grep "already_spawned checks spawned_this_cycle" \
+  'spawned_this_cycle\[' "$DAEMON_SCRIPT"
+
 # --- Label swaps NOT inside backgrounded functions ----------------------------
 echo ""
 echo "Label swaps removed from backgrounded functions:"
@@ -58,13 +68,14 @@ echo "Label swaps removed from backgrounded functions:"
 run_worker_body=$(awk '/^run_worker\(\) \{/,/^}/' "$DAEMON_SCRIPT")
 run_plan_executor_body=$(awk '/^run_plan_executor\(\) \{/,/^}/' "$DAEMON_SCRIPT")
 run_bug_investigator_body=$(awk '/^run_bug_investigator\(\) \{/,/^}/' "$DAEMON_SCRIPT")
+run_plan_writer_body=$(awk '/^run_plan_writer\(\) \{/,/^}/' "$DAEMON_SCRIPT")
 
-# run_worker should NOT have the claude-ready -> claude-wip swap for fresh starts
-if echo "$run_worker_body" | grep -qE 'remove-label.*LABEL_READY.*add-label.*LABEL_WIP'; then
-  fail "run_worker does NOT swap claude-ready labels internally" \
-    "no fresh-start label swap in run_worker" "found label swap"
+# run_worker should NOT have any label swap
+if echo "$run_worker_body" | grep -qE 'gh issue edit.*remove-label.*add-label.*LABEL_WIP'; then
+  fail "run_worker does NOT swap labels internally" \
+    "no label swap in run_worker" "found label swap"
 else
-  pass "run_worker does NOT swap claude-ready labels internally"
+  pass "run_worker does NOT swap labels internally"
 fi
 
 # run_plan_executor should NOT have the label swap inside
@@ -81,6 +92,14 @@ if echo "$run_bug_investigator_body" | grep -qE 'remove-label.*LABEL_BUG_INVESTI
     "no label swap in run_bug_investigator" "found label swap"
 else
   pass "run_bug_investigator does NOT swap labels internally"
+fi
+
+# run_plan_writer should NOT have the label swap inside
+if echo "$run_plan_writer_body" | grep -qE 'add-label.*LABEL_WIP'; then
+  fail "run_plan_writer does NOT swap labels internally" \
+    "no label swap in run_plan_writer" "found label swap"
+else
+  pass "run_plan_writer does NOT swap labels internally"
 fi
 
 # --- Synchronous label swaps in main loop -------------------------------------
@@ -105,41 +124,43 @@ else
     "label swap in main loop" "not found"
 fi
 
+# Priority 0 section should have label swap for resume issues
+p0_section=$(awk '/Priority 0: Resume/,/Priority 0\.5/' "$DAEMON_SCRIPT")
+if echo "$p0_section" | grep -q 'remove-label.*LABEL_RESUME.*add-label.*LABEL_WIP'; then
+  pass "Priority 0 section has label swap for resume issues"
+else
+  fail "Priority 0 section has label swap for resume issues" \
+    "label swap in main loop" "not found"
+fi
+
+# Priority 0.5 section should have label swap for interrupted issues
+p05_section=$(awk '/Priority 0\.5: Retry/,/Priority 0\.75/' "$DAEMON_SCRIPT")
+if echo "$p05_section" | grep -q 'remove-label.*LABEL_INTERRUPTED.*add-label.*LABEL_WIP'; then
+  pass "Priority 0.5 section has label swap for interrupted issues"
+else
+  fail "Priority 0.5 section has label swap for interrupted issues" \
+    "label swap in main loop" "not found"
+fi
+
 # --- Dedup checks at all spawn points ----------------------------------------
 echo ""
 echo "Dedup checks at all spawn points:"
 
-assert_grep "spawned_this_cycle check exists before spawn calls" \
-  'spawned_this_cycle\[' "$DAEMON_SCRIPT"
+# Count spawn points and already_spawned calls
+spawn_count=$(grep -cE 'run_worker.*&|run_plan_executor.*&|run_bug_investigator.*&|run_plan_writer.*&' "$DAEMON_SCRIPT" || true)
+dedup_call_count=$(grep -c 'already_spawned' "$DAEMON_SCRIPT" || true)
+# Subtract 1 for the function definition itself
+dedup_check_count=$((dedup_call_count - 1))
+
+if [ "$dedup_check_count" -ge "$spawn_count" ]; then
+  pass "already_spawned calls ($dedup_check_count) >= spawn point count ($spawn_count)"
+else
+  fail "dedup check at every spawn point" \
+    "at least $spawn_count already_spawned calls" "$dedup_check_count calls"
+fi
 
 assert_grep "spawned_this_cycle is populated after spawn" \
   'spawned_this_cycle\[.*\]=1' "$DAEMON_SCRIPT"
-
-# Count spawn points and dedup checks
-spawn_count=$(grep -cE 'run_worker.*&|run_plan_executor.*&|run_bug_investigator.*&|run_plan_writer.*&' "$DAEMON_SCRIPT" || true)
-dedup_check_count=$(grep -c 'spawned_this_cycle\[' "$DAEMON_SCRIPT" || true)
-if [ "$dedup_check_count" -ge "$spawn_count" ]; then
-  pass "dedup references ($dedup_check_count) >= spawn point count ($spawn_count)"
-else
-  fail "dedup check at every spawn point" \
-    "at least $spawn_count dedup references" "$dedup_check_count dedup references"
-fi
-
-# --- Resume and retry still have their own label swaps ------------------------
-echo ""
-echo "Resume and retry label swaps preserved:"
-
-if echo "$run_worker_body" | grep -q 'LABEL_RESUME'; then
-  pass "run_worker still handles resume label"
-else
-  fail "run_worker still handles resume label" "LABEL_RESUME reference" "not found"
-fi
-
-if echo "$run_worker_body" | grep -q 'LABEL_INTERRUPTED'; then
-  pass "run_worker still handles retry/interrupted label"
-else
-  fail "run_worker still handles retry/interrupted label" "LABEL_INTERRUPTED reference" "not found"
-fi
 
 # --- Summary ------------------------------------------------------------------
 echo ""
