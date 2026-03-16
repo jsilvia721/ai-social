@@ -1130,4 +1130,27 @@ describe("reconcileStuckRendering", () => {
     expect(result).toEqual({ reconciled: 0, failed: 0, skipped: 1 });
     consoleSpy.mockRestore();
   });
+
+  it("logs warning for unknown prediction status", async () => {
+    const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
+    const brief = makeRenderingBrief();
+    prismaMock.contentBrief.findMany.mockResolvedValue([brief] as never);
+    mockReplicateGet.mockResolvedValue({
+      id: "pred-123",
+      status: "queued", // unknown status
+    });
+
+    const result = await reconcileStuckRendering();
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Unknown prediction status"),
+      expect.objectContaining({
+        status: "queued",
+        predictionId: "pred-123",
+        briefId: "brief-render-1",
+      })
+    );
+    expect(result).toEqual({ reconciled: 0, failed: 0, skipped: 1 });
+    consoleSpy.mockRestore();
+  });
 });
