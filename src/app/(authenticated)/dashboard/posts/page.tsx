@@ -32,6 +32,7 @@ interface Post {
   metricsImpressions: number | null;
   metricsReach: number | null;
   metricsSaves: number | null;
+  metricsUpdatedAt: string | null;
   socialAccount: { platform: Platform; username: string };
 }
 
@@ -141,6 +142,29 @@ export default function PostsPage() {
     if (res.ok) {
       setPosts((prev) =>
         prev.map((p) => (p.id === id ? { ...p, status: "SCHEDULED" as PostStatus, errorMessage: null } : p))
+      );
+    }
+  }
+
+  async function handleRefreshMetrics(id: string) {
+    const res = await fetch(`/api/posts/${id}/refresh-metrics`, { method: "POST" });
+    if (res.ok) {
+      const body = await res.json();
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                metricsLikes: body.metrics.likes,
+                metricsComments: body.metrics.comments,
+                metricsShares: body.metrics.shares,
+                metricsImpressions: body.metrics.impressions,
+                metricsReach: body.metrics.reach ?? p.metricsReach,
+                metricsSaves: body.metrics.saves ?? p.metricsSaves,
+                metricsUpdatedAt: body.metricsUpdatedAt,
+              }
+            : p
+        )
       );
     }
   }
@@ -320,7 +344,7 @@ export default function PostsPage() {
               </div>
             ) : (
               posts.map((post) => (
-                <PostCard key={post.id} post={post} onDelete={handleDelete} onRetry={handleRetry} />
+                <PostCard key={post.id} post={post} onDelete={handleDelete} onRetry={handleRetry} onRefreshMetrics={handleRefreshMetrics} />
               ))
             )}
           </div>
