@@ -74,6 +74,19 @@ fi
 
 PID_FILE="${WORKER_PID_FILE:-$LOG_DIR/.active_pids}"
 export WORKER_PID_FILE="$PID_FILE"
+
+# Singleton guard — prevent multiple daemon instances from running simultaneously.
+# Must run BEFORE any cleanup operations to avoid interfering with a running daemon's state.
+DAEMON_PID_FILE="$LOG_DIR/.issue-daemon.pid"
+if [ -f "$DAEMON_PID_FILE" ]; then
+  existing_pid=$(cat "$DAEMON_PID_FILE" 2>/dev/null || echo "")
+  if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
+    echo "ERROR: Another daemon instance is already running (PID $existing_pid). Exiting." >&2
+    exit 1
+  fi
+fi
+echo $$ > "$DAEMON_PID_FILE"
+
 : > "$PID_FILE"  # truncate on start
 
 # Clean up orphaned heartbeat and stale-notified files from a previous run
@@ -107,19 +120,6 @@ reap_orphans() {
 }
 reap_orphans "docker (compose|ps|info)" "Docker process"
 reap_orphans "shell-snapshots/snapshot-zsh" "Claude shell wrapper"
-
-DAEMON_PID_FILE="$LOG_DIR/.issue-daemon.pid"
-
-# Singleton guard — prevent multiple daemon instances from running simultaneously
-if [ -f "$DAEMON_PID_FILE" ]; then
-  existing_pid=$(cat "$DAEMON_PID_FILE" 2>/dev/null || echo "")
-  if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
-    echo "ERROR: Another daemon instance is already running (PID $existing_pid). Exiting." >&2
-    exit 1
-  fi
-fi
-
-echo $$ > "$DAEMON_PID_FILE"
 
 # Kill a tmux session for a given issue number (if it exists).
 # $1 — issue_number
