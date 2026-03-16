@@ -218,11 +218,15 @@ jobs:
                     console.log(`#${planIssue.number}: created final PR #${finalPrNumber}`);
                   } catch (err) {
                     core.warning(`#${planIssue.number}: failed to create final PR: ${err.message}`);
-                    await github.rest.issues.createComment({
-                      owner, repo,
-                      issue_number: planIssue.number,
-                      body: `⚠️ Failed to create final PR from \`${featureBranch}\` → \`main\`:\n\n\`\`\`\n${err.message}\n\`\`\`\n\nFix the issue and close any work item to retry.`
-                    });
+                    try {
+                      await github.rest.issues.createComment({
+                        owner, repo,
+                        issue_number: planIssue.number,
+                        body: `⚠️ Failed to create final PR from \`${featureBranch}\` → \`main\`:\n\n\`\`\`\n${err.message}\n\`\`\`\n\nFix the issue and close any work item to retry.`
+                      });
+                    } catch (commentErr) {
+                      core.warning(`#${planIssue.number}: failed to post failure comment: ${commentErr.message}`);
+                    }
                     continue;
                   }
                 }
