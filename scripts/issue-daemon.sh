@@ -444,10 +444,9 @@ run_worker() {
   elif [ "$is_retry" = "true" ]; then
     # Remove interrupted label for retry
     gh issue edit "$issue_number" --remove-label "$LABEL_INTERRUPTED" --add-label "$LABEL_WIP" 2>/dev/null || true
-  else
-    # Label as in-progress
-    gh issue edit "$issue_number" --remove-label "$LABEL_READY" --add-label "$LABEL_WIP" 2>/dev/null || true
   fi
+  # Note: fresh-start label swap (claude-ready -> claude-wip) is done
+  # synchronously in the main thread before spawning, to eliminate race windows.
 
   # Check if we can resume a previous session
   local session_id=""
@@ -627,8 +626,8 @@ run_plan_executor() {
 
   log "Starting plan-executor for issue #${issue_number}: ${issue_title}"
 
-  # Label as in-progress
-  gh issue edit "$issue_number" --remove-label "$LABEL_APPROVED" --add-label "$LABEL_WIP" 2>/dev/null || true
+  # Note: label swap (claude-approved -> claude-wip) is done synchronously
+  # in the main thread before spawning, to eliminate race windows.
 
   # Record start time
   local start_time
@@ -713,8 +712,8 @@ run_bug_investigator() {
 
   log "Starting bug-investigator for issue #${issue_number}: ${issue_title}"
 
-  # Label as in-progress
-  gh issue edit "$issue_number" --remove-label "$LABEL_BUG_INVESTIGATE" --add-label "$LABEL_WIP" 2>/dev/null || true
+  # Note: label swap (bug-investigate -> claude-wip) is done synchronously
+  # in the main thread before spawning, to eliminate race windows.
 
   # Record start time
   local start_time
@@ -893,8 +892,8 @@ run_plan_writer() {
 
   log "Starting plan-writer for issue #${issue_number}: ${issue_title}"
 
-  # Label as in-progress
-  gh issue edit "$issue_number" --add-label "$LABEL_WIP" 2>/dev/null || true
+  # Note: label swap (add claude-wip) is done synchronously
+  # in the main thread before spawning, to eliminate race windows.
 
   # Record start time
   local start_time
@@ -1115,6 +1114,10 @@ while true; do
     fi
   done < "$PID_FILE"
 
+  # --- Per-cycle spawn deduplication ---
+  # Prevents the same issue from being processed by multiple priority tiers
+  declare -A spawned_this_cycle=()
+
   # --- Priority -1: CI health monitor (runs inline, no worker slot) ---
   check_ci_health || true
 
@@ -1141,8 +1144,14 @@ while true; do
           continue
         fi
 
+        if [ "${spawned_this_cycle[$number]+set}" = "set" ]; then
+          log "Skipping resume issue #${number} (already spawned this cycle)"
+          continue
+        fi
+
         run_worker "$number" "$title" "false" "true" &
         record_worker "$!" "$number" "worker"
+        spawned_this_cycle[$number]=1
         log "Spawned resume worker PID $! for issue #${number}"
       done <<< "$resume_issues"
 
@@ -1171,8 +1180,14 @@ while true; do
           continue
         fi
 
+        if [ "${spawned_this_cycle[$number]+set}" = "set" ]; then
+          log "Skipping interrupted issue #${number} (already spawned this cycle)"
+          continue
+        fi
+
         run_worker "$number" "$title" "true" "false" &
         record_worker "$!" "$number" "worker"
+        spawned_this_cycle[$number]=1
         log "Spawned retry worker PID $! for interrupted issue #${number}"
       done <<< "$interrupted_issues"
 
@@ -1203,8 +1218,16 @@ while true; do
             continue
           fi
 
+          if [ "${spawned_this_cycle[$number]+set}" = "set" ]; then
+            log "Skipping CI bug issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
+          # Synchronous label swap before backgrounding
+          gh issue edit "$number" --remove-label "$LABEL_BUG_INVESTIGATE" --add-label "$LABEL_WIP" 2>/dev/null || true
           run_bug_investigator "$number" "$title" &
           record_worker "$!" "$number" "bug-investigate"
+          spawned_this_cycle[$number]=1
           log "Spawned bug-investigator PID $! for CI failure issue #${number}"
         done <<< "$ci_bug_issues"
 
@@ -1235,8 +1258,16 @@ while true; do
             continue
           fi
 
+          if [ "${spawned_this_cycle[$number]+set}" = "set" ]; then
+            log "Skipping CI ready issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
+          # Synchronous label swap before backgrounding
+          gh issue edit "$number" --remove-label "$LABEL_READY" --add-label "$LABEL_WIP" 2>/dev/null || true
           run_worker "$number" "$title" &
           record_worker "$!" "$number" "worker"
+          spawned_this_cycle[$number]=1
           log "Spawned worker PID $! for CI failure ready issue #${number}"
         done <<< "$ci_ready_issues"
 
@@ -1267,10 +1298,18 @@ while true; do
             continue
           fi
 
+          if [ "${spawned_this_cycle[$number]+set}" = "set" ]; then
+            log "Skipping plan #${number} (already spawned this cycle)"
+            continue
+          fi
+
           # Check if this is a plan (has plan markers) or a single work item
           if echo "$body" | grep -q "PLAN_ITEMS_START"; then
+            # Synchronous label swap before backgrounding
+            gh issue edit "$number" --remove-label "$LABEL_APPROVED" --add-label "$LABEL_WIP" 2>/dev/null || true
             run_plan_executor "$number" "$title" &
             record_worker "$!" "$number" "plan"
+            spawned_this_cycle[$number]=1
             log "Spawned plan-executor PID $! for issue #${number}"
           else
             # Single work item — route to needs-human-review for human review
@@ -1315,8 +1354,16 @@ while true; do
             continue
           fi
 
+          if [ "${spawned_this_cycle[$number]+set}" = "set" ]; then
+            log "Skipping plan issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
+          # Synchronous label swap before backgrounding
+          gh issue edit "$number" --add-label "$LABEL_WIP" 2>/dev/null || true
           run_plan_writer "$number" "$title" &
           record_worker "$!" "$number" "plan-writer"
+          spawned_this_cycle[$number]=1
           log "Spawned plan-writer PID $! for issue #${number}"
         done <<< "$plan_issues"
 
@@ -1346,8 +1393,16 @@ while true; do
             continue
           fi
 
+          if [ "${spawned_this_cycle[$number]+set}" = "set" ]; then
+            log "Skipping bug issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
+          # Synchronous label swap before backgrounding
+          gh issue edit "$number" --remove-label "$LABEL_BUG_INVESTIGATE" --add-label "$LABEL_WIP" 2>/dev/null || true
           run_bug_investigator "$number" "$title" &
           record_worker "$!" "$number" "bug-investigate"
+          spawned_this_cycle[$number]=1
           log "Spawned bug-investigator PID $! for issue #${number}"
         done <<< "$bug_issues"
 
@@ -1377,8 +1432,16 @@ while true; do
             continue
           fi
 
+          if [ "${spawned_this_cycle[$number]+set}" = "set" ]; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
+          # Synchronous label swap before backgrounding
+          gh issue edit "$number" --remove-label "$LABEL_READY" --add-label "$LABEL_WIP" 2>/dev/null || true
           run_worker "$number" "$title" &
           record_worker "$!" "$number" "worker"
+          spawned_this_cycle[$number]=1
           log "Spawned worker PID $! for issue #${number}"
         done <<< "$issues"
       fi
