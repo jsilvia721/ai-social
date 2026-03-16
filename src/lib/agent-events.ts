@@ -9,6 +9,15 @@ import { prisma } from "@/lib/db";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
 import type { Prisma } from "@prisma/client";
 
+/**
+ * Write a structured agent audit event to the database.
+ *
+ * @param data.eventType - Dotted identifier, e.g. "brief.generated", "post.approved"
+ * @param data.actor - Prefixed identifier, e.g. "cron:research", "user:<userId>"
+ * @param data.payload - Structured event-specific data. **NEVER include sensitive
+ *   values** (accessToken, refreshToken, passwords, API keys, PII). This data is
+ *   stored unencrypted and may be surfaced in dashboards.
+ */
 export async function emitAgentEvent(data: {
   eventType: string;
   actor: string;
