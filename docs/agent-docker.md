@@ -1,6 +1,13 @@
 # Agent Docker Setup
 
-Run the autonomous issue-daemon agent in a Docker container with resource isolation and no baked-in secrets.
+Run the autonomous issue-daemon agent in a Docker container with resource limits, volume mounts, and health checks.
+
+## Prerequisites
+
+- Docker and Docker Compose v2
+- `ANTHROPIC_API_KEY` — Claude API key
+- `GITHUB_TOKEN` — GitHub personal access token with `repo` scope
+- `DATABASE_URL` — (optional) database connection string
 
 ## Quick Start
 
@@ -8,77 +15,74 @@ Run the autonomous issue-daemon agent in a Docker container with resource isolat
 # Build the image
 docker build -f Dockerfile.agent -t ai-social-agent .
 
+# Build with pinned Claude CLI version (recommended for production)
+docker build -f Dockerfile.agent --build-arg CLAUDE_CLI_VERSION=1.0.0 -t ai-social-agent .
+
 # Run with docker-compose (recommended)
 ANTHROPIC_API_KEY=sk-... GITHUB_TOKEN=ghp_... \
   docker compose -f docker-compose.agent.yml up --build
 
-# Or run directly
-docker run --rm \
-  -v "$(pwd):/repo:ro" \
-  -e ANTHROPIC_API_KEY \
-  -e GITHUB_TOKEN \
-  --cpus 2 --memory 4g \
-  ai-social-agent
+# Run detached
+ANTHROPIC_API_KEY=sk-... GITHUB_TOKEN=ghp_... \
+  docker compose -f docker-compose.agent.yml up -d --build
+
+# View logs
+docker compose -f docker-compose.agent.yml logs -f agent
+
+# Stop
+docker compose -f docker-compose.agent.yml down
 ```
 
 ## Architecture
 
 ```
-Host filesystem (read-only mount)
-  /repo ──────────────────────── Source code, scripts, configs
-  /workdir ───────────────────── Writable volume for agent worktrees
-  /tmp ───────────────────────── tmpfs scratch space (1 GB cap)
+Host machine
+├── Repo (mounted read-only at /workspace)
+└── Docker container (ai-social-agent)
+    ├── /workspace (ro)          ← mounted repo
+    ├── /agent-workdir/worktrees ← writable git worktrees
+    └── /agent-workdir/logs      ← daemon logs
 ```
 
-The container runs as a non-root `agent` user (UID 1000). The repo is mounted read-only at `/repo`. The agent creates git worktrees under `/workdir` for isolated work on each issue.
+The repo is mounted **read-only**. The agent creates git worktrees in `/agent-workdir/worktrees` for each issue it works on. This prevents the agent from accidentally modifying the host repo.
 
-## Environment Variables
+## Configuration
 
-### Required
+### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `ANTHROPIC_API_KEY` | Claude API key for Claude CLI |
-| `GITHUB_TOKEN` | GitHub token with `repo` and `issues` scope |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | — | Claude API key |
+| `GITHUB_TOKEN` | Yes | — | GitHub PAT with repo scope |
+| `DATABASE_URL` | No | — | Database connection string |
+| `AGENT_MAX_WORKERS` | No | `1` | Max parallel agent workers |
+| `AGENT_POLL_INTERVAL` | No | `60` | Seconds between issue polls |
+| `AGENT_MAX_BUDGET` | No | `50` | Max USD budget per issue |
 
-### Optional
+### Resource Limits
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | — | PostgreSQL connection string |
-| `AGENT_MAX_WORKERS` | `1` | Max parallel worker instances |
-| `AGENT_POLL_INTERVAL` | `60` | Seconds between issue polls |
-| `AGENT_MAX_BUDGET` | `50` | Max USD budget per issue |
+| `AGENT_CPU_LIMIT` | `2.0` | CPU cores limit |
+| `AGENT_MEMORY_LIMIT` | `4G` | Memory limit |
 
-## Resource Limits
-
-Default limits in `docker-compose.agent.yml`:
-
-| Resource | Limit | Reservation |
-|----------|-------|-------------|
-| CPU | 2 cores | 0.5 cores |
-| Memory | 4 GB | 512 MB |
-| Disk (tmpfs) | 1 GB | — |
-
-Override via environment or by editing the compose file:
+Override via environment:
 
 ```bash
-# Override CPU and memory at runtime
-docker run --rm \
-  --cpus 4 --memory 8g \
-  -v "$(pwd):/repo:ro" \
-  -e ANTHROPIC_API_KEY -e GITHUB_TOKEN \
-  ai-social-agent
+AGENT_CPU_LIMIT=4.0 AGENT_MEMORY_LIMIT=8G \
+  docker compose -f docker-compose.agent.yml up --build
 ```
+
+Tmpfs disk is capped at 256MB for `/tmp`.
 
 ## Health Check
 
-The container includes a health check (`scripts/agent-healthcheck.sh`) that verifies:
+The container includes a health check that runs every 30 seconds and verifies:
 
-- Essential tools installed: `node`, `git`, `gh`, `jq`, `claude`
-- Node.js version is 22+
-- Repo is mounted at `/repo`
-- `/workdir` is writable
+1. An agent process (issue-daemon, node, or claude) is running
+2. Node.js is available
+3. `gh` CLI is authenticated (if `GITHUB_TOKEN` is set)
+4. The workspace volume is mounted
 
 Check health status:
 
@@ -86,39 +90,38 @@ Check health status:
 docker inspect --format='{{.State.Health.Status}}' ai-social-agent
 ```
 
-## Development
-
-### Build the image
-
-```bash
-docker build -f Dockerfile.agent -t ai-social-agent .
-```
-
-### Run a one-off command
-
-```bash
-docker run --rm -it \
-  -v "$(pwd):/repo:ro" \
-  -e ANTHROPIC_API_KEY -e GITHUB_TOKEN \
-  ai-social-agent -c "gh issue list --label claude-ready"
-```
-
-### View logs
-
-```bash
-docker compose -f docker-compose.agent.yml logs -f agent
-```
-
-### Stop the agent
-
-```bash
-docker compose -f docker-compose.agent.yml down
-```
-
 ## Security
 
-- Secrets are passed via environment variables at runtime, never baked into the image
-- The repo is mounted read-only; agent writes go to a separate volume
-- The container runs as non-root user `agent` (UID 1000)
-- Resource limits prevent runaway CPU/memory usage
-- tmpfs mount caps scratch disk usage
+- **No secrets in the image** — all credentials are passed via environment variables at runtime.
+- **Non-root user** — the container runs as `agent` (UID 1000), not root.
+- **Read-only repo mount** — the host repo cannot be modified by the agent.
+- **Resource limits** — CPU, memory, and disk are capped to prevent runaway processes.
+- **Log rotation** — container logs are limited to 150MB (3 x 50MB files).
+- **Network access** — the container has outbound network access by design (it needs GitHub API and Anthropic API). No egress filtering is applied. If running in a sensitive environment, consider adding a network policy or egress proxy.
+- **Pinnable dependencies** — the Dockerfile supports a `CLAUDE_CLI_VERSION` build arg for supply-chain safety. Pin base image to a digest for production use (see comments in Dockerfile).
+
+## Troubleshooting
+
+### Container exits immediately
+
+Check the logs: `docker compose -f docker-compose.agent.yml logs agent`
+
+Common causes:
+- Missing `ANTHROPIC_API_KEY` or `GITHUB_TOKEN`
+- Repo not mounted (run from repo root)
+
+### Health check failing
+
+```bash
+# Run the health check manually
+docker exec ai-social-agent /usr/local/bin/agent-healthcheck
+```
+
+### Worktree disk usage growing
+
+The agent worktrees persist in the `agent-workdir` Docker volume. To clean up:
+
+```bash
+# Remove the volume (stops container first)
+docker compose -f docker-compose.agent.yml down -v
+```

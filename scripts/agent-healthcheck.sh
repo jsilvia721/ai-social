@@ -1,40 +1,43 @@
 #!/usr/bin/env bash
-# agent-healthcheck.sh — Health check for the agent container.
-# Verifies that essential tools are available and the repo is mounted.
-# Exit 0 = healthy, Exit 1 = unhealthy.
+# agent-healthcheck.sh — Docker health check for the agent container.
+#
+# Checks:
+#   1. The issue-daemon process is running
+#   2. Node.js is available
+#   3. gh CLI is authenticated (if GITHUB_TOKEN is set)
+#   4. The workspace is mounted
+#
+# Exit codes:
+#   0 — healthy
+#   1 — unhealthy
 
 set -euo pipefail
 
-errors=()
-
-# Check essential binaries
-for cmd in node git gh jq claude; do
-  if ! command -v "$cmd" &>/dev/null; then
-    errors+=("missing: $cmd")
-  fi
-done
-
-# Check Node.js version is 22+
-node_major=$(node -v 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo "0")
-if [ "$node_major" -lt 22 ]; then
-  errors+=("node version too old: v${node_major} (need 22+)")
-fi
-
-# Check repo is mounted
-if [ ! -d /repo/.git ] && [ ! -f /repo/package.json ]; then
-  errors+=("repo not mounted at /repo")
-fi
-
-# Check writable workdir
-if [ ! -w /workdir ]; then
-  errors+=("/workdir is not writable")
-fi
-
-# Report results
-if [ ${#errors[@]} -gt 0 ]; then
-  echo "UNHEALTHY: ${errors[*]}"
+# Check 1: issue-daemon or node process is running
+if ! pgrep -f "issue-daemon\.sh" > /dev/null 2>&1; then
+  echo "UNHEALTHY: No agent process found"
   exit 1
 fi
 
-echo "HEALTHY: all checks passed"
+# Check 2: Node.js is available
+if ! node --version > /dev/null 2>&1; then
+  echo "UNHEALTHY: Node.js not available"
+  exit 1
+fi
+
+# Check 3: gh CLI works (if token is set)
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  if ! gh api /rate_limit > /dev/null 2>&1; then
+    echo "UNHEALTHY: gh CLI not authenticated"
+    exit 1
+  fi
+fi
+
+# Check 4: Workspace is mounted and contains package.json
+if [ ! -f /workspace/package.json ]; then
+  echo "UNHEALTHY: Workspace not mounted or missing package.json"
+  exit 1
+fi
+
+echo "HEALTHY: All checks passed"
 exit 0
