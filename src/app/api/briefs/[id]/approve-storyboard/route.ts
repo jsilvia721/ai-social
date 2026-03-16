@@ -72,8 +72,10 @@ export async function POST(
     );
   }
 
-  await prisma.contentBrief.update({
-    where: { id },
+  // Atomic conditional update: only transition if still in STORYBOARD_REVIEW.
+  // Prevents duplicate Replicate predictions on concurrent requests (e.g., double-click).
+  const claimed = await prisma.contentBrief.updateMany({
+    where: { id, status: "STORYBOARD_REVIEW" },
     data: {
       replicatePredictionId: predictionId,
       videoModel: VIDEO_MODEL_DEFAULT,
@@ -81,6 +83,13 @@ export async function POST(
       status: "RENDERING",
     },
   });
+
+  if (claimed.count === 0) {
+    return NextResponse.json(
+      { error: "Brief was already transitioned from STORYBOARD_REVIEW" },
+      { status: 409 }
+    );
+  }
 
   return NextResponse.json({ predictionId });
 }
