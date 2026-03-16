@@ -98,7 +98,7 @@ async function consumeSSEStream(
         try {
           const parsed = JSON.parse(data);
           if (parsed.type === "error") {
-            onError(parsed.error || "Stream error");
+            onError(typeof parsed.error === "string" ? parsed.error : "Stream error");
             return;
           }
           if (parsed.type === "text" && parsed.text) {
@@ -217,7 +217,7 @@ export function FeedbackChat({ onClose, onSuccess }: FeedbackChatProps) {
           }
 
           const data = await res.json().catch(() => ({ error: "Request failed" }));
-          setError(data.error || "Request failed");
+          setError(typeof data.error === "string" ? data.error : "Request failed");
           setStreamingState("error");
           return;
         }
@@ -347,7 +347,7 @@ export function FeedbackChat({ onClose, onSuccess }: FeedbackChatProps) {
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || "Upload failed");
+        throw new Error(typeof data.error === "string" ? data.error : "Upload failed");
       }
 
       const data = await res.json();
@@ -388,7 +388,7 @@ export function FeedbackChat({ onClose, onSuccess }: FeedbackChatProps) {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: "Submit failed" }));
-        throw new Error(data.error || "Submit failed");
+        throw new Error(typeof data.error === "string" ? data.error : "Submit failed");
       }
 
       const data = await res.json();

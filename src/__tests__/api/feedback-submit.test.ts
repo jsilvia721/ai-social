@@ -100,6 +100,8 @@ describe("POST /api/feedback/submit", () => {
       makeRequest({ summary: "test", classification: "bug", context: {} })
     );
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(typeof body.error).toBe("string");
   });
 
   it("returns 400 for invalid payload — missing summary", async () => {
@@ -111,6 +113,8 @@ describe("POST /api/feedback/submit", () => {
       })
     );
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(typeof body.error).toBe("string");
   });
 
   it("returns 400 for invalid classification", async () => {
@@ -123,6 +127,8 @@ describe("POST /api/feedback/submit", () => {
       })
     );
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(typeof body.error).toBe("string");
   });
 
   it("returns 400 for malformed JSON body", async () => {

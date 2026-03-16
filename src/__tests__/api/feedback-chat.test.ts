@@ -146,6 +146,8 @@ describe("POST /api/feedback/chat", () => {
       makeRequest({ context: { pageUrl: "https://example.com" } })
     );
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(typeof body.error).toBe("string");
   });
 
   it("returns 400 for missing context", async () => {
@@ -153,6 +155,8 @@ describe("POST /api/feedback/chat", () => {
       makeRequest({ messages: [{ role: "user", content: "hello" }] })
     );
     expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(typeof body.error).toBe("string");
   });
 
   it("returns 400 when messages do not alternate correctly", async () => {
