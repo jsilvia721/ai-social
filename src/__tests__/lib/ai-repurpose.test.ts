@@ -1,26 +1,15 @@
 // Tests for repurposeContent — uses tool_use to force structured platform variants
-// Mock the Anthropic SDK before importing anything that uses it.
-jest.mock("@anthropic-ai/sdk", () => ({
-  __esModule: true,
-  default: jest.fn().mockImplementation(() => ({
-    messages: { create: jest.fn() },
-  })),
-}));
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- require needed in jest.mock factory (hoisted above imports)
+jest.mock("@anthropic-ai/sdk", () => require("@/__tests__/mocks/ai-models").anthropicSdkMock());
 
-import Anthropic from "@anthropic-ai/sdk";
-const getCreateSpy = (): jest.Mock =>
-  (Anthropic as unknown as jest.Mock).mock.results[0]?.value?.messages?.create;
-
+import { mockCreate, resetAiMocks } from "@/__tests__/mocks/ai-models";
 import { repurposeContent } from "@/lib/ai/repurpose";
 import type { StrategyContext } from "@/lib/ai/types";
 import type { Platform } from "@/types";
 
 describe("repurposeContent", () => {
-  let mockCreate: jest.Mock;
-
   beforeEach(() => {
-    mockCreate = getCreateSpy();
-    mockCreate?.mockReset();
+    resetAiMocks();
   });
 
   function makeToolUseResponse(input: Record<string, unknown>) {

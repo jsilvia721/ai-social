@@ -1,30 +1,14 @@
 // Mock the Anthropic SDK before importing anything that uses it.
-// lib/ai/index.ts runs `const client = new Anthropic()` at module load,
-// so the mock must be in place before the module is evaluated.
-// __esModule: true is required for correct default import interop.
-jest.mock("@anthropic-ai/sdk", () => ({
-  __esModule: true,
-  default: jest.fn().mockImplementation(() => ({
-    messages: { create: jest.fn() },
-  })),
-}));
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- require needed in jest.mock factory (hoisted above imports)
+jest.mock("@anthropic-ai/sdk", () => require("@/__tests__/mocks/ai-models").anthropicSdkMock());
 
-import Anthropic from "@anthropic-ai/sdk";
-// lib/ai/index.ts calls `new Anthropic()` at module load time.
-// mock.results[0].value is the return value of that constructor call
-// (the object with messages.create), not the `this` object (mock.instances[0]).
-const getCreateSpy = (): jest.Mock =>
-  (Anthropic as unknown as jest.Mock).mock.results[0]?.value?.messages?.create;
-
+import { mockCreate, resetAiMocks } from "@/__tests__/mocks/ai-models";
 import { generatePostContent, suggestOptimalTimes } from "@/lib/ai";
 import type { Platform } from "@/types";
 
 describe("generatePostContent", () => {
-  let mockCreate: jest.Mock;
-
   beforeEach(() => {
-    mockCreate = getCreateSpy();
-    mockCreate?.mockReset();
+    resetAiMocks();
   });
 
   function makeTextResponse(text: string) {

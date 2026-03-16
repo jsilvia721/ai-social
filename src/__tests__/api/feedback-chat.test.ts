@@ -12,23 +12,14 @@ jest.mock("@/lib/mocks/config", () => ({
 }));
 
 // Mock Anthropic SDK with a controllable stream
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- require needed in jest.mock factory (hoisted above imports)
+jest.mock("@anthropic-ai/sdk", () => require("@/__tests__/mocks/ai-models").anthropicStreamMock());
+
+import { mockStream, resetAiMocks } from "@/__tests__/mocks/ai-models";
+
 const mockStreamIterator = jest.fn();
 const mockAbort = jest.fn();
 const mockFinalMessage = jest.fn();
-jest.mock("@anthropic-ai/sdk", () => {
-  return jest.fn().mockImplementation(() => ({
-    messages: {
-      stream: jest.fn().mockImplementation(() => {
-        const streamObj = {
-          [Symbol.asyncIterator]: () => mockStreamIterator(),
-          abort: mockAbort,
-          finalMessage: mockFinalMessage,
-        };
-        return streamObj;
-      }),
-    },
-  }));
-});
 
 import { POST } from "@/app/api/feedback/chat/route";
 import { NextRequest } from "next/server";
@@ -113,7 +104,16 @@ async function readSSEStream(
 
 beforeEach(() => {
   jest.clearAllMocks();
+  resetAiMocks();
   _resetAllLimits();
+  mockStreamIterator.mockReset();
+  mockAbort.mockReset();
+  mockFinalMessage.mockReset();
+  mockStream.mockImplementation(() => ({
+    [Symbol.asyncIterator]: () => mockStreamIterator(),
+    abort: mockAbort,
+    finalMessage: mockFinalMessage,
+  }));
   mockGetServerSession.mockResolvedValue({
     user: { id: "user-1", name: "Josh", email: "josh@example.com" },
     expires: "2099-01-01",
