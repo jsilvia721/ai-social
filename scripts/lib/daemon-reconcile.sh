@@ -36,10 +36,12 @@ reconcile_orphaned_wip_issues() {
 
   while IFS= read -r issue_number; do
     [ -z "$issue_number" ] && continue
+    # Validate issue number is numeric (defense-in-depth against malformed API responses)
+    case "$issue_number" in *[!0-9]*|"") continue ;; esac
 
     # Check if any PID file entry contains this issue number
-    # PID file format: PID:ISSUE_NUMBER:START_EPOCH:TYPE
-    if [ -n "$pid_contents" ] && echo "$pid_contents" | grep -q ":${issue_number}:"; then
+    # PID file format: PID:ISSUE_NUMBER:START_EPOCH:TYPE — anchor to second field
+    if [ -n "$pid_contents" ] && echo "$pid_contents" | grep -q "^[^:]*:${issue_number}:"; then
       continue  # Issue has a matching PID entry — not orphaned
     fi
 
