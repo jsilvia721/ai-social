@@ -364,6 +364,9 @@ kill_all_active_workers_for_rate_limit() {
 
     # Remove heartbeat and stale marker files
     rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
+
+    # Remove from PID file so slots are freed immediately after cooldown
+    remove_worker "$w_pid"
   done < "$PID_FILE"
 }
 
