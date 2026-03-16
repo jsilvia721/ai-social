@@ -84,7 +84,7 @@ describe("POST /api/briefs/[id]/approve-storyboard", () => {
     prismaMock.contentBrief.findUnique.mockResolvedValue(storyboardBrief);
     prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
     mockGenerateVideo.mockResolvedValue({ predictionId: "pred-123" });
-    prismaMock.contentBrief.update.mockResolvedValue({} as any);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
 
     const [req, ctx] = makeRequest("cb-1");
     const res = await POST(req, ctx);
@@ -101,9 +101,9 @@ describe("POST /api/briefs/[id]/approve-storyboard", () => {
       duration: 5,
     });
 
-    // Verify brief was updated
-    expect(prismaMock.contentBrief.update).toHaveBeenCalledWith({
-      where: { id: "cb-1" },
+    // Verify atomic conditional update
+    expect(prismaMock.contentBrief.updateMany).toHaveBeenCalledWith({
+      where: { id: "cb-1", status: "STORYBOARD_REVIEW" },
       data: {
         replicatePredictionId: "pred-123",
         videoModel: "kwaivgi/kling-v3-omni-video",
@@ -118,7 +118,7 @@ describe("POST /api/briefs/[id]/approve-storyboard", () => {
     prismaMock.contentBrief.findUnique.mockResolvedValue(storyboardBrief);
     prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
     mockGenerateVideo.mockResolvedValue({ predictionId: "pred-456" });
-    prismaMock.contentBrief.update.mockResolvedValue({} as any);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
 
     const [req, ctx] = makeRequest("cb-1", { videoPrompt: "My custom edited prompt" });
     const res = await POST(req, ctx);
@@ -158,12 +158,38 @@ describe("POST /api/briefs/[id]/approve-storyboard", () => {
     expect(body.detail).toContain("Replicate API timeout");
   });
 
+  it("returns 409 when concurrent approval races — only first wins", async () => {
+    mockAuthenticated();
+    prismaMock.contentBrief.findUnique.mockResolvedValue(storyboardBrief);
+    prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
+    mockGenerateVideo.mockResolvedValue({ predictionId: "pred-race" });
+
+    // First call wins the atomic update, second gets count: 0
+    prismaMock.contentBrief.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    const [req1, ctx1] = makeRequest("cb-1");
+    const [req2, ctx2] = makeRequest("cb-1");
+    const [res1, res2] = await Promise.all([POST(req1, ctx1), POST(req2, ctx2)]);
+
+    const statuses = [res1.status, res2.status].sort();
+    expect(statuses).toEqual([200, 409]);
+
+    // Only one generateVideo call should proceed to update
+    // (both may call generateVideo since the guard is at update time,
+    // but only one should succeed the atomic transition)
+    const successRes = res1.status === 200 ? res1 : res2;
+    const body = await successRes.json();
+    expect(body.predictionId).toBe("pred-race");
+  });
+
   it("falls back to brief videoPrompt when body videoPrompt is not provided", async () => {
     mockAuthenticated();
     prismaMock.contentBrief.findUnique.mockResolvedValue(storyboardBrief);
     prismaMock.businessMember.findUnique.mockResolvedValue({ id: "bm-1" } as any);
     mockGenerateVideo.mockResolvedValue({ predictionId: "pred-789" });
-    prismaMock.contentBrief.update.mockResolvedValue({} as any);
+    prismaMock.contentBrief.updateMany.mockResolvedValue({ count: 1 });
 
     const [req, ctx] = makeRequest("cb-1", {});
     const res = await POST(req, ctx);
