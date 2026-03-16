@@ -74,6 +74,10 @@ source "scripts/lib/ci-health-monitor.sh"
 # shellcheck source=scripts/lib/conflict-resolver.sh
 source "scripts/lib/conflict-resolver.sh"
 
+# Source startup reconciliation for orphaned WIP issues
+# shellcheck source=scripts/lib/daemon-reconcile.sh
+source "scripts/lib/daemon-reconcile.sh"
+
 # Clear stale drain mode from a previous run (drain is runtime-only)
 if is_drain_mode; then
   clear_drain_mode
@@ -132,6 +136,10 @@ reap_orphans() {
 }
 reap_orphans "docker (compose|ps|info)" "Docker process"
 reap_orphans "shell-snapshots/snapshot-zsh" "Claude shell wrapper"
+
+# Reconcile orphaned WIP issues — any issue still labeled claude-wip with no
+# matching PID file entry gets transitioned to claude-interrupted (crash recovery)
+reconcile_orphaned_wip_issues
 
 # Kill a tmux session for a given issue number (if it exists).
 # $1 — issue_number
@@ -1227,8 +1235,14 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           run_bug_investigator "$number" "$title" &
           record_worker "$!" "$number" "bug-investigate"
+          spawned_this_cycle="$spawned_this_cycle $number"
           log "Spawned bug-investigator PID $! for CI failure issue #${number}"
         done <<< "$ci_bug_issues"
 
@@ -1259,8 +1273,14 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           run_worker "$number" "$title" &
           record_worker "$!" "$number" "worker"
+          spawned_this_cycle="$spawned_this_cycle $number"
           log "Spawned worker PID $! for CI failure ready issue #${number}"
         done <<< "$ci_ready_issues"
 
@@ -1291,10 +1311,16 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           # Check if this is a plan (has plan markers) or a single work item
           if echo "$body" | grep -q "PLAN_ITEMS_START"; then
             run_plan_executor "$number" "$title" &
             record_worker "$!" "$number" "plan"
+            spawned_this_cycle="$spawned_this_cycle $number"
             log "Spawned plan-executor PID $! for issue #${number}"
           else
             # Single work item — route to needs-human-review for human review
@@ -1339,8 +1365,14 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           run_plan_writer "$number" "$title" &
           record_worker "$!" "$number" "plan-writer"
+          spawned_this_cycle="$spawned_this_cycle $number"
           log "Spawned plan-writer PID $! for issue #${number}"
         done <<< "$plan_issues"
 
@@ -1370,8 +1402,14 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           run_bug_investigator "$number" "$title" &
           record_worker "$!" "$number" "bug-investigate"
+          spawned_this_cycle="$spawned_this_cycle $number"
           log "Spawned bug-investigator PID $! for issue #${number}"
         done <<< "$bug_issues"
 
@@ -1401,8 +1439,14 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           run_worker "$number" "$title" &
           record_worker "$!" "$number" "worker"
+          spawned_this_cycle="$spawned_this_cycle $number"
           log "Spawned worker PID $! for issue #${number}"
         done <<< "$issues"
       fi
@@ -1515,20 +1559,27 @@ while true; do
                 active=$(active_worker_count)
                 available_slots=$(( MAX_WORKERS - active ))
                 if [ "$available_slots" -gt 0 ]; then
-                  log "Spawning conflict-resolver agent for PR #${conflict_pr}"
-                  run_conflict_resolver "$conflict_pr" "$conflict_branch" &
-                  record_worker "$!" "$conflict_pr" "conflict-resolver"
-                  log "Spawned conflict-resolver PID $! for PR #${conflict_pr}"
-                  # Update ACK to record the agent's PID (not the daemon's) so that
-                  # liveness checks track the actual lock holder. If the daemon restarts
-                  # while the agent is running, the ACK won't be prematurely cleaned up.
-                  local ack_file="$LOG_DIR/conflict-state/pr-${conflict_pr}.ack"
-                  if [ -f "$ack_file" ]; then
-                    cat > "$ack_file" <<ACK_UPDATE
+                  if echo "$spawned_this_cycle" | grep -qw "$conflict_pr"; then
+                    log "Skipping issue #${conflict_pr} (already spawned this cycle)"
+                    release_conflict_ack "$conflict_pr"
+                    cleanup_conflict_worktree "$conflict_pr"
+                  else
+                    log "Spawning conflict-resolver agent for PR #${conflict_pr}"
+                    run_conflict_resolver "$conflict_pr" "$conflict_branch" &
+                    record_worker "$!" "$conflict_pr" "conflict-resolver"
+                    spawned_this_cycle="$spawned_this_cycle $conflict_pr"
+                    log "Spawned conflict-resolver PID $! for PR #${conflict_pr}"
+                    # Update ACK to record the agent's PID (not the daemon's) so that
+                    # liveness checks track the actual lock holder. If the daemon restarts
+                    # while the agent is running, the ACK won't be prematurely cleaned up.
+                    local ack_file="$LOG_DIR/conflict-state/pr-${conflict_pr}.ack"
+                    if [ -f "$ack_file" ]; then
+                      cat > "$ack_file" <<ACK_UPDATE
 pid=$!
 ts=$(date +%s)
 pr=${conflict_pr}
 ACK_UPDATE
+                    fi
                   fi
                 else
                   log "No worker slots available for conflict-resolver on PR #${conflict_pr}, will retry next cycle"
