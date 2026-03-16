@@ -224,6 +224,105 @@ describe("POST /api/businesses/[id]/onboard", () => {
     );
   });
 
+  // ── New field tests ──────────────────────────────────────────────────────
+
+  it("accepts valid payload with new optional fields (accountType, visualStyle, voiceSliders)", async () => {
+    mockOwner();
+    (prismaMock.contentStrategy.findUnique as jest.Mock).mockResolvedValue(null);
+    mockExtract.mockResolvedValue(STRATEGY_DATA);
+    (prismaMock.contentStrategy.create as jest.Mock).mockResolvedValue({
+      id: "cs-new",
+      businessId: BUSINESS_ID,
+      ...STRATEGY_DATA,
+    });
+
+    const answersWithNewFields = {
+      ...VALID_ANSWERS,
+      accountType: "INFLUENCER",
+      visualStyle: "Minimalist aesthetic with earth tones",
+      voiceSliders: { formality: 3, humor: 7, technicality: 2, boldness: 8 },
+    };
+
+    const res = await POST(makeReq({ answers: answersWithNewFields }), mockParams);
+
+    expect(res.status).toBe(201);
+    expect(mockExtract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountType: "INFLUENCER",
+        visualStyle: "Minimalist aesthetic with earth tones",
+        voiceSliders: { formality: 3, humor: 7, technicality: 2, boldness: 8 },
+      })
+    );
+  });
+
+  it("rejects invalid accountType value", async () => {
+    mockOwner();
+    (prismaMock.contentStrategy.findUnique as jest.Mock).mockResolvedValue(null);
+
+    const res = await POST(
+      makeReq({
+        answers: {
+          ...VALID_ANSWERS,
+          accountType: "INVALID_TYPE",
+        },
+      }),
+      mockParams
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockExtract).not.toHaveBeenCalled();
+  });
+
+  it("rejects voiceSliders with out-of-range values", async () => {
+    mockOwner();
+    (prismaMock.contentStrategy.findUnique as jest.Mock).mockResolvedValue(null);
+
+    const res = await POST(
+      makeReq({
+        answers: {
+          ...VALID_ANSWERS,
+          voiceSliders: { formality: 0, humor: 11, technicality: 5, boldness: 5 },
+        },
+      }),
+      mockParams
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockExtract).not.toHaveBeenCalled();
+  });
+
+  it("strips HTML tags from free-text fields", async () => {
+    mockOwner();
+    (prismaMock.contentStrategy.findUnique as jest.Mock).mockResolvedValue(null);
+    mockExtract.mockResolvedValue(STRATEGY_DATA);
+    (prismaMock.contentStrategy.create as jest.Mock).mockResolvedValue({
+      id: "cs-html",
+      businessId: BUSINESS_ID,
+      ...STRATEGY_DATA,
+    });
+
+    const answersWithHtml = {
+      businessType: "<script>alert('xss')</script>Fitness studio",
+      targetAudience: '<b>Busy</b> professionals <img src="x" onerror="alert(1)">',
+      tonePreference: "Energetic<br>science-backed",
+      primaryGoal: "<p>Grow membership</p>",
+      visualStyle: "<div>Clean look</div>",
+    };
+
+    const res = await POST(makeReq({ answers: answersWithHtml }), mockParams);
+
+    expect(res.status).toBe(201);
+    expect(mockExtract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessType: "alert('xss')Fitness studio",
+        targetAudience: "Busy professionals ",
+        tonePreference: "Energeticscience-backed",
+        primaryGoal: "Grow membership",
+        visualStyle: "Clean look",
+      })
+    );
+  });
+
   it("returns 500 when Claude extraction fails", async () => {
     mockOwner();
     (prismaMock.contentStrategy.findUnique as jest.Mock).mockResolvedValue(null);

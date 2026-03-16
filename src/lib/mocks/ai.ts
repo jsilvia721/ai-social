@@ -29,15 +29,15 @@ export function mockGeneratePostContent(
 }
 
 export function mockExtractContentStrategy(
-  wizardAnswers: Record<string, string>,
+  wizardAnswers: Record<string, unknown>,
 ): ContentStrategyInput {
   const industry =
-    wizardAnswers["Business type"] ||
-    wizardAnswers["industry"] ||
+    (wizardAnswers["Business type"] as string) ||
+    (wizardAnswers["industry"] as string) ||
     "Technology & SaaS";
   const audience =
-    wizardAnswers["Target audience"] ||
-    wizardAnswers["targetAudience"] ||
+    (wizardAnswers["Target audience"] as string) ||
+    (wizardAnswers["targetAudience"] as string) ||
     "Tech-savvy professionals aged 25-45";
 
   return {

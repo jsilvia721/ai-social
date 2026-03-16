@@ -1,16 +1,33 @@
 import { z } from "zod";
 
+// ── HTML Sanitization ──────────────────────────────────────────────────────────
+// Strips HTML tags from free-text fields to prevent XSS and injection.
+const stripHtml = (val: string) => val.replace(/<[^>]*>/g, "");
+
+// ── Voice Sliders ──────────────────────────────────────────────────────────────
+const VoiceSlidersSchema = z.object({
+  formality: z.number().int().min(1).max(10),
+  humor: z.number().int().min(1).max(10),
+  technicality: z.number().int().min(1).max(10),
+  boldness: z.number().int().min(1).max(10),
+});
+
 // ── Wizard Validation ────────────────────────────────────────────────────────
 // Keys match the onboarding wizard step keys in businesses/[id]/onboard/page.tsx
 // Claude maps these to ContentStrategy model fields during extraction.
 
 export const WizardAnswersSchema = z
   .object({
-    businessType: z.string().min(1).max(500),
-    targetAudience: z.string().min(1).max(1000),
-    tonePreference: z.string().min(1).max(500),
-    primaryGoal: z.string().min(1).max(500),
-    competitors: z.string().max(500).optional().default(""),
+    businessType: z.string().min(1).max(500).transform(stripHtml),
+    targetAudience: z.string().min(1).max(1000).transform(stripHtml),
+    tonePreference: z.string().min(1).max(500).transform(stripHtml),
+    primaryGoal: z.string().min(1).max(500).transform(stripHtml),
+    competitors: z.string().max(500).optional().default("").transform(stripHtml),
+    accountType: z.enum(["BUSINESS", "INFLUENCER", "MEME"]).optional(),
+    visualStyle: z.string().max(500).optional().transform((val) =>
+      val ? stripHtml(val) : val
+    ),
+    voiceSliders: VoiceSlidersSchema.optional(),
   })
   .strict();
 
