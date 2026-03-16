@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam } from "@anthropic-ai/sdk/resources/messages";
 import { z } from "zod";
 import type { Platform } from "@/types";
+import type { WizardAnswers } from "@/lib/strategy/schemas";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
 import { trackApiCall } from "@/lib/system-metrics";
 import {
@@ -194,9 +195,13 @@ function escapeXml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function buildOnboardingPrompt(answers: Record<string, string>): string {
+function buildOnboardingPrompt(answers: Record<string, unknown>): string {
   const fields = Object.entries(answers)
-    .map(([k, v]) => `<${k}>${escapeXml(v)}</${k}>`)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => {
+      const text = typeof v === "string" ? v : JSON.stringify(v);
+      return `<${k}>${escapeXml(text)}</${k}>`;
+    })
     .join("\n");
   return (
     "Extract a content strategy from the onboarding answers below and call save_content_strategy.\n\n" +
@@ -205,7 +210,7 @@ function buildOnboardingPrompt(answers: Record<string, string>): string {
 }
 
 export async function extractContentStrategy(
-  wizardAnswers: Record<string, string>
+  wizardAnswers: WizardAnswers | Record<string, unknown>
 ): Promise<ContentStrategyInput> {
   if (shouldMockExternalApis()) {
     return mockExtractContentStrategy(wizardAnswers);

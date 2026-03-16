@@ -29,15 +29,15 @@ export function mockGeneratePostContent(
 }
 
 export function mockExtractContentStrategy(
-  wizardAnswers: Record<string, string>,
+  wizardAnswers: Record<string, unknown>,
 ): ContentStrategyInput {
   const industry =
-    wizardAnswers["Business type"] ||
-    wizardAnswers["industry"] ||
+    (typeof wizardAnswers["Business type"] === "string" ? wizardAnswers["Business type"] : undefined) ||
+    (typeof wizardAnswers["industry"] === "string" ? wizardAnswers["industry"] : undefined) ||
     "Technology & SaaS";
   const audience =
-    wizardAnswers["Target audience"] ||
-    wizardAnswers["targetAudience"] ||
+    (typeof wizardAnswers["Target audience"] === "string" ? wizardAnswers["Target audience"] : undefined) ||
+    (typeof wizardAnswers["targetAudience"] === "string" ? wizardAnswers["targetAudience"] : undefined) ||
     "Tech-savvy professionals aged 25-45";
 
   return {
