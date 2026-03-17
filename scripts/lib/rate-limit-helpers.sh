@@ -17,12 +17,8 @@ detect_rate_limit() {
   local exit_code="$1"
   local log_file="$2"
 
-  # Successful exit is not a rate limit
-  if [ "$exit_code" -eq 0 ]; then
-    return 1
-  fi
-
-  # Check log file for rate limit indicators
+  # Check log file for rate limit indicators (regardless of exit code —
+  # Claude can exit 0 on API usage limits like "You've hit your limit")
   if grep -qiE 'rate.?limit|HTTP.?429|status.?429|quota|budget.*exceeded|overloaded|hit your.*limit|you.ve.*limit' "$log_file" 2>/dev/null; then
     return 0
   fi
