@@ -368,6 +368,7 @@ handle_resolution_success() {
   local base_branch="${2:-main}"
   local worktree_path="${3:-}"
   _validate_pr_number "$pr_number" || return 1
+  _validate_branch_name "$base_branch" || return 1
 
   conflict_log "$pr_number" "Resolution succeeded — commenting and cleaning up"
 
@@ -481,6 +482,7 @@ should_retry() {
     base_branch=$(grep '^base_branch=' "$state_file" | cut -d= -f2 || echo "")
     [ -n "$base_branch" ] || base_branch="main"
   fi
+  _validate_branch_name "$base_branch" || return 1
 
   # Read SHA: new format (base_sha_at_failure) with fallback to old format (main_sha_at_failure)
   local recorded_sha
