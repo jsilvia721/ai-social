@@ -402,6 +402,7 @@ handle_resolution_failure() {
   local reason="$2"
   local base_branch="${3:-main}"
   _validate_pr_number "$pr_number" || return 1
+  _validate_branch_name "$base_branch" || return 1
 
   ensure_conflict_state_dir
   conflict_log "$pr_number" "Resolution failed: $reason"
