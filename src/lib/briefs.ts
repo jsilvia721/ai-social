@@ -13,6 +13,7 @@ import { generateBriefs } from "@/lib/ai/briefs";
 import { flattenFormatMix } from "@/lib/strategy/schemas";
 import { sendBriefDigest } from "@/lib/notifications";
 import { reportServerError } from "@/lib/server-error-reporter";
+import { clampCadence } from "@/lib/cadence-limits";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -128,6 +129,11 @@ export async function runBriefGeneration(
         cadencePerPlatform[platform] = cadenceConfig[platform] ?? DEFAULT_CADENCE_PER_PLATFORM;
       }
 
+      // 4b. Enforce growth-aware cadence limits
+      // Override is enabled when user explicitly set postingCadence (non-null)
+      const cadenceOverrideEnabled = strategy.postingCadence != null;
+      const clampedCadence = clampCadence(cadencePerPlatform, cadenceOverrideEnabled);
+
       // 5. Call Claude to generate briefs (pass learned format mix if available)
       // flattenFormatMix handles both old flat format and new per-platform format
       const formatMix = flattenFormatMix(strategy.formatMix as Record<string, unknown> | null);
@@ -137,7 +143,7 @@ export async function runBriefGeneration(
         strategy.contentPillars,
         strategy.brandVoice,
         connectedPlatforms,
-        cadencePerPlatform,
+        clampedCadence,
         researchThemes,
         recentPostTopics,
         formatMix,
