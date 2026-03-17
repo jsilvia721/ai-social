@@ -61,6 +61,11 @@ cd "$REPO_ROOT"
 LOG_DIR="$REPO_ROOT/logs/issue-daemon"
 mkdir -p "$LOG_DIR"
 
+# Define log() early — sourced libraries (conflict-resolver.sh, etc.) call it during init
+log() {
+  echo "[daemon $(date '+%H:%M:%S')] $*"
+}
+
 # Source the shared state library
 # shellcheck source=scripts/lib/daemon-state.sh
 source "scripts/lib/daemon-state.sh"
@@ -229,10 +234,6 @@ toggle_drain() {
   fi
 }
 trap toggle_drain USR1
-
-log() {
-  echo "[daemon $(date '+%H:%M:%S')] $*"
-}
 
 # Detect stdbuf for line-buffered output on worker spawns
 STDBUF_PREFIX=""
