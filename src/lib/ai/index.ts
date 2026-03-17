@@ -11,6 +11,8 @@ import {
   mockGenerateVideoStoryboard,
 } from "@/lib/mocks/ai";
 import type { ContentBrief, ContentStrategy } from "@prisma/client";
+import { PLATFORM_INTELLIGENCE } from "@/lib/ai/knowledge/platform-intelligence";
+import { HOOK_FRAMEWORKS } from "@/lib/ai/knowledge/hooks";
 
 const client = new Anthropic();
 
@@ -309,13 +311,21 @@ const strategyUpdateTool: Anthropic.Tool = {
         description: "Plain-language weekly summary for the partner (2-3 paragraphs, max 1000 chars)",
         maxLength: 2000,
       },
+      hookTypeRecommendations: {
+        type: "array",
+        items: {
+          type: "string",
+          enum: HOOK_FRAMEWORKS.map((h) => h.name),
+        },
+        description: "3-5 hook types to emphasize in next week's briefs, based on what drove the highest-weighted signals",
+      },
     },
     required: ["patterns", "digest"],
   },
 };
 
 function buildPerformancePrompt(input: PerformanceInput): string {
-  const postSummaries = input.posts
+  const postSummaries = [...input.posts]
     .sort((a, b) => b.engagementRate - a.engagementRate)
     .map(
       (p, i) =>
@@ -327,6 +337,23 @@ function buildPerformancePrompt(input: PerformanceInput): string {
     .map(([k, v]) => `${k}: ${(v * 100).toFixed(0)}%`)
     .join(", ");
 
+  // Build platform engagement weight context for platforms present in post data
+  const activePlatforms = [...new Set(input.posts.map((p) => p.platform))] as Platform[];
+  const platformWeightContext = activePlatforms
+    .map((platform) => {
+      const intel = PLATFORM_INTELLIGENCE[platform];
+      const weights = Object.entries(intel.algorithm.weights)
+        .sort(([, a], [, b]) => b - a)
+        .map(([signal, weight]) => `${signal}: ${weight}x`)
+        .join(", ");
+      const notes = intel.algorithm.notes ?? "";
+      return `**${platform}**: ${weights}${notes ? `\n  Context: ${notes}` : ""}`;
+    })
+    .join("\n");
+
+  // Build hook type reference for recommendations
+  const hookReference = HOOK_FRAMEWORKS.map((h) => h.name).join(", ");
+
   return `You are a social media strategist analyzing performance data for a ${input.strategy.industry} business.
 
 Target audience: ${input.strategy.targetAudience}
@@ -334,6 +361,11 @@ Content pillars: ${input.strategy.contentPillars.join(", ")}
 Brand voice: ${input.strategy.brandVoice}
 
 Current format mix: ${mixEntries || "No data yet"}
+
+## Platform Engagement Signal Weights
+Understanding which signals matter most per platform helps interpret the metrics correctly:
+
+${platformWeightContext}
 
 Here are the last 30 days of published posts ranked by engagement score:
 
@@ -345,6 +377,7 @@ Analyze the performance data and call update_strategy with:
 3. cadenceChanges: suggested posting frequency changes per platform (max +/-2)
 4. topicInsights: which content pillars to emphasize or de-emphasize
 5. digest: a plain-language summary for the business owner explaining what you found and what you're changing
+6. hookTypeRecommendations: analyze which content structures and hook types drove the highest-weighted signals per platform, then recommend 3-5 hook types to emphasize next week (from: ${hookReference})
 
 Be specific and reference actual data. If there isn't enough data for confident recommendations, say so.`;
 }
@@ -356,6 +389,7 @@ export async function analyzePerformance(
   formatMixChanges?: Record<string, number>;
   cadenceChanges?: Record<string, number>;
   topicInsights?: string[];
+  hookTypeRecommendations?: string[];
   digest: string;
 }> {
   if (shouldMockExternalApis()) {
@@ -383,6 +417,7 @@ export async function analyzePerformance(
       formatMixChanges?: Record<string, number>;
       cadenceChanges?: Record<string, number>;
       topicInsights?: string[];
+      hookTypeRecommendations?: string[];
       digest: string;
     };
   } catch (err) {
