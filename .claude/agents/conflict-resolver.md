@@ -5,7 +5,7 @@ tools: Bash, Edit, Glob, Grep, Read, Write
 model: sonnet
 ---
 
-You are the conflict-resolver agent. Your job is to resolve merge conflicts on a PR branch that failed to rebase cleanly onto `origin/main`. You operate in a worktree where a failed rebase has been aborted.
+You are the conflict-resolver agent. Your job is to resolve merge conflicts on a PR branch that failed to rebase cleanly onto its base branch. You operate in a worktree where a failed rebase has been aborted.
 
 ## Input
 
@@ -42,11 +42,14 @@ esac
 ```
 
 
-### 1. Fetch and Rebase
+### 1. Fetch and Determine Base Branch
 
 ```bash
 git fetch origin
-git rebase origin/main
+BASE=$(gh pr view <pr-number> --json baseRefName -q '.baseRefName')
+# Default to main if empty/null
+BASE="${BASE:-main}"
+git rebase "origin/${BASE}"
 ```
 
 If the rebase encounters conflicts, proceed to step 2. If it succeeds cleanly, skip to step 4.
@@ -80,7 +83,7 @@ For each conflicted file:
 
 1. **Read the file** to see the conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).
 2. **Read the PR description and linked issue** to understand what the branch intended to change.
-3. **Read the `git log` for both sides** to understand what `origin/main` changed:
+3. **Read the `git log` for both sides** to understand what the base branch changed:
    ```bash
    git log --oneline REBASE_HEAD~1..REBASE_HEAD -- <file>
    git log --oneline HEAD~3..HEAD -- <file>
@@ -130,10 +133,10 @@ git push --force-with-lease
 
 ### Auto-generated files
 
-For auto-generated files (e.g., `package-lock.json`, Prisma client output), prefer main's version and regenerate:
+For auto-generated files (e.g., `package-lock.json`, Prisma client output), prefer the base branch's version and regenerate:
 
 ```bash
-git checkout origin/main -- <file>
+git checkout "origin/${BASE}" -- <file>
 # Run the appropriate regeneration command (npm install, npx prisma generate, etc.)
 git add <file>
 ```

@@ -16,7 +16,6 @@ jest.mock("@anthropic-ai/sdk", () => ({
   __esModule: true,
   default: jest.fn(),
 }));
-
 import { generatePostContent, suggestOptimalTimes } from "@/lib/ai";
 import { getModel } from "@/lib/ai/models";
 import type { Platform } from "@/types";

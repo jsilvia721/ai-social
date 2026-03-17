@@ -1,5 +1,5 @@
 // Tests for repurposeContent — uses tool_use to force structured platform variants
-// Mock the models module
+// Mock AI models module — production code imports getAnthropicClient from here
 const mockCreate = jest.fn();
 const mockClient = { messages: { create: mockCreate } };
 
@@ -16,7 +16,6 @@ jest.mock("@anthropic-ai/sdk", () => ({
   __esModule: true,
   default: jest.fn(),
 }));
-
 import { repurposeContent } from "@/lib/ai/repurpose";
 import { MODEL_DEFAULT } from "@/lib/ai/models";
 import type { StrategyContext } from "@/lib/ai/types";
