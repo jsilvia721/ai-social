@@ -87,18 +87,19 @@ ensure_conflict_state_dir() {
 # --- Detection ----------------------------------------------------------------
 
 # Find open daemon PRs with merge conflicts.
-# Returns a JSON array of PR objects (number, title, headRefName, mergeable).
+# Returns a JSON array of PR objects (number, title, headRefName, baseRefName, mergeable).
 # Filters to:
 #   - issue-* branches only
 #   - mergeable=CONFLICTING
 #   - most recent commit author is the daemon bot
 detect_conflicting_prs() {
   local pr_json
-  pr_json=$(gh pr list --state open --json number,title,headRefName,mergeable 2>/dev/null || echo "[]")
+  pr_json=$(gh pr list --state open --json number,title,headRefName,baseRefName,mergeable 2>/dev/null || echo "[]")
 
   # Filter to issue-* branches with CONFLICTING status
+  # Default null/empty baseRefName to "main"
   local candidates
-  candidates=$(echo "$pr_json" | jq '[.[] | select(.headRefName | startswith("issue-")) | select(.mergeable == "CONFLICTING")]')
+  candidates=$(echo "$pr_json" | jq '[.[] | select(.headRefName | startswith("issue-")) | select(.mergeable == "CONFLICTING") | .baseRefName = (if (.baseRefName // "") == "" then "main" else .baseRefName end)]')
 
   # The issue-* branch prefix already ensures only daemon PRs are picked up,
   # so no additional author filtering is needed. (Local Claude Code runs commit
@@ -108,18 +109,20 @@ detect_conflicting_prs() {
 
 # --- Rebase -------------------------------------------------------------------
 
-# Attempt a clean rebase of a PR branch onto origin/main.
+# Attempt a clean rebase of a PR branch onto its base branch.
 # Creates a fresh worktree, fetches, and rebases.
-# $1 — PR number, $2 — head branch name
+# $1 — PR number, $2 — head branch name, $3 — base branch (default: main)
 # Returns: 0 = clean rebase, 1 = conflicts, 2 = other error
 attempt_clean_rebase() {
   local pr_number="$1"
   local head_branch="$2"
+  local base_branch="${3:-main}"
   _validate_pr_number "$pr_number" || return 2
   _validate_branch_name "$head_branch" || return 2
+  _validate_branch_name "$base_branch" || return 2
   local worktree_path="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
 
-  conflict_log "$pr_number" "Starting clean rebase of $head_branch onto origin/main"
+  conflict_log "$pr_number" "Starting clean rebase of $head_branch onto origin/${base_branch}"
 
   # Clean up any existing worktree first
   if [ -d "$worktree_path" ]; then
@@ -147,7 +150,7 @@ attempt_clean_rebase() {
 
   # Attempt rebase
   local rebase_output
-  if rebase_output=$(git -C "$worktree_path" rebase origin/main 2>&1); then
+  if rebase_output=$(git -C "$worktree_path" rebase "origin/${base_branch}" 2>&1); then
     conflict_log "$pr_number" "Clean rebase succeeded"
     return 0
   else
@@ -297,20 +300,22 @@ is_excluded_conflict() {
 # --- Mechanical resolution ----------------------------------------------------
 
 # Attempt to resolve mechanical (lockfile-only) conflicts.
-# $1 — PR number
+# $1 — PR number, $2 — base branch (default: main)
 # Returns: 0 = resolved, 1 = non-mechanical conflicts remain
 handle_mechanical_conflicts() {
   local pr_number="$1"
+  local base_branch="${2:-main}"
   _validate_pr_number "$pr_number" || return 1
+  _validate_branch_name "$base_branch" || return 1
   local worktree_path="${CONFLICT_RESOLVER_REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
 
-  conflict_log "$pr_number" "Attempting mechanical conflict resolution"
+  conflict_log "$pr_number" "Attempting mechanical conflict resolution (base: ${base_branch})"
 
   # Fetch and start rebase (caller should have already attempted rebase)
   # Re-attempt rebase to get into conflicted state
   git -C "$worktree_path" fetch origin 2>/dev/null || true
   local rebase_output
-  rebase_output=$(git -C "$worktree_path" rebase origin/main 2>&1 || true)
+  rebase_output=$(git -C "$worktree_path" rebase "origin/${base_branch}" 2>&1 || true)
 
   local conflicted_files
   conflicted_files=$(git -C "$worktree_path" diff --name-only --diff-filter=U 2>/dev/null || echo "")
@@ -357,21 +362,28 @@ handle_mechanical_conflicts() {
 
 # Handle successful conflict resolution.
 # Comments on PR, removes label, cleans up state file.
-# $1 — PR number
+# $1 — PR number, $2 — base branch (default: main), $3 — worktree path (optional)
 handle_resolution_success() {
   local pr_number="$1"
+  local base_branch="${2:-main}"
+  local worktree_path="${3:-}"
   _validate_pr_number "$pr_number" || return 1
+  _validate_branch_name "$base_branch" || return 1
 
   conflict_log "$pr_number" "Resolution succeeded — commenting and cleaning up"
 
   local new_head
-  new_head=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  if [ -n "$worktree_path" ] && [ -d "$worktree_path" ]; then
+    new_head=$(git -C "$worktree_path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  else
+    new_head=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  fi
 
   local comment_body
   comment_body="$(cat <<EOF
 **Conflict auto-resolved** by the daemon.
 
-Rebased onto \`origin/main\` (new HEAD: \`${new_head}\`). CI checks should run automatically.
+Rebased onto \`origin/${base_branch}\` (new HEAD: \`${new_head}\`). CI checks should run automatically.
 EOF
 )"
 
@@ -385,11 +397,13 @@ EOF
 
 # Handle failed conflict resolution.
 # Adds label, comments with reason, records retry state.
-# $1 — PR number, $2 — failure reason
+# $1 — PR number, $2 — failure reason, $3 — base branch (default: main)
 handle_resolution_failure() {
   local pr_number="$1"
   local reason="$2"
+  local base_branch="${3:-main}"
   _validate_pr_number "$pr_number" || return 1
+  _validate_branch_name "$base_branch" || return 1
 
   ensure_conflict_state_dir
   conflict_log "$pr_number" "Resolution failed: $reason"
@@ -405,15 +419,16 @@ handle_resolution_failure() {
 
   attempt_count=$((attempt_count + 1))
 
-  local main_sha
-  main_sha=$(git rev-parse origin/main 2>/dev/null || echo "unknown")
+  local base_sha
+  base_sha=$(git rev-parse "origin/${base_branch}" 2>/dev/null || echo "unknown")
   local now_epoch
   now_epoch=$(date +%s)
 
-  # Write state file
+  # Write state file (base_sha_at_failure + base_branch for new format)
   cat > "$state_file" <<EOF
 attempt_count=${attempt_count}
-main_sha_at_failure=${main_sha}
+base_sha_at_failure=${base_sha}
+base_branch=${base_branch}
 last_attempt_epoch=${now_epoch}
 EOF
 
@@ -426,7 +441,7 @@ EOF
 
 **Reason:** ${reason}
 
-Will retry automatically when \`main\` advances (if attempts remain).
+Will retry automatically when \`${base_branch}\` advances (if attempts remain).
 EOF
 )"
 
@@ -437,10 +452,11 @@ EOF
 
 # Check if a PR should be retried.
 # Returns 0 if should retry, 1 if not.
-# Retries if: attempt_count < max AND current origin/main differs from last failure.
-# $1 — PR number
+# Retries if: attempt_count < max AND current base branch SHA differs from last failure.
+# $1 — PR number, $2 — base branch (default: read from state file, fallback to main)
 should_retry() {
   local pr_number="$1"
+  local base_branch_override="${2:-}"
   _validate_pr_number "$pr_number" || return 1
   local state_file="$LOG_DIR/conflict-state/pr-${pr_number}.state"
 
@@ -458,13 +474,27 @@ should_retry() {
     return 1
   fi
 
+  # Determine base branch: override > state file > fallback "main"
+  local base_branch
+  if [ -n "$base_branch_override" ]; then
+    base_branch="$base_branch_override"
+  else
+    base_branch=$(grep '^base_branch=' "$state_file" | cut -d= -f2 || echo "")
+    [ -n "$base_branch" ] || base_branch="main"
+  fi
+  _validate_branch_name "$base_branch" || return 1
+
+  # Read SHA: new format (base_sha_at_failure) with fallback to old format (main_sha_at_failure)
   local recorded_sha
-  recorded_sha=$(grep '^main_sha_at_failure=' "$state_file" | cut -d= -f2 || echo "")
+  recorded_sha=$(grep '^base_sha_at_failure=' "$state_file" | cut -d= -f2 || echo "")
+  if [ -z "$recorded_sha" ]; then
+    recorded_sha=$(grep '^main_sha_at_failure=' "$state_file" | cut -d= -f2 || echo "")
+  fi
 
   local current_sha
-  current_sha=$(git rev-parse origin/main 2>/dev/null || echo "")
+  current_sha=$(git rev-parse "origin/${base_branch}" 2>/dev/null || echo "")
 
-  # Only retry if main has advanced
+  # Only retry if base branch has advanced
   if [ "$recorded_sha" = "$current_sha" ]; then
     return 1
   fi
