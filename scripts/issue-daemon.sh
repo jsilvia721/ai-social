@@ -852,22 +852,24 @@ EOF
 
 # Push a rebased conflict branch and verify CI passes.
 # Handles success/failure via library functions. No worker slot consumed.
-# $1 — PR number
+# $1 — PR number, $2 — base branch (default: main)
 push_and_verify_conflict() {
   local pr_number="$1"
+  local base_branch="${2:-main}"
+  local worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
   if push_rebased_branch "$pr_number"; then
     log "Push succeeded for PR #${pr_number}, polling CI..."
     local ci_result=0
     poll_ci_status "$pr_number" 900 || ci_result=$?
     if [ "$ci_result" -eq 0 ]; then
-      handle_resolution_success "$pr_number"
+      handle_resolution_success "$pr_number" "$base_branch" "$worktree_path"
       log "Conflict resolved for PR #${pr_number} — CI passed"
     else
-      handle_resolution_failure "$pr_number" "CI checks failed after rebase"
+      handle_resolution_failure "$pr_number" "CI checks failed after rebase" "$base_branch"
       log "CI failed after rebase for PR #${pr_number}"
     fi
   else
-    handle_resolution_failure "$pr_number" "Push --force-with-lease failed"
+    handle_resolution_failure "$pr_number" "Push --force-with-lease failed" "$base_branch"
     log "Push failed for PR #${pr_number}"
   fi
 }
@@ -876,14 +878,16 @@ push_and_verify_conflict() {
 run_conflict_resolver() {
   local pr_number="$1"
   local head_branch="$2"
+  local base_branch="${3:-main}"
 
   # Validate inputs before use in shell commands and Claude prompt
   _validate_pr_number "$pr_number" || return 1
   _validate_branch_name "$head_branch" || return 1
+  _validate_branch_name "$base_branch" || return 1
 
   local log_file="$LOG_DIR/conflict-pr-${pr_number}.log"
 
-  log "Starting conflict-resolver agent for PR #${pr_number} (branch: ${head_branch})"
+  log "Starting conflict-resolver agent for PR #${pr_number} (branch: ${head_branch}, base: ${base_branch})"
 
   local worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
 
@@ -900,7 +904,7 @@ You are the conflict-resolver agent. Resolve merge conflicts on PR #${pr_number}
 Read the PR with: gh pr view ${pr_number} --json title,body,headRefName,baseRefName
 
 The worktree is at ${worktree_path}. A rebase was already attempted and aborted.
-Fetch, rebase onto origin/main, resolve conflicts following your agent instructions,
+Fetch, rebase onto origin/${base_branch}, resolve conflicts following your agent instructions,
 run ci:check, and push with --force-with-lease.
 
 If you cannot resolve the conflicts, exit with a non-zero code.
@@ -934,10 +938,10 @@ EOF
 
   if [ $exit_code -eq 0 ]; then
     log "Conflict-resolver for PR #${pr_number} completed successfully (${runtime}s)"
-    handle_resolution_success "$pr_number"
+    handle_resolution_success "$pr_number" "$base_branch" "$worktree_path"
   else
     log "Conflict-resolver for PR #${pr_number} failed (exit code: $exit_code, ${runtime}s)"
-    handle_resolution_failure "$pr_number" "Agent exited with code $exit_code"
+    handle_resolution_failure "$pr_number" "Agent exited with code $exit_code" "$base_branch"
   fi
 
   # Clean up worktree
@@ -1526,6 +1530,7 @@ while true; do
     # Processes at most 1 PR per poll cycle (sequential safety).
     conflict_pr=""
     conflict_branch=""
+    conflict_base=""
 
     # First: check newly detected conflicting PRs
     conflicting_json=$(detect_conflicting_prs 2>/dev/null || echo "[]")
@@ -1533,34 +1538,44 @@ while true; do
     if [ "$conflict_count" -gt 0 ]; then
       conflict_pr=$(echo "$conflicting_json" | jq -r '.[0].number')
       conflict_branch=$(echo "$conflicting_json" | jq -r '.[0].headRefName')
+      conflict_base=$(echo "$conflicting_json" | jq -r '.[0].baseRefName')
+      # Null guard: default empty/null baseRefName to "main"
+      [ -n "$conflict_base" ] && [ "$conflict_base" != "null" ] || conflict_base="main"
       # Validate extracted values before use in shell commands
-      if ! _validate_pr_number "$conflict_pr" 2>/dev/null || ! _validate_branch_name "$conflict_branch" 2>/dev/null; then
+      if ! _validate_pr_number "$conflict_pr" 2>/dev/null || ! _validate_branch_name "$conflict_branch" 2>/dev/null || ! _validate_branch_name "$conflict_base" 2>/dev/null; then
         log "Skipping conflict PR — invalid PR number or branch name from API"
         conflict_pr=""
         conflict_branch=""
-      # Check if we should retry (skip if retries exhausted or main hasn't advanced)
-      elif ! should_retry "$conflict_pr"; then
-        log "Skipping conflict PR #${conflict_pr} (retries exhausted or main unchanged)"
+        conflict_base=""
+      # Check if we should retry (skip if retries exhausted or base branch hasn't advanced)
+      elif ! should_retry "$conflict_pr" "$conflict_base"; then
+        log "Skipping conflict PR #${conflict_pr} (retries exhausted or ${conflict_base} unchanged)"
         conflict_pr=""
         conflict_branch=""
+        conflict_base=""
       fi
     fi
 
     # Second: check needs-manual-rebase PRs eligible for retry
     if [ -z "$conflict_pr" ]; then
       rebase_prs=$(gh pr list --state open --label "$LABEL_NEEDS_REBASE" \
-        --json number,headRefName \
+        --json number,headRefName,baseRefName \
         -q '.[] | @json' 2>/dev/null || echo "")
       if [ -n "$rebase_prs" ]; then
         while IFS= read -r pr_json; do
           pr_num=$(echo "$pr_json" | jq -r '.number')
           pr_branch=$(echo "$pr_json" | jq -r '.headRefName')
+          pr_base=$(echo "$pr_json" | jq -r '.baseRefName')
+          # Null guard: default empty/null baseRefName to "main"
+          [ -n "$pr_base" ] && [ "$pr_base" != "null" ] || pr_base="main"
           # Validate before use
           _validate_pr_number "$pr_num" 2>/dev/null || continue
           _validate_branch_name "$pr_branch" 2>/dev/null || continue
-          if should_retry "$pr_num"; then
+          _validate_branch_name "$pr_base" 2>/dev/null || continue
+          if should_retry "$pr_num" "$pr_base"; then
             conflict_pr="$pr_num"
             conflict_branch="$pr_branch"
+            conflict_base="$pr_base"
             break
           fi
         done <<< "$rebase_prs"
@@ -1573,17 +1588,17 @@ while true; do
       if ! acquire_conflict_ack "$conflict_pr"; then
         log "Skipping conflict PR #${conflict_pr} — ACK already held"
       else
-        log "Processing conflict PR #${conflict_pr} (branch: ${conflict_branch})"
+        log "Processing conflict PR #${conflict_pr} (branch: ${conflict_branch}, base: ${conflict_base})"
         ensure_conflict_state_dir
 
         # Step 1: Attempt clean rebase
         rebase_result=0
-        attempt_clean_rebase "$conflict_pr" "$conflict_branch" || rebase_result=$?
+        attempt_clean_rebase "$conflict_pr" "$conflict_branch" "$conflict_base" || rebase_result=$?
 
         if [ "$rebase_result" -eq 0 ]; then
           # Clean rebase succeeded — push and poll CI in-process (no worker slot)
           log "Clean rebase succeeded for PR #${conflict_pr}, pushing..."
-          push_and_verify_conflict "$conflict_pr"
+          push_and_verify_conflict "$conflict_pr" "$conflict_base"
           cleanup_conflict_worktree "$conflict_pr"
           release_conflict_ack "$conflict_pr"
 
@@ -1594,24 +1609,24 @@ while true; do
           # handle_mechanical_conflicts checks is_mechanical_conflict internally;
           # if non-mechanical conflicts exist it aborts and returns 1.
           mechanical_result=0
-          handle_mechanical_conflicts "$conflict_pr" || mechanical_result=$?
+          handle_mechanical_conflicts "$conflict_pr" "$conflict_base" || mechanical_result=$?
 
           if [ "$mechanical_result" -eq 0 ]; then
             # Mechanical resolution succeeded — push and poll CI in-process
             log "Mechanical conflict resolution succeeded for PR #${conflict_pr}, pushing..."
-            push_and_verify_conflict "$conflict_pr"
+            push_and_verify_conflict "$conflict_pr" "$conflict_base"
             cleanup_conflict_worktree "$conflict_pr"
             release_conflict_ack "$conflict_pr"
           else
             # Non-mechanical conflicts — check for excluded files before spawning agent.
             # Re-run rebase to get into conflicted state for is_excluded_conflict check.
             worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${conflict_pr}"
-            git -C "$worktree_path" rebase origin/main 2>/dev/null || true
+            git -C "$worktree_path" rebase "origin/${conflict_base}" 2>/dev/null || true
 
             if is_excluded_conflict "$conflict_pr" "$worktree_path"; then
               log "PR #${conflict_pr} has excluded file conflicts — labeling for manual rebase"
               git -C "$worktree_path" rebase --abort 2>/dev/null || true
-              handle_resolution_failure "$conflict_pr" "Conflicts in excluded files (prisma migrations, sst.config.ts, etc.)"
+              handle_resolution_failure "$conflict_pr" "Conflicts in excluded files (prisma migrations, sst.config.ts, etc.)" "$conflict_base"
               cleanup_conflict_worktree "$conflict_pr"
               release_conflict_ack "$conflict_pr"
             else
@@ -1632,7 +1647,7 @@ while true; do
                     cleanup_conflict_worktree "$conflict_pr"
                   else
                     log "Spawning conflict-resolver agent for PR #${conflict_pr}"
-                    run_conflict_resolver "$conflict_pr" "$conflict_branch" &
+                    run_conflict_resolver "$conflict_pr" "$conflict_branch" "$conflict_base" &
                     record_worker "$!" "$conflict_pr" "conflict-resolver"
                     spawned_this_cycle="$spawned_this_cycle $conflict_pr"
                     log "Spawned conflict-resolver PID $! for PR #${conflict_pr}"
@@ -1660,7 +1675,7 @@ ACK_UPDATE
         else
           # rebase_result == 2 — unexpected error
           log "Unexpected error during rebase for PR #${conflict_pr}"
-          handle_resolution_failure "$conflict_pr" "Unexpected error during rebase"
+          handle_resolution_failure "$conflict_pr" "Unexpected error during rebase" "$conflict_base"
           cleanup_conflict_worktree "$conflict_pr"
           release_conflict_ack "$conflict_pr"
         fi
