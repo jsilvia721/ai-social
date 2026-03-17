@@ -66,13 +66,31 @@ echo "=== Rate Limit Detection Tests ==="
 echo ""
 echo "detect_rate_limit:"
 
-# Test: successful exit is never rate limited
+# Test: successful exit with clean log is not rate limited
 log_file="$TEST_LOG_DIR/test-success.log"
 echo "Everything is fine" > "$log_file"
 if detect_rate_limit 0 "$log_file"; then
-  fail "successful exit is not rate limited" "not rate limited" "rate limited"
+  fail "exit 0 + clean log is not rate limited" "not rate limited" "rate limited"
 else
-  pass "successful exit is not rate limited"
+  pass "exit 0 + clean log is not rate limited"
+fi
+
+# Test: exit 0 with rate limit message IS detected as rate limited
+log_file="$TEST_LOG_DIR/test-exit0-rate-limit.log"
+echo "You've hit your limit · resets 8pm (America/New_York)" > "$log_file"
+if detect_rate_limit 0 "$log_file"; then
+  pass "exit 0 + 'hit your limit' IS rate limited"
+else
+  fail "exit 0 + 'hit your limit' IS rate limited" "rate limited" "not rate limited"
+fi
+
+# Test: exit 0 with 429 in log IS detected as rate limited
+log_file="$TEST_LOG_DIR/test-exit0-429.log"
+echo "HTTP 429 Too Many Requests" > "$log_file"
+if detect_rate_limit 0 "$log_file"; then
+  pass "exit 0 + HTTP 429 IS rate limited"
+else
+  fail "exit 0 + HTTP 429 IS rate limited" "rate limited" "not rate limited"
 fi
 
 # Test: 429 in log file

@@ -618,16 +618,6 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    commit_wip_if_needed "$issue_number"
-    handle_rate_limit_exit "$issue_number" "$runtime" "Worker" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    clean_worktree "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   # Verify a PR was actually created for this issue (regardless of exit code)
   local pr_url
   pr_url=$(gh pr list --search "Closes #${issue_number}" --json url -q '.[0].url' 2>/dev/null || echo "")
@@ -653,6 +643,15 @@ EOF
     log "Worker for issue #${issue_number} completed — no PR needed (issue already marked done/closed)"
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
     clear_session_id "$issue_number"
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    # but catches rate limits that exit 0 (e.g., "You've hit your limit" graceful shutdown)
+    commit_wip_if_needed "$issue_number"
+    handle_rate_limit_exit "$issue_number" "$runtime" "Worker" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    clean_worktree "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     if [ $exit_code -eq 0 ] && [ -z "$pr_url" ]; then
@@ -741,20 +740,18 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    clean_worktree "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   if [ $exit_code -eq 0 ]; then
     log "Plan-executor for issue #${issue_number} completed successfully"
     # plan-executor handles its own label transitions (approved -> done)
     # but ensure WIP is removed if still present
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    clean_worktree "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     log "Plan-executor for issue #${issue_number} failed (exit code: $exit_code)"
@@ -827,19 +824,17 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   if [ $exit_code -eq 0 ]; then
     log "Bug-investigator for issue #${issue_number} completed successfully"
     # bug-investigator handles its own label transitions (bug-investigate -> bug-planned)
     # but ensure WIP is removed if still present
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     log "Bug-investigator for issue #${issue_number} failed (exit code: $exit_code)"
@@ -1007,18 +1002,16 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-writer" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   if [ $exit_code -eq 0 ]; then
     log "Plan-writer for issue #${issue_number} completed successfully"
     # plan-writer adds needs-human-review itself; just remove WIP
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-writer" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     log "Plan-writer for issue #${issue_number} failed (exit code: $exit_code)"
