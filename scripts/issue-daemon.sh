@@ -74,6 +74,10 @@ source "scripts/lib/ci-health-monitor.sh"
 # shellcheck source=scripts/lib/conflict-resolver.sh
 source "scripts/lib/conflict-resolver.sh"
 
+# Source startup reconciliation for orphaned WIP issues
+# shellcheck source=scripts/lib/daemon-reconcile.sh
+source "scripts/lib/daemon-reconcile.sh"
+
 # Clear stale drain mode from a previous run (drain is runtime-only)
 if is_drain_mode; then
   clear_drain_mode
@@ -132,6 +136,10 @@ reap_orphans() {
 }
 reap_orphans "docker (compose|ps|info)" "Docker process"
 reap_orphans "shell-snapshots/snapshot-zsh" "Claude shell wrapper"
+
+# Reconcile orphaned WIP issues — any issue still labeled claude-wip with no
+# matching PID file entry gets transitioned to claude-interrupted (crash recovery)
+reconcile_orphaned_wip_issues
 
 # Kill a tmux session for a given issue number (if it exists).
 # $1 — issue_number
@@ -311,6 +319,55 @@ handle_rate_limit_exit() {
 
   gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
   gh issue comment "$issue_number" --body "${worker_type} interrupted by API usage limit (runtime: ${runtime}s). ${comment_suffix}" 2>/dev/null || true
+
+  # Kill all other active workers — rate limit is account-wide
+  kill_all_active_workers_for_rate_limit "$issue_number"
+}
+
+# --- Global rate limit halt ---------------------------------------------------
+# When one worker detects a rate limit, kill ALL other active workers since the
+# API limit is account-wide. Commits WIP, transitions labels, and cleans up.
+# Arguments: $1=triggering_issue_number (skip this worker — already handled by caller)
+kill_all_active_workers_for_rate_limit() {
+  local triggering_issue="$1"
+
+  [ -f "$PID_FILE" ] || return 0
+
+  while IFS=: read -r w_pid w_issue w_start w_type; do
+    [ -n "$w_pid" ] || continue
+    [ -n "$w_issue" ] || continue
+
+    # Skip the triggering issue's worker (already handled by caller)
+    if [ "$w_issue" = "$triggering_issue" ]; then
+      continue
+    fi
+
+    # Only kill live workers
+    if ! kill -0 "$w_pid" 2>/dev/null; then
+      continue
+    fi
+
+    log "Rate limit halt: killing worker PID $w_pid for issue #${w_issue} (type: ${w_type})"
+
+    # Commit WIP before killing
+    commit_wip_if_needed "$w_issue"
+
+    # Kill the process group
+    kill_process_group "$w_pid"
+
+    # Clean up tmux session
+    kill_worker_tmux_session "$w_issue"
+
+    # Transition labels: claude-wip → claude-interrupted
+    gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
+    gh issue comment "$w_issue" --body "Worker interrupted by account-wide API rate limit (triggered by issue #${triggering_issue}). Will auto-retry after cooldown." 2>/dev/null || true
+
+    # Remove heartbeat and stale marker files
+    rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
+
+    # Remove from PID file so slots are freed immediately after cooldown
+    remove_worker "$w_pid"
+  done < "$PID_FILE"
 }
 
 # --- Circuit breaker configuration --------------------------------------------
@@ -561,16 +618,6 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    commit_wip_if_needed "$issue_number"
-    handle_rate_limit_exit "$issue_number" "$runtime" "Worker" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    clean_worktree "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   # Verify a PR was actually created for this issue (regardless of exit code)
   local pr_url
   pr_url=$(gh pr list --search "Closes #${issue_number}" --json url -q '.[0].url' 2>/dev/null || echo "")
@@ -596,6 +643,15 @@ EOF
     log "Worker for issue #${issue_number} completed — no PR needed (issue already marked done/closed)"
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
     clear_session_id "$issue_number"
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    # but catches rate limits that exit 0 (e.g., "You've hit your limit" graceful shutdown)
+    commit_wip_if_needed "$issue_number"
+    handle_rate_limit_exit "$issue_number" "$runtime" "Worker" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    clean_worktree "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     if [ $exit_code -eq 0 ] && [ -z "$pr_url" ]; then
@@ -626,6 +682,15 @@ run_plan_executor() {
   local log_file="$LOG_DIR/plan-${issue_number}.log"
 
   log "Starting plan-executor for issue #${issue_number}: ${issue_title}"
+
+  # Idempotency guard: if plan already has claude-active, it was already executed
+  local current_labels
+  current_labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
+  if echo "$current_labels" | grep -q "$LABEL_ACTIVE"; then
+    log "Plan #${issue_number} already has '$LABEL_ACTIVE' label — skipping (already executed)"
+    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+    return
+  fi
 
   # Label as in-progress
   gh issue edit "$issue_number" --remove-label "$LABEL_APPROVED" --add-label "$LABEL_WIP" 2>/dev/null || true
@@ -675,20 +740,18 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    clean_worktree "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   if [ $exit_code -eq 0 ]; then
     log "Plan-executor for issue #${issue_number} completed successfully"
     # plan-executor handles its own label transitions (approved -> done)
     # but ensure WIP is removed if still present
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    clean_worktree "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     log "Plan-executor for issue #${issue_number} failed (exit code: $exit_code)"
@@ -761,19 +824,17 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   if [ $exit_code -eq 0 ]; then
     log "Bug-investigator for issue #${issue_number} completed successfully"
     # bug-investigator handles its own label transitions (bug-investigate -> bug-planned)
     # but ensure WIP is removed if still present
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     log "Bug-investigator for issue #${issue_number} failed (exit code: $exit_code)"
@@ -945,18 +1006,16 @@ EOF
   local self_pid
   self_pid=$(sh -c 'echo $PPID')
 
-  # Check for rate limit first
-  if detect_rate_limit "$exit_code" "$log_file"; then
-    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-writer" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    remove_worker "$self_pid"
-    return
-  fi
-
   if [ $exit_code -eq 0 ]; then
     log "Plan-writer for issue #${issue_number} completed successfully"
     # plan-writer adds needs-human-review itself; just remove WIP
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
+  elif detect_rate_limit "$exit_code" "$log_file"; then
+    # Rate limit check after success path — prevents false positives on genuine successes
+    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-writer" "$log_file"
+    kill_worker_tmux_session "$issue_number"
+    remove_worker "$self_pid"
+    return
   else
     record_failure
     log "Plan-writer for issue #${issue_number} failed (exit code: $exit_code)"
@@ -993,6 +1052,9 @@ log "Watching for issues labeled '${LABEL_RESUME}', '${LABEL_INTERRUPTED}', '${L
 log "PID file: ${DAEMON_PID_FILE} (send SIGUSR1 to toggle drain mode)"
 
 while true; do
+  # Reset per-cycle spawn deduplication set
+  spawned_this_cycle=""
+
   # --- 1. Drain mode check ---
   if is_drain_mode; then
     active=$(active_worker_count)
@@ -1031,9 +1093,26 @@ while true; do
   while IFS=: read -r w_pid w_issue w_start w_type; do
     [ -n "$w_pid" ] || continue
 
-    # Dead worker — clean up orphaned state
+    # Dead worker — clean up orphaned state and transition labels
     if ! kill -0 "$w_pid" 2>/dev/null; then
-      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}"
+      log "Worker PID $w_pid for issue #${w_issue} is dead — cleaning up orphaned state"
+      kill_worker_tmux_session "$w_issue"
+
+      # Check if issue still has claude-wip label before transitioning
+      dead_labels=$(gh issue view "$w_issue" --json labels -q '.labels[].name' 2>/dev/null || true)
+      if echo "$dead_labels" | grep -q "$LABEL_WIP"; then
+        if [ "$w_type" = "worker" ]; then
+          # Workers are idempotent — transition to interrupted for auto-retry
+          gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
+          gh issue comment "$w_issue" --body "Worker process died unexpectedly (PID $w_pid no longer running). Transitioning to \`$LABEL_INTERRUPTED\` for auto-retry." 2>/dev/null || true
+        else
+          # Non-workers (plan, plan-writer, bug-investigate, conflict-resolver) are not idempotent — block for manual review
+          gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
+          gh issue comment "$w_issue" --body "Worker process died unexpectedly (PID $w_pid, type: $w_type). Transitioning to \`$LABEL_BLOCKED\` — manual review required since $w_type tasks are not idempotent." 2>/dev/null || true
+        fi
+      fi
+
+      rm -f "$LOG_DIR/heartbeat-${w_issue}" "$LOG_DIR/.stale-notified-${w_pid}" "$LOG_DIR/.pr-check-${w_issue}" "$LOG_DIR/.pr-discovered-${w_issue}"
       remove_worker "$w_pid"
       continue
     fi
@@ -1145,8 +1224,14 @@ while true; do
           continue
         fi
 
+        if echo "$spawned_this_cycle" | grep -qw "$number"; then
+          log "Skipping issue #${number} (already spawned this cycle)"
+          continue
+        fi
+
         run_worker "$number" "$title" "false" "true" &
         record_worker "$!" "$number" "worker"
+        spawned_this_cycle="$spawned_this_cycle $number"
         log "Spawned resume worker PID $! for issue #${number}"
       done <<< "$resume_issues"
 
@@ -1156,6 +1241,8 @@ while true; do
     fi
 
     # --- Priority 0.5: Retry interrupted issues (auto rate-limit retries) ---
+    # Re-check rate limit pause (may have been set by kill_all_active_workers_for_rate_limit mid-cycle)
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
     interrupted_issues=$(gh issue list \
       --state open \
@@ -1175,8 +1262,14 @@ while true; do
           continue
         fi
 
+        if echo "$spawned_this_cycle" | grep -qw "$number"; then
+          log "Skipping issue #${number} (already spawned this cycle)"
+          continue
+        fi
+
         run_worker "$number" "$title" "true" "false" &
         record_worker "$!" "$number" "worker"
+        spawned_this_cycle="$spawned_this_cycle $number"
         log "Spawned retry worker PID $! for interrupted issue #${number}"
       done <<< "$interrupted_issues"
 
@@ -1187,6 +1280,7 @@ while true; do
     fi
 
     # --- Priority 0.75a: CI failure investigation (elevated) ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       ci_bug_issues=$(gh issue list \
         --state open \
@@ -1207,8 +1301,14 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           run_bug_investigator "$number" "$title" &
           record_worker "$!" "$number" "bug-investigate"
+          spawned_this_cycle="$spawned_this_cycle $number"
           log "Spawned bug-investigator PID $! for CI failure issue #${number}"
         done <<< "$ci_bug_issues"
 
@@ -1219,6 +1319,7 @@ while true; do
     fi
 
     # --- Priority 0.75b: CI failure implementation (elevated) ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       ci_ready_issues=$(gh issue list \
         --state open \
@@ -1239,8 +1340,14 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           run_worker "$number" "$title" &
           record_worker "$!" "$number" "worker"
+          spawned_this_cycle="$spawned_this_cycle $number"
           log "Spawned worker PID $! for CI failure ready issue #${number}"
         done <<< "$ci_ready_issues"
 
@@ -1251,6 +1358,7 @@ while true; do
     fi
 
     # --- Priority 1: Approved plans (create work issues quickly) ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       approved_issues=$(gh issue list \
         --state open \
@@ -1271,10 +1379,16 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           # Check if this is a plan (has plan markers) or a single work item
           if echo "$body" | grep -q "PLAN_ITEMS_START"; then
             run_plan_executor "$number" "$title" &
             record_worker "$!" "$number" "plan"
+            spawned_this_cycle="$spawned_this_cycle $number"
             log "Spawned plan-executor PID $! for issue #${number}"
           else
             # Single work item — route to needs-human-review for human review
@@ -1291,6 +1405,7 @@ while true; do
     fi
 
     # --- Priority 1.25: Stub plan issues (plan-writer) ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       # Find issues labeled "plan" that are not already in progress or completed
       plan_issues=$(gh issue list \
@@ -1319,8 +1434,14 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           run_plan_writer "$number" "$title" &
           record_worker "$!" "$number" "plan-writer"
+          spawned_this_cycle="$spawned_this_cycle $number"
           log "Spawned plan-writer PID $! for issue #${number}"
         done <<< "$plan_issues"
 
@@ -1331,6 +1452,7 @@ while true; do
     fi
 
     # --- Priority 1.5: Bug investigation issues ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       bug_issues=$(gh issue list \
         --state open \
@@ -1350,8 +1472,14 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           run_bug_investigator "$number" "$title" &
           record_worker "$!" "$number" "bug-investigate"
+          spawned_this_cycle="$spawned_this_cycle $number"
           log "Spawned bug-investigator PID $! for issue #${number}"
         done <<< "$bug_issues"
 
@@ -1362,6 +1490,7 @@ while true; do
     fi
 
     # --- Priority 2: Ready work issues ---
+    if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       issues=$(gh issue list \
         --state open \
@@ -1381,8 +1510,14 @@ while true; do
             continue
           fi
 
+          if echo "$spawned_this_cycle" | grep -qw "$number"; then
+            log "Skipping issue #${number} (already spawned this cycle)"
+            continue
+          fi
+
           run_worker "$number" "$title" &
           record_worker "$!" "$number" "worker"
+          spawned_this_cycle="$spawned_this_cycle $number"
           log "Spawned worker PID $! for issue #${number}"
         done <<< "$issues"
       fi
@@ -1506,20 +1641,27 @@ while true; do
                 active=$(active_worker_count)
                 available_slots=$(( MAX_WORKERS - active ))
                 if [ "$available_slots" -gt 0 ]; then
-                  log "Spawning conflict-resolver agent for PR #${conflict_pr}"
-                  run_conflict_resolver "$conflict_pr" "$conflict_branch" "$conflict_base" &
-                  record_worker "$!" "$conflict_pr" "conflict-resolver"
-                  log "Spawned conflict-resolver PID $! for PR #${conflict_pr}"
-                  # Update ACK to record the agent's PID (not the daemon's) so that
-                  # liveness checks track the actual lock holder. If the daemon restarts
-                  # while the agent is running, the ACK won't be prematurely cleaned up.
-                  local ack_file="$LOG_DIR/conflict-state/pr-${conflict_pr}.ack"
-                  if [ -f "$ack_file" ]; then
-                    cat > "$ack_file" <<ACK_UPDATE
+                  if echo "$spawned_this_cycle" | grep -qw "$conflict_pr"; then
+                    log "Skipping issue #${conflict_pr} (already spawned this cycle)"
+                    release_conflict_ack "$conflict_pr"
+                    cleanup_conflict_worktree "$conflict_pr"
+                  else
+                    log "Spawning conflict-resolver agent for PR #${conflict_pr}"
+                    run_conflict_resolver "$conflict_pr" "$conflict_branch" "$conflict_base" &
+                    record_worker "$!" "$conflict_pr" "conflict-resolver"
+                    spawned_this_cycle="$spawned_this_cycle $conflict_pr"
+                    log "Spawned conflict-resolver PID $! for PR #${conflict_pr}"
+                    # Update ACK to record the agent's PID (not the daemon's) so that
+                    # liveness checks track the actual lock holder. If the daemon restarts
+                    # while the agent is running, the ACK won't be prematurely cleaned up.
+                    local ack_file="$LOG_DIR/conflict-state/pr-${conflict_pr}.ack"
+                    if [ -f "$ack_file" ]; then
+                      cat > "$ack_file" <<ACK_UPDATE
 pid=$!
 ts=$(date +%s)
 pr=${conflict_pr}
 ACK_UPDATE
+                    fi
                   fi
                 else
                   log "No worker slots available for conflict-resolver on PR #${conflict_pr}, will retry next cycle"
