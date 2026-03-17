@@ -641,6 +641,74 @@ assert_file_exists "live ACK preserved by cleanup" "$LOG_DIR/conflict-state/pr-3
 rm -f "$LOG_DIR/conflict-state/pr-301.ack"
 
 # =============================================================================
+# Test: select_conflict_candidate — iterates all candidates
+# =============================================================================
+echo ""
+echo "select_conflict_candidate:"
+
+# Reset state
+rm -f "$LOG_DIR/conflict-state/"*.json 2>/dev/null || true
+
+# Mock should_retry: only PR 789 is retryable (first two are exhausted)
+should_retry() {
+  local pr="$1"
+  if [ "$pr" = "789" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# Test: given 3 candidates, first two non-retryable, third is selected
+three_prs='[
+  {"number": 815, "headRefName": "issue-815-feat-a", "baseRefName": "main", "mergeable": "CONFLICTING"},
+  {"number": 816, "headRefName": "issue-816-feat-b", "baseRefName": "main", "mergeable": "CONFLICTING"},
+  {"number": 789, "headRefName": "issue-789-feat-c", "baseRefName": "main", "mergeable": "CONFLICTING"}
+]'
+
+conflict_pr=""
+conflict_branch=""
+conflict_base=""
+select_conflict_candidate "$three_prs"
+assert_eq "selects third candidate when first two non-retryable" "789" "$conflict_pr"
+assert_eq "sets branch for selected candidate" "issue-789-feat-c" "$conflict_branch"
+assert_eq "sets base for selected candidate" "main" "$conflict_base"
+
+# Test: all candidates non-retryable => conflict_pr remains empty
+should_retry() {
+  return 1
+}
+
+conflict_pr=""
+conflict_branch=""
+conflict_base=""
+result=0
+select_conflict_candidate "$three_prs" || result=$?
+assert_eq "returns empty when all non-retryable" "" "$conflict_pr"
+assert_eq "returns 1 when no candidate found" "1" "$result"
+
+# Test: empty array => returns 1
+conflict_pr=""
+result=0
+select_conflict_candidate "[]" || result=$?
+assert_eq "returns 1 for empty array" "1" "$result"
+assert_eq "conflict_pr empty for empty array" "" "$conflict_pr"
+
+# Test: null baseRefName defaults to main
+should_retry() {
+  return 0
+}
+null_base_pr='[{"number": 100, "headRefName": "issue-100-test", "baseRefName": null, "mergeable": "CONFLICTING"}]'
+conflict_pr=""
+conflict_branch=""
+conflict_base=""
+select_conflict_candidate "$null_base_pr"
+assert_eq "null baseRefName defaults to main" "main" "$conflict_base"
+assert_eq "selects PR with null base" "100" "$conflict_pr"
+
+# Restore should_retry to real implementation
+source "$REPO_ROOT/scripts/lib/conflict-resolver.sh"
+
+# =============================================================================
 # Test: Shellcheck
 # =============================================================================
 echo ""
