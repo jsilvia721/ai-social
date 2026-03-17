@@ -1,17 +1,11 @@
 // Mock Anthropic SDK
-jest.mock("@anthropic-ai/sdk", () => {
-  const mockCreate = jest.fn();
-  return {
-    __esModule: true,
-    default: jest.fn().mockImplementation(() => ({
-      messages: { create: mockCreate },
-    })),
-    _mockCreate: mockCreate,
-  };
-});
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- require needed in jest.mock factory (hoisted above imports)
+jest.mock("@anthropic-ai/sdk", () => require("@/__tests__/mocks/ai-models").anthropicSdkMock());
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { _mockCreate: anthropicCreate } = require("@anthropic-ai/sdk");
+import {
+  mockCreate as anthropicCreate,
+  resetAiMocks,
+} from "@/__tests__/mocks/ai-models";
 
 // Mock SES
 jest.mock("@aws-sdk/client-ses", () => ({
@@ -34,7 +28,7 @@ import { runBriefGeneration } from "@/lib/briefs";
 
 beforeEach(() => {
   resetPrismaMock();
-  anthropicCreate.mockReset();
+  resetAiMocks();
   mockReportServerError.mockReset().mockResolvedValue(undefined);
   jest.clearAllMocks();
 });

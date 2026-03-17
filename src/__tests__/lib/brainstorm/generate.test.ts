@@ -3,14 +3,11 @@
  * Mocks GitHub client, Anthropic SDK, and Prisma.
  */
 
-// Mock Anthropic SDK — use __esModule pattern to avoid hoisting issues
-const mockMessagesCreate = jest.fn();
-jest.mock("@anthropic-ai/sdk", () => ({
-  __esModule: true,
-  default: jest.fn().mockImplementation(() => ({
-    messages: { create: (...args: unknown[]) => mockMessagesCreate(...args) },
-  })),
-}));
+// Mock Anthropic SDK
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- require needed in jest.mock factory (hoisted above imports)
+jest.mock("@anthropic-ai/sdk", () => require("@/__tests__/mocks/ai-models").anthropicSdkMock());
+
+import { mockCreate as mockMessagesCreate } from "@/__tests__/mocks/ai-models";
 
 // Mock GitHub client — delegate to jest.fn() instances defined above the mock
 const mockListIssues = jest.fn();
