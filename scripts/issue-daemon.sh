@@ -1092,11 +1092,19 @@ while true; do
     # Dead worker — clean up orphaned state and transition labels
     if ! kill -0 "$w_pid" 2>/dev/null; then
       log "Worker PID $w_pid for issue #${w_issue} is dead — cleaning up orphaned state"
+      commit_wip_if_needed "$w_issue"
       kill_worker_tmux_session "$w_issue"
 
       # Check if issue still has claude-wip label before transitioning
+      # Note: TOCTOU race between view and edit is inherent to GitHub API (no atomic
+      # compare-and-swap for labels). The window is narrow since the daemon is single-threaded.
       dead_labels=$(gh issue view "$w_issue" --json labels -q '.labels[].name' 2>/dev/null || true)
-      if echo "$dead_labels" | grep -q "$LABEL_WIP"; then
+      if [ -z "$dead_labels" ]; then
+        # gh issue view failed (rate limit, network error) — log warning but still proceed
+        # with cleanup. The label may stay as claude-wip, but the startup reconciliation
+        # loop will catch it on next daemon restart.
+        log "WARNING: Could not fetch labels for issue #${w_issue} — label transition skipped"
+      elif echo "$dead_labels" | grep -q "$LABEL_WIP"; then
         if [ "$w_type" = "worker" ]; then
           # Workers are idempotent — transition to interrupted for auto-retry
           gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
