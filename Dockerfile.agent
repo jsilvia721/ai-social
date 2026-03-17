@@ -1,0 +1,75 @@
+# Dockerfile.agent — Container for running the autonomous issue-daemon agent.
+#
+# Installs Node.js 22, git, Claude CLI, gh CLI, and jq.
+# The repo is mounted as a volume at runtime — NOT copied into the image.
+# Secrets are passed via environment variables — NEVER baked into the image.
+#
+# Build:
+#   docker build -f Dockerfile.agent -t ai-social-agent .
+#
+# Run:
+#   See docker-compose.agent.yml for the recommended way to run.
+
+# Pin to tag for reproducibility. Update periodically.
+# To pin to digest: docker pull node:22-bookworm-slim && docker inspect --format='{{index .RepoDigests 0}}' node:22-bookworm-slim
+FROM node:22-bookworm-slim
+
+LABEL maintainer="ai-social team"
+LABEL description="Autonomous agent worker for ai-social issue daemon"
+
+# Avoid interactive prompts during package installation
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    jq \
+    curl \
+    ca-certificates \
+    gnupg \
+    tmux \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI (gh)
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude CLI via npm (global)
+# Pin to explicit version for supply-chain safety. Update intentionally.
+ARG CLAUDE_CLI_VERSION=latest
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}
+
+# Create a non-root user for running the agent
+RUN groupadd --gid 1000 agent \
+    && useradd --uid 1000 --gid agent --shell /bin/bash --create-home agent
+
+# Create directories for worktrees and logs
+RUN mkdir -p /workspace /agent-workdir/worktrees /agent-workdir/logs \
+    && chown -R agent:agent /agent-workdir
+
+# Health check script
+COPY scripts/agent-healthcheck.sh /usr/local/bin/agent-healthcheck
+RUN chmod +x /usr/local/bin/agent-healthcheck
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD /usr/local/bin/agent-healthcheck
+
+# Switch to non-root user
+USER agent
+
+# Workspace is where the repo gets mounted (read-only)
+# Agent workdir is for writable worktrees and logs
+WORKDIR /workspace
+
+# Default entrypoint runs the issue daemon
+ENTRYPOINT ["bash", "scripts/issue-daemon.sh"]
+
+# Default args (can be overridden at runtime)
+CMD ["-w", "1", "-i", "60"]
