@@ -3,6 +3,8 @@ name: Close Completed Plans
 on:
   issues:
     types: [closed]
+  pull_request:
+    types: [closed]
   repository_dispatch:
     types: [plan-issue-closed]
 
@@ -10,10 +12,12 @@ permissions:
   issues: write
   pull-requests: write
   contents: read
+  actions: write
 
 jobs:
   close-plans:
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/github-script@v7
         with:
@@ -151,102 +155,145 @@ jobs:
                   const featureBranch = branchMatch[1].trim();
                   console.log(`#${planIssue.number}: found FEATURE_BRANCH marker: ${featureBranch}`);
 
-                  // Build task-to-PR mapping table
-                  // Fetch merged PRs once to avoid repeated API calls
-                  let mergedPrs = [];
+                  // --- Duplicate PR guard (check before building PR body to save API calls) ---
                   try {
-                    const prsResponse = await github.rest.pulls.list({
+                    const existingPrs = await github.rest.pulls.list({
                       owner, repo,
-                      state: 'closed',
-                      per_page: 100
-                    });
-                    mergedPrs = prsResponse.data.filter(pr => pr.merged_at);
-                  } catch (err) {
-                    console.log(`  Failed to fetch PRs: ${err.message}`);
-                  }
-
-                  // Sanitize text for safe Markdown table embedding
-                  const sanitizeMd = (str) => str.replace(/[|[\]]/g, '\\$&');
-
-                  const taskRows = [];
-                  for (const workNum of workIssueNumbers) {
-                    const cached = workIssueData.get(workNum);
-                    const workTitle = cached ? sanitizeMd(cached.title) : `(issue #${workNum})`;
-
-                    const closesPattern = new RegExp(`(?:closes|fixes|resolves)\\s+#${workNum}\\b`, 'i');
-                    const linkedPr = mergedPrs.find(pr =>
-                      pr.body && closesPattern.test(pr.body)
-                    );
-
-                    if (linkedPr) {
-                      taskRows.push(`| #${workNum} | ${workTitle} | #${linkedPr.number} |`);
-                    } else {
-                      taskRows.push(`| #${workNum} | ${workTitle} | — |`);
-                    }
-                  }
-
-                  const taskTable = [
-                    '| Issue | Title | PR |',
-                    '|-------|-------|----|',
-                    ...taskRows
-                  ].join('\n');
-
-                  const prBody = [
-                    `## Plan: #${planIssue.number}`,
-                    '',
-                    `**${planIssue.title}**`,
-                    '',
-                    '## Completed Tasks',
-                    '',
-                    taskTable,
-                    '',
-                    '---',
-                    '',
-                    '> **Note:** This PR should be **squash merged** to keep a clean commit history on main.'
-                  ].join('\n');
-
-                  try {
-                    const pr = await github.rest.pulls.create({
-                      owner, repo,
-                      title: planIssue.title,
-                      head: featureBranch,
+                      head: `${owner}:${featureBranch}`,
                       base: 'main',
-                      body: prBody
+                      state: 'open'
                     });
 
-                    finalPrNumber = pr.data.number;
-                    console.log(`#${planIssue.number}: created final PR #${finalPrNumber}`);
-                  } catch (err) {
-                    core.warning(`#${planIssue.number}: failed to create final PR: ${err.message}`);
-                    try {
-                      await github.rest.issues.createComment({
-                        owner, repo,
-                        issue_number: planIssue.number,
-                        body: `⚠️ Failed to create final PR from \`${featureBranch}\` → \`main\`:\n\n\`\`\`\n${err.message}\n\`\`\`\n\nFix the issue and close any work item to retry.`
-                      });
-                    } catch (commentErr) {
-                      core.warning(`#${planIssue.number}: failed to post failure comment: ${commentErr.message}`);
+                    if (existingPrs.data.length > 0) {
+                      finalPrNumber = existingPrs.data[0].number;
+                      console.log(`#${planIssue.number}: existing open PR #${finalPrNumber} found from ${featureBranch} to main, skipping PR creation.`);
                     }
-                    continue;
+                  } catch (err) {
+                    console.log(`#${planIssue.number}: failed to check for existing PRs: ${err.message}`);
+                  }
+
+                  // --- Create PR if no duplicate found ---
+                  if (!finalPrNumber) {
+                    // Build task-to-PR mapping table
+                    let mergedPrs = [];
+                    try {
+                      const prsResponse = await github.rest.pulls.list({
+                        owner, repo,
+                        state: 'closed',
+                        per_page: 100
+                      });
+                      mergedPrs = prsResponse.data.filter(pr => pr.merged_at);
+                    } catch (err) {
+                      console.log(`  Failed to fetch PRs: ${err.message}`);
+                    }
+
+                    const sanitizeMd = (str) => str.replace(/[|[\]]/g, '\\$&');
+
+                    const taskRows = [];
+                    for (const workNum of workIssueNumbers) {
+                      const cached = workIssueData.get(workNum);
+                      const workTitle = cached ? sanitizeMd(cached.title) : `(issue #${workNum})`;
+
+                      const closesPattern = new RegExp(`(?:closes|fixes|resolves)\\s+#${workNum}\\b`, 'i');
+                      const linkedPr = mergedPrs.find(pr =>
+                        pr.body && closesPattern.test(pr.body)
+                      );
+
+                      if (linkedPr) {
+                        taskRows.push(`| #${workNum} | ${workTitle} | #${linkedPr.number} |`);
+                      } else {
+                        taskRows.push(`| #${workNum} | ${workTitle} | — |`);
+                      }
+                    }
+
+                    const taskTable = [
+                      '| Issue | Title | PR |',
+                      '|-------|-------|----|',
+                      ...taskRows
+                    ].join('\n');
+
+                    const prBody = [
+                      `## Plan: #${planIssue.number}`,
+                      '',
+                      `**${planIssue.title}**`,
+                      '',
+                      '## Completed Tasks',
+                      '',
+                      taskTable,
+                      '',
+                      '---',
+                      '',
+                      '> **Note:** This PR should be **squash merged** to keep a clean commit history on main.'
+                    ].join('\n');
+
+                    try {
+                      const pr = await github.rest.pulls.create({
+                        owner, repo,
+                        title: planIssue.title,
+                        head: featureBranch,
+                        base: 'main',
+                        body: prBody
+                      });
+
+                      finalPrNumber = pr.data.number;
+                      console.log(`#${planIssue.number}: created final PR #${finalPrNumber}`);
+                    } catch (err) {
+                      // Handle race condition: another run created the PR between our check and create
+                      if (err.message && err.message.includes('already exists')) {
+                        console.log(`#${planIssue.number}: PR already exists (race condition), fetching existing PR.`);
+                        try {
+                          const racePrs = await github.rest.pulls.list({
+                            owner, repo,
+                            head: `${owner}:${featureBranch}`,
+                            base: 'main',
+                            state: 'open'
+                          });
+                          if (racePrs.data.length > 0) {
+                            finalPrNumber = racePrs.data[0].number;
+                            console.log(`#${planIssue.number}: found existing PR #${finalPrNumber} after race.`);
+                          }
+                        } catch (raceErr) {
+                          console.log(`#${planIssue.number}: failed to fetch PR after race: ${raceErr.message}`);
+                        }
+                      }
+
+                      if (!finalPrNumber) {
+                        core.warning(`#${planIssue.number}: failed to create final PR: ${err.message}`);
+                        try {
+                          await github.rest.issues.createComment({
+                            owner, repo,
+                            issue_number: planIssue.number,
+                            body: `⚠️ Failed to create final PR from \`${featureBranch}\` → \`main\`:\n\n\`\`\`\n${err.message}\n\`\`\`\n\nFix the issue and close any work item to retry.`
+                          });
+                        } catch (commentErr) {
+                          core.warning(`#${planIssue.number}: failed to post failure comment: ${commentErr.message}`);
+                        }
+                        continue;
+                      }
+                    }
+                  }
+
+                  // --- Dispatch CI on the feature branch ---
+                  if (finalPrNumber) {
+                    try {
+                      await github.rest.actions.createWorkflowDispatch({
+                        owner, repo,
+                        workflow_id: 'ci.yml',
+                        ref: featureBranch,
+                        inputs: { ref: featureBranch }
+                      });
+                      console.log(`#${planIssue.number}: dispatched CI on branch ${featureBranch}`);
+                    } catch (err) {
+                      console.log(`#${planIssue.number}: failed to dispatch CI: ${err.message}`);
+                    }
                   }
                 }
               } else {
                 console.log(`#${planIssue.number}: no FEATURE_BRANCH marker found, skipping final PR creation.`);
               }
 
-              // --- Step 4: All work issues closed — close the plan issue ---
+              // --- Step 4: All work issues closed — update the plan issue ---
               const issueList = workIssueNumbers.map(n => `#${n}`).join(', ');
-              console.log(`#${planIssue.number}: all work items completed! Closing plan.`);
-
-              const closeComment = finalPrNumber
-                ? `All work complete. Final PR: #${finalPrNumber}. Review and squash-merge to main.`
-                : `All work items completed. Closing plan. Issues: ${issueList}.`;
-
-              await github.rest.issues.createComment({
-                owner, repo,
-                issue_number: planIssue.number,
-                body: closeComment
-              });
 
               await github.rest.issues.addLabels({
                 owner, repo,
@@ -264,13 +311,39 @@ jobs:
                 console.log(`  Warning: could not remove claude-active label: ${err.message}`);
               }
 
-              await github.rest.issues.update({
-                owner, repo,
-                issue_number: planIssue.number,
-                state: 'closed'
-              });
+              if (finalPrNumber) {
+                // Plan has a final PR — keep issue open until PR merges
+                console.log(`#${planIssue.number}: all work items completed! Final PR #${finalPrNumber} — plan stays open until merged.`);
 
-              // --- Step 5: Close linked bug issue if BUG_ISSUE marker exists ---
+                await github.rest.issues.createComment({
+                  owner, repo,
+                  issue_number: planIssue.number,
+                  body: `All work complete. Final PR: #${finalPrNumber} — plan will close when the PR is merged.`
+                });
+              } else {
+                // No feature branch / no final PR — close immediately
+                console.log(`#${planIssue.number}: all work items completed! Closing plan.`);
+
+                await github.rest.issues.createComment({
+                  owner, repo,
+                  issue_number: planIssue.number,
+                  body: `All work items completed. Closing plan. Issues: ${issueList}.`
+                });
+
+                await github.rest.issues.update({
+                  owner, repo,
+                  issue_number: planIssue.number,
+                  state: 'closed'
+                });
+              }
+
+              // --- Step 5: Close linked bug issues (DUPLICATED: keep in sync with close-plan-on-merge job) ---
+              // Only close bugs immediately when there's no final PR (otherwise defer to close-plan-on-merge)
+              if (finalPrNumber) {
+                console.log(`#${planIssue.number}: deferring bug closure until final PR merges.`);
+                continue;
+              }
+
               const bugMarkerMatch = (planIssue.body || '').match(/<!-- BUG_ISSUE: #(\d+) -->/);
               if (bugMarkerMatch) {
                 const bugIssueNumber = parseInt(bugMarkerMatch[1], 10);
@@ -331,5 +404,136 @@ jobs:
                 } catch (err) {
                   console.log(`#${planIssue.number}: failed to close bug #${bugNum}: ${err.message}`);
                 }
+              }
+            }
+
+  close-plan-on-merge:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main'
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prBody = context.payload.pull_request.body || '';
+
+            // Parse "## Plan: #N" from PR body
+            const planMatch = prBody.match(/## Plan: #(\d+)/);
+            if (!planMatch) {
+              console.log('No "## Plan: #N" marker found in PR body. Skipping.');
+              return;
+            }
+
+            const planNumber = parseInt(planMatch[1], 10);
+            console.log(`Found plan reference: #${planNumber}`);
+
+            // Fetch the plan issue
+            let planIssue;
+            try {
+              const { data } = await github.rest.issues.get({
+                owner, repo,
+                issue_number: planNumber
+              });
+              planIssue = data;
+            } catch (err) {
+              console.log(`Failed to fetch plan issue #${planNumber}: ${err.message}`);
+              return;
+            }
+
+            if (planIssue.state === 'closed') {
+              console.log(`Plan issue #${planNumber} is already closed. Skipping.`);
+              return;
+            }
+
+            // Close the plan issue
+            console.log(`Closing plan issue #${planNumber}`);
+
+            try {
+              await github.rest.issues.createComment({
+                owner, repo,
+                issue_number: planNumber,
+                body: `Plan complete — final PR #${context.payload.pull_request.number} has been merged to main.`
+              });
+            } catch (err) {
+              console.log(`Failed to comment on plan issue #${planNumber}: ${err.message}`);
+            }
+
+            try {
+              await github.rest.issues.update({
+                owner, repo,
+                issue_number: planNumber,
+                state: 'closed'
+              });
+            } catch (err) {
+              core.warning(`Failed to close plan issue #${planNumber}: ${err.message}`);
+              return;
+            }
+
+            // --- Close linked bug issues (DUPLICATED: keep in sync with close-plans job Step 5/5b) ---
+            const bugMarkerMatch = (planIssue.body || '').match(/<!-- BUG_ISSUE: #(\d+) -->/);
+            if (bugMarkerMatch) {
+              const bugIssueNumber = parseInt(bugMarkerMatch[1], 10);
+              console.log(`#${planNumber}: found BUG_ISSUE marker referencing #${bugIssueNumber}. Closing bug issue.`);
+
+              try {
+                await github.rest.issues.createComment({
+                  owner, repo,
+                  issue_number: bugIssueNumber,
+                  body: `Closing: plan issue #${planNumber} final PR has been merged.`
+                });
+
+                await github.rest.issues.update({
+                  owner, repo,
+                  issue_number: bugIssueNumber,
+                  state: 'closed'
+                });
+              } catch (err) {
+                console.log(`Failed to close bug issue #${bugIssueNumber}: ${err.message}`);
+              }
+            }
+
+            // Fallback — parse plan title for bug #N references
+            const titleBugPattern = /bug\s*#(\d+)/gi;
+            let titleBugMatch;
+            const closedFromMarker = bugMarkerMatch ? parseInt(bugMarkerMatch[1], 10) : null;
+
+            while ((titleBugMatch = titleBugPattern.exec(planIssue.title)) !== null) {
+              const bugNum = parseInt(titleBugMatch[1], 10);
+
+              if (bugNum === closedFromMarker) {
+                console.log(`#${planNumber}: bug #${bugNum} already closed via BUG_ISSUE marker, skipping.`);
+                continue;
+              }
+
+              try {
+                const { data: bugIssue } = await github.rest.issues.get({
+                  owner, repo,
+                  issue_number: bugNum
+                });
+
+                if (bugIssue.state === 'closed') {
+                  console.log(`#${planNumber}: bug #${bugNum} is already closed, skipping.`);
+                  continue;
+                }
+
+                console.log(`#${planNumber}: closing bug #${bugNum} referenced in plan title.`);
+
+                await github.rest.issues.createComment({
+                  owner, repo,
+                  issue_number: bugNum,
+                  body: `Closing: plan issue #${planNumber} final PR has been merged.`
+                });
+
+                await github.rest.issues.update({
+                  owner, repo,
+                  issue_number: bugNum,
+                  state: 'closed'
+                });
+              } catch (err) {
+                console.log(`#${planNumber}: failed to close bug #${bugNum}: ${err.message}`);
               }
             }
