@@ -107,6 +107,54 @@ detect_conflicting_prs() {
   echo "$candidates"
 }
 
+# Select the first retryable conflict candidate from a JSON array of PRs.
+# Iterates all candidates, skipping those with invalid fields or exhausted retries.
+# Sets global variables: conflict_pr, conflict_branch, conflict_base
+# $1 — JSON array from detect_conflicting_prs()
+# Returns: 0 if a candidate was selected, 1 if none found
+select_conflict_candidate() {
+  local conflicting_json="$1"
+  local count
+  count=$(echo "$conflicting_json" | jq 'length')
+
+  conflict_pr=""
+  conflict_branch=""
+  conflict_base=""
+
+  if [ "$count" -le 0 ]; then
+    return 1
+  fi
+
+  for i in $(seq 0 $((count - 1))); do
+    local candidate_pr candidate_branch candidate_base
+    candidate_pr=$(echo "$conflicting_json" | jq -r ".[$i].number")
+    candidate_branch=$(echo "$conflicting_json" | jq -r ".[$i].headRefName")
+    candidate_base=$(echo "$conflicting_json" | jq -r ".[$i].baseRefName")
+    # Null guard: default empty/null baseRefName to "main"
+    [ -n "$candidate_base" ] && [ "$candidate_base" != "null" ] || candidate_base="main"
+    # Validate extracted values before use in shell commands
+    if ! _validate_pr_number "$candidate_pr" 2>/dev/null || ! _validate_branch_name "$candidate_branch" 2>/dev/null || ! _validate_branch_name "$candidate_base" 2>/dev/null; then
+      log "Skipping conflict PR — invalid PR number or branch name from API"
+      continue
+    fi
+    # Check if we should retry (skip if retries exhausted or base branch hasn't advanced)
+    if ! should_retry "$candidate_pr" "$candidate_base"; then
+      log "Skipping conflict PR #${candidate_pr} (retries exhausted or ${candidate_base} unchanged)"
+      continue
+    fi
+    # Found a valid, retryable candidate (globals consumed by caller)
+    # shellcheck disable=SC2034
+    conflict_pr="$candidate_pr"
+    # shellcheck disable=SC2034
+    conflict_branch="$candidate_branch"
+    # shellcheck disable=SC2034
+    conflict_base="$candidate_base"
+    return 0
+  done
+
+  return 1
+}
+
 # --- Rebase -------------------------------------------------------------------
 
 # Attempt a clean rebase of a PR branch onto its base branch.

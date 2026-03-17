@@ -1541,29 +1541,9 @@ while true; do
     conflict_branch=""
     conflict_base=""
 
-    # First: check newly detected conflicting PRs
+    # First: check newly detected conflicting PRs (iterate all candidates)
     conflicting_json=$(detect_conflicting_prs 2>/dev/null || echo "[]")
-    conflict_count=$(echo "$conflicting_json" | jq 'length')
-    if [ "$conflict_count" -gt 0 ]; then
-      conflict_pr=$(echo "$conflicting_json" | jq -r '.[0].number')
-      conflict_branch=$(echo "$conflicting_json" | jq -r '.[0].headRefName')
-      conflict_base=$(echo "$conflicting_json" | jq -r '.[0].baseRefName')
-      # Null guard: default empty/null baseRefName to "main"
-      [ -n "$conflict_base" ] && [ "$conflict_base" != "null" ] || conflict_base="main"
-      # Validate extracted values before use in shell commands
-      if ! _validate_pr_number "$conflict_pr" 2>/dev/null || ! _validate_branch_name "$conflict_branch" 2>/dev/null || ! _validate_branch_name "$conflict_base" 2>/dev/null; then
-        log "Skipping conflict PR — invalid PR number or branch name from API"
-        conflict_pr=""
-        conflict_branch=""
-        conflict_base=""
-      # Check if we should retry (skip if retries exhausted or base branch hasn't advanced)
-      elif ! should_retry "$conflict_pr" "$conflict_base"; then
-        log "Skipping conflict PR #${conflict_pr} (retries exhausted or ${conflict_base} unchanged)"
-        conflict_pr=""
-        conflict_branch=""
-        conflict_base=""
-      fi
-    fi
+    select_conflict_candidate "$conflicting_json" || true
 
     # Second: check needs-manual-rebase PRs eligible for retry
     if [ -z "$conflict_pr" ]; then
