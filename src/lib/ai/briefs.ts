@@ -3,8 +3,7 @@ import { z } from "zod";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
 import { trackApiCall } from "@/lib/system-metrics";
 import { mockGenerateBriefs } from "@/lib/mocks/ai";
-
-const client = new Anthropic();
+import { getAnthropicClient, getModel } from "./models";
 
 // ── Zod schema for Claude's structured output ────────────────────────────────
 
@@ -111,9 +110,10 @@ export async function generateBriefs(
 
   const startMs = Date.now();
   let errorMessage: string | undefined;
+  const modelId = getModel("default");
   try {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
+    const response = await getAnthropicClient().messages.create({
+      model: modelId,
       max_tokens: 8192,
       system:
         "You are a social media content strategist. Generate a week's content calendar " +
@@ -166,6 +166,7 @@ export async function generateBriefs(
       statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
       error: errorMessage,
+      metadata: { modelId },
     });
   }
 }

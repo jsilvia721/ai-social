@@ -11,8 +11,7 @@ import {
   mockGenerateVideoStoryboard,
 } from "@/lib/mocks/ai";
 import type { ContentBrief, ContentStrategy } from "@prisma/client";
-
-const client = new Anthropic();
+import { getAnthropicClient, getModel } from "./models";
 
 export async function generatePostContent(
   topic: string,
@@ -43,9 +42,10 @@ export async function generatePostContent(
 
   const startMs = Date.now();
   let errorMessage: string | undefined;
+  const modelId = getModel("fast");
   try {
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
+    const message = await getAnthropicClient().messages.create({
+      model: modelId,
       max_tokens: 1024,
       messages: [
         {
@@ -72,6 +72,7 @@ Return only the post text, no explanation.`,
       statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
       error: errorMessage,
+      metadata: { modelId },
     });
   }
 }
@@ -212,9 +213,10 @@ export async function extractContentStrategy(
   }
   const startMs = Date.now();
   let errorMessage: string | undefined;
+  const modelId = getModel("default");
   try {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
+    const response = await getAnthropicClient().messages.create({
+      model: modelId,
       max_tokens: 2048,
       system:
         "You are extracting a content strategy from user-provided onboarding answers. " +
@@ -247,6 +249,7 @@ export async function extractContentStrategy(
       statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
       error: errorMessage,
+      metadata: { modelId },
     });
   }
 }
@@ -349,23 +352,26 @@ Analyze the performance data and call update_strategy with:
 Be specific and reference actual data. If there isn't enough data for confident recommendations, say so.`;
 }
 
+const AnalyzePerformanceResultSchema = z.object({
+  patterns: z.array(z.string()),
+  formatMixChanges: z.record(z.string(), z.number()).optional(),
+  cadenceChanges: z.record(z.string(), z.number()).optional(),
+  topicInsights: z.array(z.string()).optional(),
+  digest: z.string(),
+});
+
 export async function analyzePerformance(
   input: PerformanceInput
-): Promise<{
-  patterns: string[];
-  formatMixChanges?: Record<string, number>;
-  cadenceChanges?: Record<string, number>;
-  topicInsights?: string[];
-  digest: string;
-}> {
+): Promise<z.infer<typeof AnalyzePerformanceResultSchema>> {
   if (shouldMockExternalApis()) {
     return mockAnalyzePerformance();
   }
   const startMs = Date.now();
   let errorMessage: string | undefined;
+  const modelId = getModel("default");
   try {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
+    const response = await getAnthropicClient().messages.create({
+      model: modelId,
       max_tokens: 2048,
       tools: [strategyUpdateTool],
       tool_choice: { type: "tool", name: "update_strategy" },
@@ -377,14 +383,7 @@ export async function analyzePerformance(
       throw new Error("Claude did not call update_strategy");
     }
 
-    // Return raw — caller is responsible for Zod validation + guardrails
-    return toolUse.input as {
-      patterns: string[];
-      formatMixChanges?: Record<string, number>;
-      cadenceChanges?: Record<string, number>;
-      topicInsights?: string[];
-      digest: string;
-    };
+    return AnalyzePerformanceResultSchema.parse(toolUse.input);
   } catch (err) {
     errorMessage = err instanceof Error ? err.message : String(err);
     throw err;
@@ -395,6 +394,7 @@ export async function analyzePerformance(
       statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
       error: errorMessage,
+      metadata: { modelId },
     });
   }
 }
@@ -476,9 +476,10 @@ export async function generateVideoStoryboard(
 
   const startMs = Date.now();
   let errorMessage: string | undefined;
+  const modelId = getModel("default");
   try {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
+    const response = await getAnthropicClient().messages.create({
+      model: modelId,
       max_tokens: 2048,
       system:
         "You are a professional video content strategist. " +
@@ -510,6 +511,7 @@ export async function generateVideoStoryboard(
       statusCode: errorMessage ? undefined : 200,
       latencyMs: Date.now() - startMs,
       error: errorMessage,
+      metadata: { modelId },
     });
   }
 }

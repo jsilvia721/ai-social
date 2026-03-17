@@ -3,10 +3,21 @@
  */
 
 // Mock Anthropic SDK
-// eslint-disable-next-line @typescript-eslint/no-require-imports -- require needed in jest.mock factory (hoisted above imports)
-jest.mock("@anthropic-ai/sdk", () => require("@/__tests__/mocks/ai-models").anthropicSdkMock());
+const mockMessagesCreate = jest.fn();
+jest.mock("@anthropic-ai/sdk", () => ({
+  __esModule: true,
+  default: jest.fn(),
+}));
 
-import { mockCreate as mockMessagesCreate } from "@/__tests__/mocks/ai-models";
+// Mock AI models module
+jest.mock("@/lib/ai/models", () => ({
+  getAnthropicClient: jest.fn(() => ({
+    messages: { create: (...args: unknown[]) => mockMessagesCreate(...args) },
+  })),
+  getModel: jest.fn(() => "claude-sonnet-4-6"),
+  MODEL_DEFAULT: "claude-sonnet-4-6",
+  MODEL_FAST: "claude-haiku-4-5-20251001",
+}));
 
 // Mock GitHub client
 const mockGetIssueBody = jest.fn();
@@ -31,6 +42,11 @@ jest.mock("@/lib/db", () => ({
       update: (...args: unknown[]) => mockSessionUpdate(...args),
     },
   },
+}));
+
+// Mock system-metrics (trackApiCall is now used by iterate.ts)
+jest.mock("@/lib/system-metrics", () => ({
+  trackApiCall: jest.fn(),
 }));
 
 // Mock env

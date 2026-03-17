@@ -1,13 +1,27 @@
 // Tests for extractContentStrategy — uses tool_use to force structured extraction
-// eslint-disable-next-line @typescript-eslint/no-require-imports -- require needed in jest.mock factory (hoisted above imports)
-jest.mock("@anthropic-ai/sdk", () => require("@/__tests__/mocks/ai-models").anthropicSdkMock());
+// Mock AI models module — production code imports getAnthropicClient from here
+const mockCreate = jest.fn();
+const mockClient = { messages: { create: mockCreate } };
 
-import { mockCreate, resetAiMocks } from "@/__tests__/mocks/ai-models";
+jest.mock("@/lib/ai/models", () => ({
+  getAnthropicClient: jest.fn(() => mockClient),
+  getModel: jest.fn((tier: string) =>
+    tier === "fast" ? "claude-haiku-4-5-20251001" : "claude-sonnet-4-6"
+  ),
+  MODEL_DEFAULT: "claude-sonnet-4-6",
+  MODEL_FAST: "claude-haiku-4-5-20251001",
+}));
+
+jest.mock("@anthropic-ai/sdk", () => ({
+  __esModule: true,
+  default: jest.fn(),
+}));
 import { extractContentStrategy } from "@/lib/ai";
+import { MODEL_DEFAULT } from "@/lib/ai/models";
 
 describe("extractContentStrategy", () => {
   beforeEach(() => {
-    resetAiMocks();
+    mockCreate.mockReset();
   });
 
   function makeToolUseResponse(input: Record<string, unknown>) {
@@ -102,12 +116,12 @@ describe("extractContentStrategy", () => {
     expect(content).toContain("Female entrepreneurs");
   });
 
-  it("uses claude-sonnet-4-6 model", async () => {
+  it("uses MODEL_DEFAULT (Sonnet) for extractContentStrategy", async () => {
     mockCreate.mockResolvedValue(makeToolUseResponse(validInput));
 
     await extractContentStrategy({ businessType: "Retail" });
 
-    expect(mockCreate.mock.calls[0][0].model).toBe("claude-sonnet-4-6");
+    expect(mockCreate.mock.calls[0][0].model).toBe(MODEL_DEFAULT);
   });
 
   it("optimizationGoal must be one of the enum values", async () => {

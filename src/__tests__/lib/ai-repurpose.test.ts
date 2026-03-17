@@ -1,15 +1,29 @@
 // Tests for repurposeContent — uses tool_use to force structured platform variants
-// eslint-disable-next-line @typescript-eslint/no-require-imports -- require needed in jest.mock factory (hoisted above imports)
-jest.mock("@anthropic-ai/sdk", () => require("@/__tests__/mocks/ai-models").anthropicSdkMock());
+// Mock AI models module — production code imports getAnthropicClient from here
+const mockCreate = jest.fn();
+const mockClient = { messages: { create: mockCreate } };
 
-import { mockCreate, resetAiMocks } from "@/__tests__/mocks/ai-models";
+jest.mock("@/lib/ai/models", () => ({
+  getAnthropicClient: jest.fn(() => mockClient),
+  getModel: jest.fn((tier: string) =>
+    tier === "fast" ? "claude-haiku-4-5-20251001" : "claude-sonnet-4-6"
+  ),
+  MODEL_DEFAULT: "claude-sonnet-4-6",
+  MODEL_FAST: "claude-haiku-4-5-20251001",
+}));
+
+jest.mock("@anthropic-ai/sdk", () => ({
+  __esModule: true,
+  default: jest.fn(),
+}));
 import { repurposeContent } from "@/lib/ai/repurpose";
+import { MODEL_DEFAULT } from "@/lib/ai/models";
 import type { StrategyContext } from "@/lib/ai/types";
 import type { Platform } from "@/types";
 
 describe("repurposeContent", () => {
   beforeEach(() => {
-    resetAiMocks();
+    mockCreate.mockReset();
   });
 
   function makeToolUseResponse(input: Record<string, unknown>) {
@@ -161,12 +175,12 @@ describe("repurposeContent", () => {
     expect(result.variants[0].tone).toBeUndefined();
   });
 
-  it("uses claude-sonnet-4-6 model", async () => {
+  it("uses MODEL_DEFAULT (Sonnet) for repurposeContent", async () => {
     mockCreate.mockResolvedValue(makeToolUseResponse(validResult));
 
     await repurposeContent(defaultInput);
 
-    expect(mockCreate.mock.calls[0][0].model).toBe("claude-sonnet-4-6");
+    expect(mockCreate.mock.calls[0][0].model).toBe(MODEL_DEFAULT);
   });
 
   it("includes source content in the user message", async () => {

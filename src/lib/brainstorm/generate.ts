@@ -6,14 +6,14 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { shouldMockExternalApis } from "@/lib/mocks/config";
+import { trackApiCall } from "@/lib/system-metrics";
 import { mockGenerateBrainstorm } from "@/lib/mocks/brainstorm";
 import { BrainstormOutputSchema } from "./types";
 import { BRAINSTORM_SYSTEM_PROMPT, buildGenerationPrompt } from "./prompts";
 import { renderBrainstormIssue } from "./markdown";
 import * as github from "@/lib/github";
 import { prisma } from "@/lib/db";
-
-const client = new Anthropic();
+import { getAnthropicClient, getModel } from "@/lib/ai/models";
 
 // NOTE: This JSON Schema must stay in sync with BrainstormOutputSchema in types.ts.
 // The Anthropic tool-use API requires raw JSON Schema, so we cannot derive this from Zod.
@@ -100,14 +100,36 @@ export async function generateBrainstorm(): Promise<{
   // 2. Build prompt and call Claude
   const prompt = buildGenerationPrompt({ openIssues, recentPRs, visionDoc });
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4096,
-    system: BRAINSTORM_SYSTEM_PROMPT,
-    tools: [brainstormTool],
-    tool_choice: { type: "tool", name: "generate_brainstorm" },
-    messages: [{ role: "user", content: prompt }],
-  });
+  const startMs = Date.now();
+  let errorMessage: string | undefined;
+  const modelId = getModel("default");
+  let response;
+  try {
+    response = await getAnthropicClient().messages.create({
+      model: modelId,
+      max_tokens: 4096,
+      system: BRAINSTORM_SYSTEM_PROMPT,
+      tools: [brainstormTool],
+      tool_choice: { type: "tool", name: "generate_brainstorm" },
+      messages: [{ role: "user", content: prompt }],
+    });
+  } catch (err) {
+    errorMessage = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
+    trackApiCall({
+      service: "anthropic",
+      endpoint: "generateBrainstorm",
+      statusCode: errorMessage ? undefined : 200,
+      latencyMs: Date.now() - startMs,
+      error: errorMessage,
+      metadata: {
+        modelId,
+        inputTokens: response?.usage?.input_tokens,
+        outputTokens: response?.usage?.output_tokens,
+      },
+    });
+  }
 
   const toolUse = response.content.find((b) => b.type === "tool_use");
   if (!toolUse || toolUse.type !== "tool_use") {
