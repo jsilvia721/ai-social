@@ -11,6 +11,8 @@ import {
   mockGenerateVideoStoryboard,
 } from "@/lib/mocks/ai";
 import type { ContentBrief, ContentStrategy } from "@prisma/client";
+import { buildPlatformPrompt } from "@/lib/ai/knowledge/platform-intelligence";
+import { selectHooks } from "@/lib/ai/knowledge/hooks";
 
 const client = new Anthropic();
 
@@ -25,13 +27,15 @@ export async function generatePostContent(
   if (shouldMockExternalApis()) {
     return mockGeneratePostContent(topic, platform);
   }
-  const platformGuide: Record<Platform, string> = {
-    TWITTER: "Keep it under 280 characters. Use hashtags sparingly.",
-    INSTAGRAM: "Can be longer. Use emojis and 3-5 relevant hashtags.",
-    FACEBOOK: "Conversational tone. Can include a question to drive engagement.",
-    TIKTOK: "Short, punchy caption. Use trending hashtags. Keep it casual and energetic.",
-    YOUTUBE: "Write a compelling video description. Include keywords naturally in the first 2 sentences.",
-  };
+  // Rich platform intelligence replaces thin platformGuide
+  const platformIntel = buildPlatformPrompt(platform);
+
+  // Select contextually relevant hooks
+  const accountType = (options?.creative?.accountType as "BUSINESS" | "INFLUENCER" | "MEME") ?? "BUSINESS";
+  const hooks = selectHooks(platform, "ENGAGEMENT", accountType);
+  const hookSection = `## Hook Frameworks
+Lead your post with one of these proven hook types:
+${hooks.map((h) => `- **${h.name}**: ${h.description} (e.g., "${h.examples[0]}")`).join("\n")}`;
 
   // Build personality hint from Creative Profile
   let personalityHint = "";
@@ -53,7 +57,11 @@ export async function generatePostContent(
           content: `Write a social media post for ${platform} about: ${topic}.
 ${options?.tone ? `Tone: ${options.tone}.` : ""}
 ${personalityHint ? `Personality: ${personalityHint}` : ""}
-${platformGuide[platform]}
+
+${platformIntel}
+
+${hookSection}
+
 Return only the post text, no explanation.`,
         },
       ],
