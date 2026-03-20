@@ -325,8 +325,9 @@ assert_grep "polls for claude-resume labeled issues" \
 # claude-resume should appear before claude-interrupted in the main loop
 # (Priority 0 vs Priority 0.5)
 # The polling code uses resume_issues= and interrupted_issues= variable names
-resume_line=$(grep -n 'resume_issues=.*gh issue list' "$DAEMON_SCRIPT" | head -1 | cut -d: -f1)
-interrupted_line=$(grep -n 'interrupted_issues=.*gh issue list' "$DAEMON_SCRIPT" | head -1 | cut -d: -f1)
+# (issues_with_label replaced gh issue list in the consolidated fetch refactor)
+resume_line=$(grep -n 'resume_issues=.*issues_with_label\|resume_issues=.*gh issue list' "$DAEMON_SCRIPT" | head -1 | cut -d: -f1)
+interrupted_line=$(grep -n 'interrupted_issues=.*issues_with_label\|interrupted_issues=.*gh issue list' "$DAEMON_SCRIPT" | head -1 | cut -d: -f1)
 
 if [ -n "$resume_line" ] && [ -n "$interrupted_line" ]; then
   if [ "$resume_line" -lt "$interrupted_line" ]; then

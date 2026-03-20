@@ -267,18 +267,26 @@ else
   fail "cleanup() calls kill_all_worker_tmux_sessions" "found" "not found"
 fi
 
-# run_worker calls kill_worker_tmux_session
-if echo "$run_worker_body" | grep -q 'kill_worker_tmux_session'; then
-  pass "run_worker calls kill_worker_tmux_session"
+# run_worker calls agent_cleanup (which calls kill_worker_tmux_session)
+if echo "$run_worker_body" | grep -q 'agent_cleanup'; then
+  pass "run_worker calls agent_cleanup (which calls kill_worker_tmux_session)"
 else
-  fail "run_worker calls kill_worker_tmux_session" "found" "not found"
+  fail "run_worker calls agent_cleanup (which calls kill_worker_tmux_session)" "found" "not found"
 fi
 
-# run_plan_executor calls kill_worker_tmux_session
-if echo "$plan_executor_body" | grep -q 'kill_worker_tmux_session'; then
-  pass "run_plan_executor calls kill_worker_tmux_session"
+# run_plan_executor calls agent_cleanup (which calls kill_worker_tmux_session)
+if echo "$plan_executor_body" | grep -q 'agent_cleanup'; then
+  pass "run_plan_executor calls agent_cleanup (which calls kill_worker_tmux_session)"
 else
-  fail "run_plan_executor calls kill_worker_tmux_session" "found" "not found"
+  fail "run_plan_executor calls agent_cleanup (which calls kill_worker_tmux_session)" "found" "not found"
+fi
+
+# agent_cleanup calls kill_worker_tmux_session
+agent_cleanup_body=$(extract_function 'agent_cleanup' "$DAEMON_SCRIPT")
+if echo "$agent_cleanup_body" | grep -q 'kill_worker_tmux_session'; then
+  pass "agent_cleanup calls kill_worker_tmux_session"
+else
+  fail "agent_cleanup calls kill_worker_tmux_session" "found" "not found"
 fi
 
 # run_bug_investigator calls kill_worker_tmux_session
