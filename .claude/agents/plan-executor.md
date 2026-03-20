@@ -42,9 +42,33 @@ From each item's `**Depends on:**` field, build a dependency graph using the pos
 Items with `Depends on: none` are roots — they can start immediately.
 Items with dependencies must wait for their dependencies to complete.
 
-### 3. Create Feature Branch
+### 3. Decide Feature Branch Strategy
 
-Before creating work issues, create and push a feature branch from `origin/main`. This ensures the branch exists before any child issues are labeled `claude-ready` (preventing a race where an issue-worker tries to target a branch that doesn't exist yet).
+Evaluate the plan items to decide whether a feature branch is needed. Use your judgment based on these guidelines:
+
+**Skip feature branch (target `main` directly) when:**
+- The plan has 1-2 work items
+- All changes are in related files or a single area of the codebase
+- Items don't need integration testing with each other before merging to `main`
+
+**Create a feature branch when:**
+- The plan has 3+ work items
+- Work items touch independent areas that need integration testing together
+- Changes are large enough that incremental PRs to `main` could leave it in a broken intermediate state
+
+#### Option A: No Feature Branch
+
+If you decide to skip the feature branch, set `BRANCH=""` (empty) and comment on the plan issue:
+
+```
+No feature branch — child PRs will target `main` directly.
+```
+
+Then proceed to Step 3.5.
+
+#### Option B: Create Feature Branch
+
+Create and push a feature branch from `origin/main`. This ensures the branch exists before any child issues are labeled `claude-ready` (preventing a race where an issue-worker tries to target a branch that doesn't exist yet).
 
 **Derive the branch name once** and reuse it for all subsequent steps:
 
@@ -91,7 +115,7 @@ Process items in topological order (roots first, then dependents). For each item
 
 **Plan auto-approval:** The parent plan has been approved by the human, so child work issues are **auto-approved**. Root issues get `claude-ready` (not `needs-human-review`). This eliminates the need for individual `/go` approvals on each work item.
 
-Use the `$BRANCH` variable derived in Step 3 for the `TARGET_BRANCH` marker in every child issue:
+**If a feature branch was created** (Option B in Step 3), use the `$BRANCH` variable for the `TARGET_BRANCH` marker. **If no feature branch** (Option A), omit the `TARGET_BRANCH` marker entirely — the issue-worker defaults to `main` when no marker is present.
 
 ```bash
 gh issue create \
@@ -99,7 +123,7 @@ gh issue create \
   --label "<claude-ready OR blocked>" \
   --body "$(cat <<ISSUE_EOF
 <!-- PARENT_PLAN: #<plan-issue-number> -->
-<!-- TARGET_BRANCH: $BRANCH -->
+$([ -n "$BRANCH" ] && echo "<!-- TARGET_BRANCH: $BRANCH -->")
 
 ### Objective
 
@@ -124,7 +148,7 @@ ISSUE_EOF
 )"
 ```
 
-**IMPORTANT:** Every child issue body MUST begin with the `<!-- PARENT_PLAN: #<plan-issue-number> -->` marker followed by the `<!-- TARGET_BRANCH: $BRANCH -->` marker. The PARENT_PLAN marker is used by downstream workflows to cascade approval. The TARGET_BRANCH marker tells the issue-worker which branch to target.
+**IMPORTANT:** Every child issue body MUST begin with the `<!-- PARENT_PLAN: #<plan-issue-number> -->` marker. The PARENT_PLAN marker is used by downstream workflows to cascade approval. When a feature branch exists, include the `<!-- TARGET_BRANCH: $BRANCH -->` marker on the next line — this tells the issue-worker which branch to target. When no feature branch was created, **omit the TARGET_BRANCH marker entirely** (do not set it to "main" — absence is the signal to use the default).
 
 **Labeling rules:**
 - Items with NO dependencies: label `claude-ready` (auto-approved via parent plan approval)
