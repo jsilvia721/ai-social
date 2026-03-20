@@ -7,6 +7,7 @@
 #   ./scripts/bug-monitor.sh                    # defaults: 5min poll, error level
 #   ./scripts/bug-monitor.sh -i 120 -s warn     # 2min poll, include warnings
 #   ./scripts/bug-monitor.sh -n                  # dry run
+#   ./scripts/bug-monitor.sh -d                  # dry-run auto-route (logs decisions, labels needs-human-review)
 #   ./scripts/bug-monitor.sh -l /aws/lambda/foo  # specific log group (repeatable)
 #
 # Requirements:
@@ -23,26 +24,29 @@ set -euo pipefail
 POLL_INTERVAL=300          # seconds between polls (default: 5 minutes)
 SEVERITY="error"           # minimum severity: "error" or "warn"
 DRY_RUN=false              # if true, print actions without executing
+DRY_RUN_AUTO_ROUTE=false   # if true, log auto-route decisions but label needs-human-review instead
 MAX_ISSUES_PER_CYCLE=5     # safety guard: max issues created per poll cycle
 MAX_SELF_ISSUES_PER_CYCLE=2  # max self-health issues per poll cycle (separate from app bugs)
 MIN_COUNT_THRESHOLD=1      # skip errors seen fewer than this many times (unless FATAL)
 COOLDOWN_SECONDS=1800      # don't re-check the same fingerprint within this window (CloudWatch only)
+IGNORE_FILE="scripts/config/bug-monitor-ignore.conf"  # patterns to skip (one regex per line)
 LOG_DIR="./logs/bug-monitor"
 LABEL_BUG="bug-report"
-LABEL_TRIAGE="needs-human-review"
+LABEL_TRIAGE="claude-ready"
 LABEL_BUG_MONITOR_HEALTH="bug-monitor-health"
 
 # User-specified log groups (empty = auto-discover)
 declare -a LOG_GROUPS=()
 
 # --- Parse flags --------------------------------------------------------------
-while getopts "i:s:nl:" opt; do
+while getopts "i:s:nl:d" opt; do
   case $opt in
     i) POLL_INTERVAL=$OPTARG ;;
     s) SEVERITY=$OPTARG ;;
     n) DRY_RUN=true ;;
     l) LOG_GROUPS+=("$OPTARG") ;;
-    *) echo "Usage: $0 [-i interval] [-s error|warn] [-n] [-l log-group]" && exit 1 ;;
+    d) DRY_RUN_AUTO_ROUTE=true ;;
+    *) echo "Usage: $0 [-i interval] [-s error|warn] [-n] [-l log-group] [-d]" && exit 1 ;;
   esac
 done
 
@@ -328,6 +332,212 @@ set_cooldown() {
   echo "${fingerprint}|$(date +%s)" >> "$COOLDOWN_FILE"
 }
 
+# --- Ignore list --------------------------------------------------------------
+# Returns 0 (true) if the message matches a pattern in the ignore file
+is_ignored() {
+  local message="$1"
+  if [ ! -f "$IGNORE_FILE" ]; then
+    return 1
+  fi
+
+  while IFS= read -r pattern; do
+    # Skip comments and empty lines
+    [[ -z "$pattern" || "$pattern" =~ ^[[:space:]]*# ]] && continue
+    if echo "$message" | grep -iqE "$pattern" 2>/dev/null; then
+      return 0
+    fi
+  done < "$IGNORE_FILE"
+  return 1
+}
+
+# --- Daily rate limiting ------------------------------------------------------
+# State files in daemon-shared dir track daily issue counts.
+# Format: fingerprint|epoch_timestamp (one line per issue created)
+DAILY_RATE_FILE="${DAEMON_STATE_DIR}/bug-autofix-daily.log"
+MAX_PER_FINGERPRINT_PER_DAY=3
+MAX_AUTOROUTED_PER_DAY=5
+
+# Initialize daily rate state (clean entries older than 24h)
+init_daily_rate() {
+  ensure_state_dir
+  if [ ! -f "$DAILY_RATE_FILE" ]; then
+    touch "$DAILY_RATE_FILE"
+    return
+  fi
+  # Prune entries older than 24 hours
+  local cutoff=$(( $(date +%s) - 86400 ))
+  local tmp
+  tmp=$(mktemp)
+  while IFS='|' read -r fp ts; do
+    [ -z "$fp" ] && continue
+    if [ "$ts" -gt "$cutoff" ] 2>/dev/null; then
+      echo "${fp}|${ts}" >> "$tmp"
+    fi
+  done < "$DAILY_RATE_FILE"
+  mv "$tmp" "$DAILY_RATE_FILE"
+}
+
+# Count issues created for a fingerprint in the last 24h
+daily_count_for_fingerprint() {
+  local fingerprint="$1"
+  local cutoff=$(( $(date +%s) - 86400 ))
+  local count=0
+  while IFS='|' read -r fp ts; do
+    [ -z "$fp" ] && continue
+    if [ "$fp" = "$fingerprint" ] && [ "$ts" -gt "$cutoff" ] 2>/dev/null; then
+      count=$((count + 1))
+    fi
+  done < "$DAILY_RATE_FILE"
+  echo "$count"
+}
+
+# Count total auto-routed issues in the last 24h
+daily_total_autorouted() {
+  local cutoff=$(( $(date +%s) - 86400 ))
+  local count=0
+  while IFS='|' read -r fp ts; do
+    [ -z "$fp" ] && continue
+    if [ "$ts" -gt "$cutoff" ] 2>/dev/null; then
+      count=$((count + 1))
+    fi
+  done < "$DAILY_RATE_FILE"
+  echo "$count"
+}
+
+# Record an auto-routed issue creation
+record_daily_autoroute() {
+  local fingerprint="$1"
+  ensure_state_dir
+  echo "${fingerprint}|$(date +%s)" >> "$DAILY_RATE_FILE"
+}
+
+# Check if a fingerprint is within daily rate limits.
+# Returns 0 if allowed, 1 if rate-limited.
+# Echoes "fp" if fingerprint limit hit, "total" if daily total hit, "" if OK.
+check_daily_rate_limit() {
+  local fingerprint="$1"
+  local fp_count
+  fp_count=$(daily_count_for_fingerprint "$fingerprint")
+  if [ "$fp_count" -ge "$MAX_PER_FINGERPRINT_PER_DAY" ]; then
+    echo "fp"
+    return 1
+  fi
+  local total
+  total=$(daily_total_autorouted)
+  if [ "$total" -ge "$MAX_AUTOROUTED_PER_DAY" ]; then
+    echo "total"
+    return 1
+  fi
+  echo ""
+  return 0
+}
+
+# --- Per-file fix throttle ----------------------------------------------------
+# Tracks files modified by auto-fix PRs. New bugs touching same files → human review.
+AUTOFIX_FILES_LOG="${DAEMON_STATE_DIR}/autofix-files.log"
+
+# Record files modified by an auto-fix PR
+# Called by the issue-daemon after a bug-report PR merges.
+# Format: filepath|epoch_timestamp
+record_autofix_files() {
+  local files="$1"  # newline-separated list of file paths
+  ensure_state_dir
+  local now
+  now=$(date +%s)
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    echo "${f}|${now}" >> "$AUTOFIX_FILES_LOG"
+  done <<< "$files"
+}
+
+# Check if any of the given files were recently modified by an auto-fix
+# $1 = newline-separated list of file paths to check
+# Returns 0 if overlap found (should throttle), 1 if OK
+check_autofix_file_overlap() {
+  local files="$1"
+  if [ ! -f "$AUTOFIX_FILES_LOG" ]; then
+    return 1
+  fi
+  local cutoff=$(( $(date +%s) - 86400 ))
+  while IFS= read -r check_file; do
+    [ -z "$check_file" ] && continue
+    while IFS='|' read -r logged_file ts; do
+      [ -z "$logged_file" ] && continue
+      if [ "$logged_file" = "$check_file" ] && [ "$ts" -gt "$cutoff" ] 2>/dev/null; then
+        return 0  # overlap found
+      fi
+    done < "$AUTOFIX_FILES_LOG"
+  done <<< "$files"
+  return 1
+}
+
+# Prune autofix files older than 24h
+prune_autofix_files() {
+  if [ ! -f "$AUTOFIX_FILES_LOG" ]; then
+    return
+  fi
+  local cutoff=$(( $(date +%s) - 86400 ))
+  local tmp
+  tmp=$(mktemp)
+  while IFS='|' read -r f ts; do
+    [ -z "$f" ] && continue
+    if [ "$ts" -gt "$cutoff" ] 2>/dev/null; then
+      echo "${f}|${ts}" >> "$tmp"
+    fi
+  done < "$AUTOFIX_FILES_LOG"
+  mv "$tmp" "$AUTOFIX_FILES_LOG"
+}
+
+# --- Fix chain depth tracking -------------------------------------------------
+# Tracks auto-fix chain depth to prevent cascading fix loops.
+# Format: issue_number|parent_issue|epoch_timestamp
+AUTOFIX_CHAIN_LOG="${DAEMON_STATE_DIR}/autofix-chain.log"
+
+# Record an auto-fix issue and its parent (if any).
+# Parent is determined by correlating: if a bug was filed within 30 min of
+# an auto-fix PR merge, the merged PR's source issue is the parent.
+record_autofix_chain() {
+  local issue_number="$1"
+  local parent_issue="${2:-0}"  # 0 = no parent (first in chain)
+  ensure_state_dir
+  echo "${issue_number}|${parent_issue}|$(date +%s)" >> "$AUTOFIX_CHAIN_LOG"
+}
+
+# Get the chain depth for a potential new auto-fix.
+# $1 = parent issue number (the issue whose fix may have caused this new bug)
+# Returns the depth (0 = no chain, 1 = one prior auto-fix, etc.)
+get_autofix_chain_depth() {
+  local parent_issue="$1"
+  if [ ! -f "$AUTOFIX_CHAIN_LOG" ] || [ "$parent_issue" = "0" ]; then
+    echo "0"
+    return
+  fi
+
+  local depth=0
+  local current="$parent_issue"
+  # Walk the chain backwards (max 10 iterations to prevent infinite loops)
+  local max_walk=10
+  while [ "$max_walk" -gt 0 ] && [ "$current" != "0" ]; do
+    local found=false
+    while IFS='|' read -r issue parent ts; do
+      if [ "$issue" = "$current" ]; then
+        depth=$((depth + 1))
+        current="$parent"
+        found=true
+        break
+      fi
+    done < "$AUTOFIX_CHAIN_LOG"
+    if [ "$found" = false ]; then
+      break
+    fi
+    max_walk=$((max_walk - 1))
+  done
+  echo "$depth"
+}
+
+# shellcheck disable=SC2034 # Used by issue-daemon when correlating auto-fix chains
+MAX_AUTOFIX_CHAIN_DEPTH=2
+
 # --- Deduplication against GitHub issues --------------------------------------
 # Returns the issue URL if a matching open issue exists, empty string otherwise
 find_existing_issue() {
@@ -472,7 +682,13 @@ _Filed automatically by bug-monitor daemon_
 EOF
 )
 
-  local labels="${LABEL_BUG},${LABEL_TRIAGE}"
+  local effective_triage="$LABEL_TRIAGE"
+  if [ "$DRY_RUN_AUTO_ROUTE" = true ] && [ "$LABEL_TRIAGE" = "claude-ready" ]; then
+    log "[AUTO-ROUTE DRY RUN] Would label claude-ready, actually labeling needs-human-review: ${title}"
+    effective_triage="needs-human-review"
+  fi
+
+  local labels="${LABEL_BUG},${effective_triage}"
   if [ -n "$environment" ] && [ "$environment" != "unknown" ]; then
     labels="${labels},env:${environment}"
   fi
@@ -552,6 +768,13 @@ process_error() {
     fp=$(generate_fingerprint "$source" "$msg")
   fi
 
+  # Check ignore list before any processing
+  if is_ignored "$msg"; then
+    log "Ignoring error matching ignore list: $(echo "$msg" | head -c 80)"
+    echo "0"
+    return
+  fi
+
   # Environment-scoped cooldown key
   local cooldown_key="$fp"
   if [ -n "$environment" ]; then
@@ -627,7 +850,59 @@ process_error() {
     return
   fi
 
-  # Create new issue
+  # --- Circuit breaker checks before auto-routing ---
+  # Check daily rate limits (per-fingerprint and total)
+  local rate_limit_reason
+  rate_limit_reason=$(check_daily_rate_limit "$fp") || true
+  if [ -n "$rate_limit_reason" ]; then
+    if [ "$rate_limit_reason" = "fp" ]; then
+      log "Rate limited: fingerprint ${fp:0:12} hit ${MAX_PER_FINGERPRINT_PER_DAY}/day limit, routing to human review"
+    else
+      log "Rate limited: daily auto-route cap (${MAX_AUTOROUTED_PER_DAY}/day) reached, routing to human review"
+    fi
+    # Fall through to create issue but force needs-human-review label
+    local save_triage="$LABEL_TRIAGE"
+    LABEL_TRIAGE="needs-human-review"
+    local issue_number
+    issue_number=$(create_bug_issue \
+      "$msg" "$source" "$stack" "$url" \
+      "$err_count" "$first_seen" "$last_seen" "$fp" "$metadata" "$environment")
+    LABEL_TRIAGE="$save_triage"
+    [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$cooldown_key"
+    mark_seen_this_cycle "$fp"
+    if [ -n "$issue_number" ]; then
+      echo "$issue_number"
+    else
+      echo "0"
+    fi
+    return
+  fi
+
+  # Check per-file fix throttle: if suggested files overlap with recently auto-fixed files
+  if [ -n "$stack" ]; then
+    local suggested
+    suggested=$(extract_suggested_files "$stack")
+    if [ -n "$suggested" ] && check_autofix_file_overlap "$suggested"; then
+      log "File throttle: suggested files overlap with recent auto-fix, routing to human review"
+      local save_triage="$LABEL_TRIAGE"
+      LABEL_TRIAGE="needs-human-review"
+      local issue_number
+      issue_number=$(create_bug_issue \
+        "$msg" "$source" "$stack" "$url" \
+        "$err_count" "$first_seen" "$last_seen" "$fp" "$metadata" "$environment")
+      LABEL_TRIAGE="$save_triage"
+      [ "$source_type" = "CLOUDWATCH" ] && set_cooldown "$cooldown_key"
+      mark_seen_this_cycle "$fp"
+      if [ -n "$issue_number" ]; then
+        echo "$issue_number"
+      else
+        echo "0"
+      fi
+      return
+    fi
+  fi
+
+  # Create new issue (auto-routed with claude-ready label)
   local issue_number
   issue_number=$(create_bug_issue \
     "$msg" "$source" "$stack" "$url" \
@@ -637,6 +912,8 @@ process_error() {
   mark_seen_this_cycle "$fp"
 
   if [ -n "$issue_number" ]; then
+    # Record for daily rate tracking
+    record_daily_autoroute "$fp"
     echo "$issue_number"
   else
     echo "0"
@@ -901,7 +1178,7 @@ save_poll_time() {
 }
 
 # --- Main loop ----------------------------------------------------------------
-log "Started (interval=${POLL_INTERVAL}s, severity=${SEVERITY}, dry_run=${DRY_RUN})"
+log "Started (interval=${POLL_INTERVAL}s, severity=${SEVERITY}, dry_run=${DRY_RUN}, dry_run_auto_route=${DRY_RUN_AUTO_ROUTE})"
 if [ ${#LOG_GROUPS[@]} -gt 0 ]; then
   log "Monitoring specific log groups: ${LOG_GROUPS[*]}"
 else
@@ -912,6 +1189,8 @@ while true; do
   local_issues_created=0
   since_ms=$(get_last_poll_ms)
   init_cycle_dedup
+  init_daily_rate
+  prune_autofix_files
 
   log "--- Poll cycle start (since=$(ms_to_human "$since_ms")) ---"
 
