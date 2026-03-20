@@ -171,76 +171,6 @@ attach_to_session() {
   exec tmux attach -t "$session"
 }
 
-# --- CI Health display --------------------------------------------------------
-
-show_ci_health() {
-  echo ""
-  echo "CI Health:"
-
-  # Check if CI monitoring is disabled
-  if [ -f "$DAEMON_STATE_DIR/ci-monitor-disabled" ] || [ "${CI_MONITOR_DISABLED:-}" = "1" ]; then
-    echo "  Status: disabled"
-    return
-  fi
-
-  local state_file="${CI_MONITOR_STATE_FILE:-${DAEMON_STATE_DIR}/ci-monitor-state}"
-  local now
-  now=$(date +%s)
-
-  # No state file = clean start
-  if [ ! -f "$state_file" ]; then
-    echo "  No data"
-    return
-  fi
-
-  # Count entries by status
-  # Format: run_id|status|fingerprint|detected_epoch|rerun_epoch|issue_number|workflow_name
-  local rerunning=0 filed=0 resolved=0
-  while IFS='|' read -r rid st fp det re iss wf; do
-    [ -z "$rid" ] && continue
-    case "$st" in
-      rerunning) rerunning=$((rerunning + 1)) ;;
-      filed) filed=$((filed + 1)) ;;
-      resolved) resolved=$((resolved + 1)) ;;
-    esac
-  done < "$state_file"
-
-  # Last check timestamp from file modification time
-  local last_check=""
-  # macOS: stat -f%m; Linux: stat -c%Y
-  local file_mtime
-  file_mtime=$(stat -f%m "$state_file" 2>/dev/null || stat -c%Y "$state_file" 2>/dev/null || echo "")
-  if [ -n "$file_mtime" ]; then
-    local age=$((now - file_mtime))
-    last_check=$(format_elapsed "$age")
-    echo "  Last check: ${last_check} ago"
-  fi
-
-  echo "  Tracked: rerunning: ${rerunning}, filed: ${filed}, resolved: ${resolved}"
-
-  # GitHub issue count (only with -g flag)
-  if [ "$GITHUB" -eq 1 ]; then
-    local open_count
-    open_count=$(gh issue list --label ci-failure --state open --json number -q 'length' 2>/dev/null || echo "0")
-    echo "  GitHub: ${open_count} open issues (ci-failure)"
-  fi
-
-  # Verbose: show last 5 entries
-  if [ "$VERBOSE" -eq 1 ]; then
-    echo "    --- recent entries ---"
-    # Format: run_id|status|fingerprint|detected_epoch|rerun_epoch|issue_number|workflow_name
-    tail -5 "$state_file" | while IFS='|' read -r rid st fp det re iss wf; do
-      [ -z "$rid" ] && continue
-      local age_str=""
-      if [ -n "$det" ]; then
-        local age=$((now - det))
-        age_str=$(format_elapsed "$age")
-      fi
-      printf '    run:%s  %-10s  %-20s  %s ago\n' "$rid" "$st" "$wf" "$age_str"
-    done
-  fi
-}
-
 # --- Display ------------------------------------------------------------------
 
 show_status() {
@@ -309,7 +239,7 @@ show_status() {
   if [ "$active_count" -eq 0 ]; then
     echo ""
     echo "No active workers."
-    show_ci_health
+
     return
   fi
 

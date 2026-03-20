@@ -40,8 +40,6 @@ HEARTBEAT_INTERVAL=30      # seconds between heartbeat writes
 STALE_THRESHOLD=300        # seconds before a heartbeat is considered stale (5 min)
 TMUX_MODE="auto"           # "auto" (detect), "on" (force), "off" (disable)
 LABEL_NEEDS_REBASE="needs-manual-rebase"
-LABEL_CI_FAILURE="ci-failure"
-CI_MONITOR_RERUN_TIMEOUT=600  # 10 min timeout for CI reruns
 
 # --- Parse flags --------------------------------------------------------------
 while getopts "w:i:b:T:t:" opt; do
@@ -70,10 +68,6 @@ log() {
 # shellcheck source=scripts/lib/daemon-state.sh
 source "scripts/lib/daemon-state.sh"
 ensure_state_dir
-
-# Source CI health monitor (depends on daemon-state.sh ci_monitor_* functions)
-# shellcheck source=scripts/lib/ci-health-monitor.sh
-source "scripts/lib/ci-health-monitor.sh"
 
 # Source conflict resolver early — cleanup_stale_conflict_worktrees is called during init
 # shellcheck source=scripts/lib/conflict-resolver.sh
@@ -122,9 +116,6 @@ done
 
 # Clean up stale conflict worktrees from a previous run (crash recovery)
 cleanup_stale_conflict_worktrees
-
-# Clean up stale ACK files from a previous run (crash recovery)
-cleanup_stale_ack_files
 
 # Reap orphaned processes matching a pattern with ppid=1 (parent daemon died).
 # $1 — pgrep pattern, $2 — label for log messages
@@ -851,106 +842,6 @@ EOF
   remove_worker "$self_pid"
 }
 
-# Push a rebased conflict branch and verify CI passes.
-# Handles success/failure via library functions. No worker slot consumed.
-# $1 — PR number, $2 — base branch (default: main)
-push_and_verify_conflict() {
-  local pr_number="$1"
-  local base_branch="${2:-main}"
-  local worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
-  if push_rebased_branch "$pr_number"; then
-    log "Push succeeded for PR #${pr_number}, polling CI..."
-    local ci_result=0
-    poll_ci_status "$pr_number" 900 || ci_result=$?
-    if [ "$ci_result" -eq 0 ]; then
-      handle_resolution_success "$pr_number" "$base_branch" "$worktree_path"
-      log "Conflict resolved for PR #${pr_number} — CI passed"
-    else
-      handle_resolution_failure "$pr_number" "CI checks failed after rebase" "$base_branch"
-      log "CI failed after rebase for PR #${pr_number}"
-    fi
-  else
-    handle_resolution_failure "$pr_number" "Push --force-with-lease failed" "$base_branch"
-    log "Push failed for PR #${pr_number}"
-  fi
-}
-
-# --- Conflict resolver agent function -----------------------------------------
-run_conflict_resolver() {
-  local pr_number="$1"
-  local head_branch="$2"
-  local base_branch="${3:-main}"
-
-  # Validate inputs before use in shell commands and Claude prompt
-  _validate_pr_number "$pr_number" || return 1
-  _validate_branch_name "$head_branch" || return 1
-  _validate_branch_name "$base_branch" || return 1
-
-  local log_file="$LOG_DIR/conflict-pr-${pr_number}.log"
-
-  log "Starting conflict-resolver agent for PR #${pr_number} (branch: ${head_branch}, base: ${base_branch})"
-
-  local worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${pr_number}"
-
-  # Record start time
-  local start_time
-  start_time=$(date +%s)
-
-  # Run Claude conflict-resolver agent in the worktree
-  # shellcheck disable=SC2086
-  (perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
-    $STDBUF_PREFIX claude -p "$(cat <<EOF
-You are the conflict-resolver agent. Resolve merge conflicts on PR #${pr_number} (branch: ${head_branch}).
-
-Read the PR with: gh pr view ${pr_number} --json title,body,headRefName,baseRefName
-
-The worktree is at ${worktree_path}. A rebase was already attempted and aborted.
-Fetch, rebase onto origin/${base_branch}, resolve conflicts following your agent instructions,
-run ci:check, and push with --force-with-lease.
-
-If you cannot resolve the conflicts, exit with a non-zero code.
-EOF
-)" \
-    --agent "conflict-resolver" \
-    $TMUX_FLAGS \
-    --max-budget-usd "$MAX_BUDGET" \
-    --allowedTools "Bash,Edit,Glob,Grep,Read,Write" \
-    2>&1 | tee -a "$log_file") &
-  local claude_pid=$!
-
-  # Start heartbeat writer
-  local hb_pid
-  hb_pid=$(start_heartbeat "$pr_number" "$claude_pid")
-
-  # Wait for Claude to finish
-  wait "$claude_pid"
-  local exit_code=$?
-
-  # Stop heartbeat
-  stop_heartbeat "$hb_pid" "$pr_number"
-
-  local end_time
-  end_time=$(date +%s)
-  local runtime=$(( end_time - start_time ))
-
-  # Get our own PID for cleanup (Bash 3 compatible)
-  local self_pid
-  self_pid=$(sh -c 'echo $PPID')
-
-  if [ $exit_code -eq 0 ]; then
-    log "Conflict-resolver for PR #${pr_number} completed successfully (${runtime}s)"
-    handle_resolution_success "$pr_number" "$base_branch" "$worktree_path"
-  else
-    log "Conflict-resolver for PR #${pr_number} failed (exit code: $exit_code, ${runtime}s)"
-    handle_resolution_failure "$pr_number" "Agent exited with code $exit_code" "$base_branch"
-  fi
-
-  # Clean up worktree
-  cleanup_conflict_worktree "$pr_number"
-  kill_worker_tmux_session "$pr_number"
-  remove_worker "$self_pid"
-}
-
 # --- Plan writer function -----------------------------------------------------
 run_plan_writer() {
   local issue_number="$1"
@@ -1052,9 +943,19 @@ log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGE
 log "Watching for issues labeled '${LABEL_RESUME}', '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', '${LABEL_PLAN}', '${LABEL_BUG_INVESTIGATE}', and '${LABEL_READY}'..."
 log "PID file: ${DAEMON_PID_FILE} (send SIGUSR1 to toggle drain mode)"
 
+RECONCILE_INTERVAL=5  # reconcile every N poll cycles (~5 min at 60s interval)
+cycle_count=0
+
 while true; do
   # Reset per-cycle spawn deduplication set
   spawned_this_cycle=""
+  cycle_count=$((cycle_count + 1))
+
+  # --- 0. Periodic reconciliation (every RECONCILE_INTERVAL cycles) ---
+  # Catches issues stuck in claude-wip with no active worker during long daemon runs.
+  if [ $((cycle_count % RECONCILE_INTERVAL)) -eq 0 ]; then
+    reconcile_orphaned_wip_issues
+  fi
 
   # --- 1. Drain mode check ---
   if is_drain_mode; then
@@ -1115,7 +1016,7 @@ while true; do
           gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
           gh issue comment "$w_issue" --body "Worker process died unexpectedly (PID $w_pid no longer running). Transitioning to \`$LABEL_INTERRUPTED\` for auto-retry." 2>/dev/null || true
         else
-          # Non-workers (plan, plan-writer, bug-investigate, conflict-resolver) are not idempotent — block for manual review
+          # Non-workers (plan, plan-writer, bug-investigate) are not idempotent — block for manual review
           gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
           gh issue comment "$w_issue" --body "Worker process died unexpectedly (PID $w_pid, type: $w_type). Transitioning to \`$LABEL_BLOCKED\` — manual review required since $w_type tasks are not idempotent." 2>/dev/null || true
         fi
@@ -1196,8 +1097,6 @@ while true; do
           stale_log_file="$LOG_DIR/plan-writer-${w_issue}.log"
         elif [ "$w_type" = "bug-investigate" ]; then
           stale_log_file="$LOG_DIR/bug-investigate-${w_issue}.log"
-        elif [ "$w_type" = "conflict-resolver" ]; then
-          stale_log_file="$LOG_DIR/conflict-pr-${w_issue}.log"
         fi
         log "Worker PID $w_pid for issue #${w_issue} appears stalled (no heartbeat for ${stale_min}m)"
         gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
@@ -1207,8 +1106,48 @@ while true; do
     fi
   done < "$PID_FILE"
 
-  # --- Priority -1: CI health monitor (runs inline, no worker slot) ---
-  check_ci_health || true
+  # --- Lightweight CI failure check (replaces ci-health-monitor.sh) ---
+  # Query open daemon PRs with failing CI. If a PR has had failing checks for >30 min,
+  # file a bug-report issue for the issue-worker to fix. Runs inline, no worker slot.
+  ci_fail_prs=$(gh pr list --state open --json number,headRefName,statusCheckRollup,updatedAt \
+    -q '[.[] | select(.headRefName | startswith("issue-")) | select(.statusCheckRollup != null) | select([.statusCheckRollup[] | select(.conclusion == "FAILURE")] | length > 0)] | .[] | @json' 2>/dev/null || echo "")
+  if [ -n "$ci_fail_prs" ]; then
+    while IFS= read -r pr_json; do
+      ci_pr_num=$(echo "$pr_json" | jq -r '.number')
+      ci_pr_updated=$(echo "$pr_json" | jq -r '.updatedAt')
+      # Check if updated >30 min ago (stale failure, not a just-pushed PR)
+      # Strip fractional seconds (.123Z -> Z) for macOS date compatibility
+      ci_pr_updated_clean=$(echo "$ci_pr_updated" | sed 's/\.[0-9]*Z$/Z/')
+      ci_updated_epoch=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$ci_pr_updated_clean" +%s 2>/dev/null || date -d "$ci_pr_updated" +%s 2>/dev/null || echo "0")
+      ci_age=$(( now_epoch - ci_updated_epoch ))
+      if [ "$ci_age" -ge 1800 ]; then
+        # Check if we already filed an issue for this PR's CI failure
+        ci_marker="$LOG_DIR/.ci-fail-filed-${ci_pr_num}"
+        if [ ! -f "$ci_marker" ]; then
+          log "PR #${ci_pr_num} has failing CI for >30 min — filing bug-report for issue-worker"
+          ci_issue_url=$(gh issue create \
+            --title "CI failure on PR #${ci_pr_num}" \
+            --label "bug-report,claude-ready" \
+            --body "PR #${ci_pr_num} has failing CI checks for >30 minutes. Investigate and fix the CI failure. PR URL: $(gh pr view "$ci_pr_num" --json url -q '.url' 2>/dev/null || echo "unknown")" \
+            2>/dev/null || echo "")
+          if [ -n "$ci_issue_url" ]; then
+            echo "$now_epoch" > "$ci_marker"
+            log "Filed CI failure issue: $ci_issue_url"
+          fi
+        fi
+      fi
+    done <<< "$ci_fail_prs"
+  fi
+  # Clean up stale CI failure markers for PRs that are no longer open or no longer failing
+  for ci_marker_file in "$LOG_DIR"/.ci-fail-filed-*; do
+    [ -f "$ci_marker_file" ] || continue
+    marker_pr="${ci_marker_file##*.ci-fail-filed-}"
+    # Remove marker if >24h old (allows re-filing for regressions)
+    marker_epoch=$(cat "$ci_marker_file" 2>/dev/null || echo "0")
+    if [ $(( now_epoch - marker_epoch )) -ge 86400 ]; then
+      rm -f "$ci_marker_file"
+    fi
+  done
 
   active=$(active_worker_count)
   available_slots=$(( MAX_WORKERS - active ))
@@ -1286,84 +1225,6 @@ while true; do
       active=$(active_worker_count)
       available_slots=$(( MAX_WORKERS - active ))
     fi
-    fi
-
-    # --- Priority 0.75a: CI failure investigation (elevated) ---
-    if is_rate_limit_paused; then available_slots=0; fi
-    if [ "$available_slots" -gt 0 ]; then
-      ci_bug_issues=$(gh issue list \
-        --state open \
-        --label "$LABEL_BUG_INVESTIGATE" \
-        --label "$LABEL_CI_FAILURE" \
-        --limit "$available_slots" \
-        --json number,title \
-        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
-
-      if [ -n "$ci_bug_issues" ]; then
-        while IFS= read -r issue_json; do
-          number=$(echo "$issue_json" | jq -r '.number')
-          title=$(echo "$issue_json" | jq -r '.title')
-
-          wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
-          if [ "$wip_check" -gt 0 ]; then
-            log "Skipping CI bug issue #${number} (already WIP)"
-            continue
-          fi
-
-          if echo "$spawned_this_cycle" | grep -qw "$number"; then
-            log "Skipping issue #${number} (already spawned this cycle)"
-            continue
-          fi
-
-          run_bug_investigator "$number" "$title" &
-          record_worker "$!" "$number" "bug-investigate"
-          spawned_this_cycle="$spawned_this_cycle $number"
-          log "Spawned bug-investigator PID $! for CI failure issue #${number}"
-        done <<< "$ci_bug_issues"
-
-        # Recalculate available slots
-        active=$(active_worker_count)
-        available_slots=$(( MAX_WORKERS - active ))
-      fi
-    fi
-
-    # --- Priority 0.75b: CI failure implementation (elevated) ---
-    if is_rate_limit_paused; then available_slots=0; fi
-    if [ "$available_slots" -gt 0 ]; then
-      ci_ready_issues=$(gh issue list \
-        --state open \
-        --label "$LABEL_READY" \
-        --label "$LABEL_CI_FAILURE" \
-        --limit "$available_slots" \
-        --json number,title \
-        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
-
-      if [ -n "$ci_ready_issues" ]; then
-        while IFS= read -r issue_json; do
-          number=$(echo "$issue_json" | jq -r '.number')
-          title=$(echo "$issue_json" | jq -r '.title')
-
-          wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
-          if [ "$wip_check" -gt 0 ]; then
-            log "Skipping CI ready issue #${number} (already WIP)"
-            continue
-          fi
-
-          if echo "$spawned_this_cycle" | grep -qw "$number"; then
-            log "Skipping issue #${number} (already spawned this cycle)"
-            continue
-          fi
-
-          run_worker "$number" "$title" &
-          record_worker "$!" "$number" "worker"
-          spawned_this_cycle="$spawned_this_cycle $number"
-          log "Spawned worker PID $! for CI failure ready issue #${number}"
-        done <<< "$ci_ready_issues"
-
-        # Recalculate available slots
-        active=$(active_worker_count)
-        available_slots=$(( MAX_WORKERS - active ))
-      fi
     fi
 
     # --- Priority 1: Approved plans (create work issues quickly) ---
@@ -1532,20 +1393,19 @@ while true; do
       fi
     fi
 
-    # --- Priority 3: Conflict resolution (lowest priority) ---
-    # Detect daemon PRs with merge conflicts and attempt resolution.
-    # Clean rebases run in-process (no worker slot consumed).
-    # Agent-assisted resolution spawns a Claude agent and consumes a worker slot.
-    # Processes at most 1 PR per poll cycle (sequential safety).
+    # --- Priority 3: Conflict resolution (lowest priority, inline, no worker slot) ---
+    # Detect daemon PRs with merge conflicts. Attempt clean rebase or mechanical
+    # lockfile resolution. Non-mechanical conflicts → label needs-manual-rebase.
+    # Processes at most 1 PR per poll cycle.
     conflict_pr=""
     conflict_branch=""
     conflict_base=""
 
-    # First: check newly detected conflicting PRs (iterate all candidates)
+    # First: check newly detected conflicting PRs
     conflicting_json=$(detect_conflicting_prs 2>/dev/null || echo "[]")
     select_conflict_candidate "$conflicting_json" || true
 
-    # Second: check needs-manual-rebase PRs eligible for retry
+    # Second: check needs-manual-rebase PRs eligible for retry (base branch advanced)
     if [ -z "$conflict_pr" ]; then
       rebase_prs=$(gh pr list --state open --label "$LABEL_NEEDS_REBASE" \
         --json number,headRefName,baseRefName \
@@ -1555,9 +1415,7 @@ while true; do
           pr_num=$(echo "$pr_json" | jq -r '.number')
           pr_branch=$(echo "$pr_json" | jq -r '.headRefName')
           pr_base=$(echo "$pr_json" | jq -r '.baseRefName')
-          # Null guard: default empty/null baseRefName to "main"
           [ -n "$pr_base" ] && [ "$pr_base" != "null" ] || pr_base="main"
-          # Validate before use
           _validate_pr_number "$pr_num" 2>/dev/null || continue
           _validate_branch_name "$pr_branch" 2>/dev/null || continue
           _validate_branch_name "$pr_base" 2>/dev/null || continue
@@ -1573,101 +1431,45 @@ while true; do
 
     # Process the selected conflict PR (at most 1 per cycle)
     if [ -n "$conflict_pr" ] && [ -n "$conflict_branch" ]; then
-      # Acquire ACK lock — skip if another instance/cycle is already processing this PR
-      if ! acquire_conflict_ack "$conflict_pr"; then
-        log "Skipping conflict PR #${conflict_pr} — ACK already held"
-      else
-        log "Processing conflict PR #${conflict_pr} (branch: ${conflict_branch}, base: ${conflict_base})"
-        ensure_conflict_state_dir
+      log "Processing conflict PR #${conflict_pr} (branch: ${conflict_branch}, base: ${conflict_base})"
+      ensure_conflict_state_dir
+      worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${conflict_pr}"
 
-        # Step 1: Attempt clean rebase
-        rebase_result=0
-        attempt_clean_rebase "$conflict_pr" "$conflict_branch" "$conflict_base" || rebase_result=$?
+      rebase_result=0
+      attempt_clean_rebase "$conflict_pr" "$conflict_branch" "$conflict_base" || rebase_result=$?
 
-        if [ "$rebase_result" -eq 0 ]; then
-          # Clean rebase succeeded — push and poll CI in-process (no worker slot)
-          log "Clean rebase succeeded for PR #${conflict_pr}, pushing..."
-          push_and_verify_conflict "$conflict_pr" "$conflict_base"
-          cleanup_conflict_worktree "$conflict_pr"
-          release_conflict_ack "$conflict_pr"
-
-        elif [ "$rebase_result" -eq 1 ]; then
-          # Rebase has conflicts — attempt_clean_rebase aborted the rebase, so we
-          # need to go through handle_mechanical_conflicts which re-runs the rebase
-          # to get back into conflicted state and can properly classify conflicts.
-          # handle_mechanical_conflicts checks is_mechanical_conflict internally;
-          # if non-mechanical conflicts exist it aborts and returns 1.
-          mechanical_result=0
-          handle_mechanical_conflicts "$conflict_pr" "$conflict_base" || mechanical_result=$?
-
-          if [ "$mechanical_result" -eq 0 ]; then
-            # Mechanical resolution succeeded — push and poll CI in-process
-            log "Mechanical conflict resolution succeeded for PR #${conflict_pr}, pushing..."
-            push_and_verify_conflict "$conflict_pr" "$conflict_base"
-            cleanup_conflict_worktree "$conflict_pr"
-            release_conflict_ack "$conflict_pr"
-          else
-            # Non-mechanical conflicts — check for excluded files before spawning agent.
-            # Re-run rebase to get into conflicted state for is_excluded_conflict check.
-            worktree_path="${REPO_ROOT}/.claude/worktrees/conflict-pr-${conflict_pr}"
-            git -C "$worktree_path" rebase "origin/${conflict_base}" 2>/dev/null || true
-
-            if is_excluded_conflict "$conflict_pr" "$worktree_path"; then
-              log "PR #${conflict_pr} has excluded file conflicts — labeling for manual rebase"
-              git -C "$worktree_path" rebase --abort 2>/dev/null || true
-              handle_resolution_failure "$conflict_pr" "Conflicts in excluded files (prisma migrations, sst.config.ts, etc.)" "$conflict_base"
-              cleanup_conflict_worktree "$conflict_pr"
-              release_conflict_ack "$conflict_pr"
-            else
-              git -C "$worktree_path" rebase --abort 2>/dev/null || true
-              # Defense-in-depth: check PID_FILE for existing conflict-resolver on same PR
-              if grep -q ":${conflict_pr}:.*:conflict-resolver$" "$PID_FILE" 2>/dev/null; then
-                log "PID_FILE already has conflict-resolver entry for PR #${conflict_pr} — skipping"
-                release_conflict_ack "$conflict_pr"
-                cleanup_conflict_worktree "$conflict_pr"
-              else
-                # Spawn agent if slot available
-                active=$(active_worker_count)
-                available_slots=$(( MAX_WORKERS - active ))
-                if [ "$available_slots" -gt 0 ]; then
-                  if echo "$spawned_this_cycle" | grep -qw "$conflict_pr"; then
-                    log "Skipping issue #${conflict_pr} (already spawned this cycle)"
-                    release_conflict_ack "$conflict_pr"
-                    cleanup_conflict_worktree "$conflict_pr"
-                  else
-                    log "Spawning conflict-resolver agent for PR #${conflict_pr}"
-                    run_conflict_resolver "$conflict_pr" "$conflict_branch" "$conflict_base" &
-                    record_worker "$!" "$conflict_pr" "conflict-resolver"
-                    spawned_this_cycle="$spawned_this_cycle $conflict_pr"
-                    log "Spawned conflict-resolver PID $! for PR #${conflict_pr}"
-                    # Update ACK to record the agent's PID (not the daemon's) so that
-                    # liveness checks track the actual lock holder. If the daemon restarts
-                    # while the agent is running, the ACK won't be prematurely cleaned up.
-                    local ack_file="$LOG_DIR/conflict-state/pr-${conflict_pr}.ack"
-                    if [ -f "$ack_file" ]; then
-                      cat > "$ack_file" <<ACK_UPDATE
-pid=$!
-ts=$(date +%s)
-pr=${conflict_pr}
-ACK_UPDATE
-                    fi
-                  fi
-                else
-                  log "No worker slots available for conflict-resolver on PR #${conflict_pr}, will retry next cycle"
-                  cleanup_conflict_worktree "$conflict_pr"
-                  release_conflict_ack "$conflict_pr"
-                fi
-              fi
-            fi
-          fi
-
+      if [ "$rebase_result" -eq 0 ]; then
+        # Clean rebase succeeded — push (CI runs automatically on push)
+        if push_rebased_branch "$conflict_pr"; then
+          handle_resolution_success "$conflict_pr" "$conflict_base" "$worktree_path"
+          log "Conflict resolved for PR #${conflict_pr} — rebased and pushed"
         else
-          # rebase_result == 2 — unexpected error
-          log "Unexpected error during rebase for PR #${conflict_pr}"
-          handle_resolution_failure "$conflict_pr" "Unexpected error during rebase" "$conflict_base"
-          cleanup_conflict_worktree "$conflict_pr"
-          release_conflict_ack "$conflict_pr"
+          handle_resolution_failure "$conflict_pr" "Push --force-with-lease failed" "$conflict_base"
         fi
+        cleanup_conflict_worktree "$conflict_pr"
+
+      elif [ "$rebase_result" -eq 1 ]; then
+        # Conflicts — try mechanical lockfile resolution
+        mechanical_result=0
+        handle_mechanical_conflicts "$conflict_pr" "$conflict_base" || mechanical_result=$?
+
+        if [ "$mechanical_result" -eq 0 ]; then
+          if push_rebased_branch "$conflict_pr"; then
+            handle_resolution_success "$conflict_pr" "$conflict_base" "$worktree_path"
+            log "Mechanical conflict resolved for PR #${conflict_pr}"
+          else
+            handle_resolution_failure "$conflict_pr" "Push --force-with-lease failed after lockfile resolution" "$conflict_base"
+          fi
+        else
+          # Non-mechanical conflicts — label for manual rebase (no agent spawn)
+          handle_resolution_failure "$conflict_pr" "Non-mechanical conflicts require manual resolution" "$conflict_base"
+        fi
+        cleanup_conflict_worktree "$conflict_pr"
+
+      else
+        # rebase_result == 2 — unexpected error
+        handle_resolution_failure "$conflict_pr" "Unexpected error during rebase" "$conflict_base"
+        cleanup_conflict_worktree "$conflict_pr"
       fi
     fi
   else
