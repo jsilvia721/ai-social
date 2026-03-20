@@ -4,6 +4,9 @@ import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { normalizeMessage } from "@/lib/normalize-error";
+import { checkRateLimit } from "@/lib/rate-limit";
+
+const ERRORS_RATE_LIMIT = { maxRequests: 10, windowMs: 60_000 };
 
 const errorReportSchema = z.object({
   message: z.string().min(1).max(1000),
@@ -14,6 +17,23 @@ const errorReportSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const ip =
+    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+    request.headers.get("x-real-ip") ||
+    "anonymous";
+
+  const rateResult = checkRateLimit(`errors:${ip}`, ERRORS_RATE_LIMIT);
+  if (!rateResult.allowed) {
+    const retryAfterSeconds = Math.ceil(rateResult.retryAfterMs / 1000);
+    return NextResponse.json(
+      { error: "Too many requests" },
+      {
+        status: 429,
+        headers: { "Retry-After": String(retryAfterSeconds) },
+      }
+    );
+  }
+
   const body = await request.json().catch(() => null);
   if (body === null) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
