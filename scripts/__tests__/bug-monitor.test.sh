@@ -1110,6 +1110,458 @@ else
   fail "process_error uses cycle-level dedup" "is_seen_this_cycle call exists" "not found"
 fi
 
+# --- Test ignore list ---------------------------------------------------------
+echo ""
+echo "=== Ignore List Tests ==="
+echo ""
+
+echo "is_ignored function:"
+
+# Create temp ignore file
+IGNORE_TEST_DIR=$(mktemp -d)
+IGNORE_FILE="$IGNORE_TEST_DIR/ignore.conf"
+cat > "$IGNORE_FILE" <<'IGNOREEOF'
+# This is a comment
+DeprecationWarning
+GET.*favicon\.ico.*404
+Content-Security-Policy.*chrome-extension
+
+IGNOREEOF
+
+# Re-implement is_ignored for testing
+is_ignored() {
+  local message="$1"
+  if [ ! -f "$IGNORE_FILE" ]; then
+    return 1
+  fi
+  while IFS= read -r pattern; do
+    [[ -z "$pattern" || "$pattern" =~ ^[[:space:]]*# ]] && continue
+    if echo "$message" | grep -iqE "$pattern" 2>/dev/null; then
+      return 0
+    fi
+  done < "$IGNORE_FILE"
+  return 1
+}
+
+if is_ignored "DeprecationWarning: something old"; then
+  pass "matches DeprecationWarning pattern"
+else
+  fail "matches DeprecationWarning pattern" "ignored" "not ignored"
+fi
+
+if is_ignored "GET /favicon.ico 404 Not Found"; then
+  pass "matches favicon 404 pattern"
+else
+  fail "matches favicon 404 pattern" "ignored" "not ignored"
+fi
+
+if is_ignored "Content-Security-Policy violation from chrome-extension://abc"; then
+  pass "matches CSP chrome-extension pattern"
+else
+  fail "matches CSP chrome-extension pattern" "ignored" "not ignored"
+fi
+
+if is_ignored "TypeError: Cannot read property 'foo' of null"; then
+  fail "does not match real errors" "not ignored" "ignored"
+else
+  pass "does not match real errors"
+fi
+
+if is_ignored "FATAL OutOfMemoryError"; then
+  fail "does not match FATAL errors" "not ignored" "ignored"
+else
+  pass "does not match FATAL errors"
+fi
+
+# Test with missing ignore file
+IGNORE_FILE="$IGNORE_TEST_DIR/nonexistent.conf"
+if is_ignored "DeprecationWarning: something"; then
+  fail "returns false when ignore file missing" "not ignored" "ignored"
+else
+  pass "returns false when ignore file missing"
+fi
+
+rm -rf "$IGNORE_TEST_DIR"
+
+# Verify ignore file exists in repo
+echo ""
+echo "Ignore file config:"
+if [ -f "$REPO_ROOT/scripts/config/bug-monitor-ignore.conf" ]; then
+  pass "bug-monitor-ignore.conf exists"
+else
+  fail "bug-monitor-ignore.conf exists" "file present" "not found"
+fi
+
+# Verify is_ignored is called in process_error
+if grep -q 'is_ignored' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "is_ignored function defined and used in bug-monitor.sh"
+else
+  fail "is_ignored function defined and used in bug-monitor.sh" "is_ignored exists" "not found"
+fi
+
+# --- Test daily rate limiting -------------------------------------------------
+echo ""
+echo "=== Daily Rate Limiting Tests ==="
+echo ""
+
+echo "Daily rate limit functions:"
+
+RATE_TEST_DIR=$(mktemp -d)
+DAILY_RATE_FILE="$RATE_TEST_DIR/daily.log"
+MAX_PER_FINGERPRINT_PER_DAY=3
+MAX_AUTOROUTED_PER_DAY=5
+
+# Reimplement helpers for testing
+ensure_state_dir() { mkdir -p "$RATE_TEST_DIR"; }
+
+daily_count_for_fingerprint() {
+  local fingerprint="$1"
+  local cutoff=$(( $(date +%s) - 86400 ))
+  local count=0
+  if [ ! -f "$DAILY_RATE_FILE" ]; then echo "0"; return; fi
+  while IFS='|' read -r fp ts; do
+    [ -z "$fp" ] && continue
+    if [ "$fp" = "$fingerprint" ] && [ "$ts" -gt "$cutoff" ] 2>/dev/null; then
+      count=$((count + 1))
+    fi
+  done < "$DAILY_RATE_FILE"
+  echo "$count"
+}
+
+daily_total_autorouted() {
+  local cutoff=$(( $(date +%s) - 86400 ))
+  local count=0
+  if [ ! -f "$DAILY_RATE_FILE" ]; then echo "0"; return; fi
+  while IFS='|' read -r fp ts; do
+    [ -z "$fp" ] && continue
+    if [ "$ts" -gt "$cutoff" ] 2>/dev/null; then
+      count=$((count + 1))
+    fi
+  done < "$DAILY_RATE_FILE"
+  echo "$count"
+}
+
+record_daily_autoroute() {
+  local fingerprint="$1"
+  echo "${fingerprint}|$(date +%s)" >> "$DAILY_RATE_FILE"
+}
+
+check_daily_rate_limit() {
+  local fingerprint="$1"
+  local fp_count
+  fp_count=$(daily_count_for_fingerprint "$fingerprint")
+  if [ "$fp_count" -ge "$MAX_PER_FINGERPRINT_PER_DAY" ]; then
+    echo "fp"
+    return 1
+  fi
+  local total
+  total=$(daily_total_autorouted)
+  if [ "$total" -ge "$MAX_AUTOROUTED_PER_DAY" ]; then
+    echo "total"
+    return 1
+  fi
+  echo ""
+  return 0
+}
+
+touch "$DAILY_RATE_FILE"
+
+# Empty state — should be allowed
+result=$(check_daily_rate_limit "fp_test_1") || true
+assert_eq "empty state allows routing" "" "$result"
+
+# Record 3 issues for same fingerprint — should hit per-fp limit
+record_daily_autoroute "fp_test_1"
+record_daily_autoroute "fp_test_1"
+record_daily_autoroute "fp_test_1"
+
+result=$(check_daily_rate_limit "fp_test_1") || true
+assert_eq "3 issues for same fingerprint hits per-fp limit" "fp" "$result"
+
+# Different fingerprint should still be allowed
+result=$(check_daily_rate_limit "fp_test_2") || true
+assert_eq "different fingerprint still allowed" "" "$result"
+
+# Fill up to daily total limit
+record_daily_autoroute "fp_test_2"
+record_daily_autoroute "fp_test_3"
+
+result=$(check_daily_rate_limit "fp_test_4") || true
+assert_eq "5 total issues hits daily cap" "total" "$result"
+
+# Test that old entries are pruned (add entry with old timestamp)
+: > "$DAILY_RATE_FILE"
+echo "fp_old|1000000" >> "$DAILY_RATE_FILE"  # very old timestamp
+count=$(daily_total_autorouted)
+assert_eq "old entries not counted in daily total" "0" "$count"
+
+rm -rf "$RATE_TEST_DIR"
+
+# Verify structural integration
+echo ""
+echo "Daily rate limit integration:"
+
+if grep -q 'MAX_PER_FINGERPRINT_PER_DAY' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "MAX_PER_FINGERPRINT_PER_DAY defined"
+else
+  fail "MAX_PER_FINGERPRINT_PER_DAY defined" "variable exists" "not found"
+fi
+
+if grep -q 'MAX_AUTOROUTED_PER_DAY' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "MAX_AUTOROUTED_PER_DAY defined"
+else
+  fail "MAX_AUTOROUTED_PER_DAY defined" "variable exists" "not found"
+fi
+
+if grep -q 'check_daily_rate_limit' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "check_daily_rate_limit used in process_error"
+else
+  fail "check_daily_rate_limit used in process_error" "function call exists" "not found"
+fi
+
+if grep -q 'record_daily_autoroute' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "record_daily_autoroute called after issue creation"
+else
+  fail "record_daily_autoroute called after issue creation" "function call exists" "not found"
+fi
+
+# --- Test per-file fix throttle -----------------------------------------------
+echo ""
+echo "=== Per-File Fix Throttle Tests ==="
+echo ""
+
+echo "Autofix file overlap tracking:"
+
+THROTTLE_TEST_DIR=$(mktemp -d)
+AUTOFIX_FILES_LOG="$THROTTLE_TEST_DIR/autofix-files.log"
+
+record_autofix_files() {
+  local files="$1"
+  local now
+  now=$(date +%s)
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    echo "${f}|${now}" >> "$AUTOFIX_FILES_LOG"
+  done <<< "$files"
+}
+
+check_autofix_file_overlap() {
+  local files="$1"
+  if [ ! -f "$AUTOFIX_FILES_LOG" ]; then
+    return 1
+  fi
+  local cutoff=$(( $(date +%s) - 86400 ))
+  while IFS= read -r check_file; do
+    [ -z "$check_file" ] && continue
+    while IFS='|' read -r logged_file ts; do
+      [ -z "$logged_file" ] && continue
+      if [ "$logged_file" = "$check_file" ] && [ "$ts" -gt "$cutoff" ] 2>/dev/null; then
+        return 0
+      fi
+    done < "$AUTOFIX_FILES_LOG"
+  done <<< "$files"
+  return 1
+}
+
+# No log file — no overlap
+if check_autofix_file_overlap "src/lib/db.ts"; then
+  fail "no overlap when log file missing" "no overlap" "overlap found"
+else
+  pass "no overlap when log file missing"
+fi
+
+# Record some files
+record_autofix_files "src/lib/db.ts
+src/app/api/posts/route.ts"
+
+# Check overlap with recorded file
+if check_autofix_file_overlap "src/lib/db.ts"; then
+  pass "detects overlap with recently auto-fixed file"
+else
+  fail "detects overlap with recently auto-fixed file" "overlap" "no overlap"
+fi
+
+# Check no overlap with different file
+if check_autofix_file_overlap "src/lib/auth.ts"; then
+  fail "no overlap with different file" "no overlap" "overlap found"
+else
+  pass "no overlap with different file"
+fi
+
+# Check old entries are not matched
+: > "$AUTOFIX_FILES_LOG"
+echo "src/lib/old.ts|1000000" >> "$AUTOFIX_FILES_LOG"
+if check_autofix_file_overlap "src/lib/old.ts"; then
+  fail "old entries not matched" "no overlap" "overlap found"
+else
+  pass "old entries not matched (>24h ago)"
+fi
+
+rm -rf "$THROTTLE_TEST_DIR"
+
+# Verify structural integration
+echo ""
+echo "Per-file throttle integration:"
+
+if grep -q 'AUTOFIX_FILES_LOG' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "AUTOFIX_FILES_LOG defined"
+else
+  fail "AUTOFIX_FILES_LOG defined" "variable exists" "not found"
+fi
+
+if grep -q 'check_autofix_file_overlap' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "check_autofix_file_overlap used in process_error"
+else
+  fail "check_autofix_file_overlap used in process_error" "function call exists" "not found"
+fi
+
+# --- Test fix chain depth tracking --------------------------------------------
+echo ""
+echo "=== Fix Chain Depth Tests ==="
+echo ""
+
+echo "Autofix chain depth tracking:"
+
+CHAIN_TEST_DIR=$(mktemp -d)
+AUTOFIX_CHAIN_LOG="$CHAIN_TEST_DIR/autofix-chain.log"
+
+record_autofix_chain() {
+  local issue_number="$1"
+  local parent_issue="${2:-0}"
+  echo "${issue_number}|${parent_issue}|$(date +%s)" >> "$AUTOFIX_CHAIN_LOG"
+}
+
+get_autofix_chain_depth() {
+  local parent_issue="$1"
+  if [ ! -f "$AUTOFIX_CHAIN_LOG" ] || [ "$parent_issue" = "0" ]; then
+    echo "0"
+    return
+  fi
+  local depth=0
+  local current="$parent_issue"
+  local max_walk=10
+  while [ "$max_walk" -gt 0 ] && [ "$current" != "0" ]; do
+    local found=false
+    while IFS='|' read -r issue parent ts; do
+      if [ "$issue" = "$current" ]; then
+        depth=$((depth + 1))
+        current="$parent"
+        found=true
+        break
+      fi
+    done < "$AUTOFIX_CHAIN_LOG"
+    if [ "$found" = false ]; then
+      break
+    fi
+    max_walk=$((max_walk - 1))
+  done
+  echo "$depth"
+}
+
+# No chain log — depth 0
+depth=$(get_autofix_chain_depth "100")
+assert_eq "no chain log gives depth 0" "0" "$depth"
+
+# No parent — depth 0
+touch "$AUTOFIX_CHAIN_LOG"
+depth=$(get_autofix_chain_depth "0")
+assert_eq "no parent gives depth 0" "0" "$depth"
+
+# Single auto-fix: issue 100 filed, no parent
+record_autofix_chain "100" "0"
+# New bug caused by fix for 100: depth of parent 100 = 1
+depth=$(get_autofix_chain_depth "100")
+assert_eq "depth 1: parent 100 is in chain (100→0)" "1" "$depth"
+
+# Issue 101 filed with parent 100, now check depth if 101 causes another bug
+record_autofix_chain "101" "100"
+depth=$(get_autofix_chain_depth "101")
+assert_eq "depth 2: parent 101→100→0 (should trigger block)" "2" "$depth"
+
+# Even deeper: 102 caused by 101
+record_autofix_chain "102" "101"
+depth=$(get_autofix_chain_depth "102")
+assert_eq "depth 3: parent 102→101→100→0" "3" "$depth"
+
+rm -rf "$CHAIN_TEST_DIR"
+
+# Verify structural integration
+echo ""
+echo "Fix chain depth integration:"
+
+if grep -q 'MAX_AUTOFIX_CHAIN_DEPTH' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "MAX_AUTOFIX_CHAIN_DEPTH defined"
+else
+  fail "MAX_AUTOFIX_CHAIN_DEPTH defined" "variable exists" "not found"
+fi
+
+if grep -q 'AUTOFIX_CHAIN_LOG' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "AUTOFIX_CHAIN_LOG defined"
+else
+  fail "AUTOFIX_CHAIN_LOG defined" "variable exists" "not found"
+fi
+
+# --- Test dry-run-auto-route flag ---------------------------------------------
+echo ""
+echo "=== Dry-Run Auto-Route Tests ==="
+echo ""
+
+echo "DRY_RUN_AUTO_ROUTE flag:"
+
+# Verify the flag is defined in bug-monitor.sh
+if grep -q 'DRY_RUN_AUTO_ROUTE=false' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "DRY_RUN_AUTO_ROUTE defaults to false"
+else
+  fail "DRY_RUN_AUTO_ROUTE defaults to false" "default false" "not found"
+fi
+
+# Verify -d flag is parsed
+if grep -q 'd) DRY_RUN_AUTO_ROUTE=true' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "-d flag sets DRY_RUN_AUTO_ROUTE"
+else
+  fail "-d flag sets DRY_RUN_AUTO_ROUTE" "-d handler exists" "not found"
+fi
+
+# Verify auto-route dry run logic in create_bug_issue
+if grep -q 'AUTO-ROUTE DRY RUN' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "auto-route dry run logging present in create_bug_issue"
+else
+  fail "auto-route dry run logging present in create_bug_issue" "log message exists" "not found"
+fi
+
+# Verify LABEL_TRIAGE is now claude-ready
+if grep -q 'LABEL_TRIAGE="claude-ready"' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "LABEL_TRIAGE defaults to claude-ready"
+else
+  fail "LABEL_TRIAGE defaults to claude-ready" "claude-ready" "not found"
+fi
+
+# --- Test init_daily_rate in main loop ----------------------------------------
+echo ""
+echo "=== Main Loop Integration Tests ==="
+echo ""
+
+echo "Main loop calls new functions:"
+
+if grep -q 'init_daily_rate' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "init_daily_rate called in main loop"
+else
+  fail "init_daily_rate called in main loop" "function call exists" "not found"
+fi
+
+if grep -q 'prune_autofix_files' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "prune_autofix_files called in main loop"
+else
+  fail "prune_autofix_files called in main loop" "function call exists" "not found"
+fi
+
+# Verify IGNORE_FILE is defined
+if grep -q 'IGNORE_FILE=' "$REPO_ROOT/scripts/bug-monitor.sh"; then
+  pass "IGNORE_FILE config variable defined"
+else
+  fail "IGNORE_FILE config variable defined" "variable exists" "not found"
+fi
+
 # Test that shellcheck passes
 echo ""
 echo "Shellcheck:"
