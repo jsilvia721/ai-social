@@ -136,14 +136,12 @@ else
 fi
 
 # ==============================================================================
-# Part 5: Plan-executor, bug-investigator, plan-writer get tmux + worktree
+# Part 5: Plan-executor gets tmux + worktree
 # ==============================================================================
 echo ""
 echo "Other worker types get tmux + worktree:"
 
 plan_executor_body=$(extract_function 'run_plan_executor' "$DAEMON_SCRIPT")
-bug_investigator_body=$(extract_function 'run_bug_investigator' "$DAEMON_SCRIPT")
-plan_writer_body=$(extract_function 'run_plan_writer' "$DAEMON_SCRIPT")
 
 # Plan-executor
 if echo "$plan_executor_body" | grep -q '\-\-worktree'; then
@@ -158,31 +156,8 @@ else
   fail "run_plan_executor uses TMUX_FLAGS (--tmux=classic)" "found" "not found"
 fi
 
-# Bug-investigator
-if echo "$bug_investigator_body" | grep -q '\-\-worktree'; then
-  pass "run_bug_investigator uses --worktree"
-else
-  fail "run_bug_investigator uses --worktree" "found" "not found"
-fi
-
-if echo "$bug_investigator_body" | grep -q 'TMUX_FLAGS'; then
-  pass "run_bug_investigator uses TMUX_FLAGS (--tmux=classic)"
-else
-  fail "run_bug_investigator uses TMUX_FLAGS (--tmux=classic)" "found" "not found"
-fi
-
-# Plan-writer
-if echo "$plan_writer_body" | grep -q '\-\-worktree'; then
-  pass "run_plan_writer uses --worktree"
-else
-  fail "run_plan_writer uses --worktree" "found" "not found"
-fi
-
-if echo "$plan_writer_body" | grep -q 'TMUX_FLAGS'; then
-  pass "run_plan_writer uses TMUX_FLAGS (--tmux=classic)"
-else
-  fail "run_plan_writer uses TMUX_FLAGS (--tmux=classic)" "found" "not found"
-fi
+# Note: bug-investigator and plan-writer removed in Phase 1 consolidation.
+# Their responsibilities are now handled by issue-worker.
 
 # ==============================================================================
 # Part 6: Resume path gets tmux session
@@ -281,19 +256,7 @@ else
   fail "run_plan_executor calls kill_worker_tmux_session" "found" "not found"
 fi
 
-# run_bug_investigator calls kill_worker_tmux_session
-if echo "$bug_investigator_body" | grep -q 'kill_worker_tmux_session'; then
-  pass "run_bug_investigator calls kill_worker_tmux_session"
-else
-  fail "run_bug_investigator calls kill_worker_tmux_session" "found" "not found"
-fi
-
-# run_plan_writer calls kill_worker_tmux_session
-if echo "$plan_writer_body" | grep -q 'kill_worker_tmux_session'; then
-  pass "run_plan_writer calls kill_worker_tmux_session"
-else
-  fail "run_plan_writer calls kill_worker_tmux_session" "found" "not found"
-fi
+# Note: bug-investigator and plan-writer tmux cleanup checks removed (Phase 1 consolidation)
 
 # Wall-clock timeout handler calls kill_worker_tmux_session
 assert_grep "wall-clock timeout calls kill_worker_tmux_session" \

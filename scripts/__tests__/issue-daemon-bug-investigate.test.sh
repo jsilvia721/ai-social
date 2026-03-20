@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# issue-daemon-bug-investigate.test.sh — Tests for bug-investigate support in issue-daemon.sh
+# issue-daemon-bug-investigate.test.sh — Tests for bug-report routing in issue-daemon.sh
+#
+# Phase 1 consolidation: bug-report issues now route to issue-worker directly
+# (previously routed to a separate bug-investigator agent).
 #
 # Run: bash scripts/__tests__/issue-daemon-bug-investigate.test.sh
 
@@ -39,86 +42,87 @@ assert_grep() {
   fi
 }
 
+assert_not_grep() {
+  local description="$1"
+  local pattern="$2"
+  local file="$3"
+  if grep -qE "$pattern" "$file"; then
+    fail "$description" "pattern '$pattern' NOT found" "found"
+  else
+    pass "$description"
+  fi
+}
+
 echo ""
-echo "=== Bug-investigate daemon support tests ==="
+echo "=== Bug-report routing tests (Phase 1 consolidation) ==="
 echo ""
 
-# --- Config vars --------------------------------------------------------------
-echo "Configuration variables:"
+# --- Agent consolidation (bug-investigator removed) ---------------------------
+echo "Agent consolidation:"
 
-assert_grep "LABEL_BUG_INVESTIGATE config var exists" \
-  '^LABEL_BUG_INVESTIGATE=' "$DAEMON_SCRIPT"
-
-assert_grep "LABEL_BUG_INVESTIGATE is 'bug-investigate'" \
-  'LABEL_BUG_INVESTIGATE="bug-investigate"' "$DAEMON_SCRIPT"
-
-assert_grep "LABEL_BUG_PLANNED config var exists" \
-  '^LABEL_BUG_PLANNED=' "$DAEMON_SCRIPT"
-
-assert_grep "LABEL_BUG_PLANNED is 'bug-planned'" \
-  'LABEL_BUG_PLANNED="bug-planned"' "$DAEMON_SCRIPT"
-
-# --- Function definition ------------------------------------------------------
-echo ""
-echo "run_bug_investigator function:"
-
-assert_grep "run_bug_investigator function defined" \
+assert_not_grep "run_bug_investigator function removed" \
   '^run_bug_investigator\(\)' "$DAEMON_SCRIPT"
 
-assert_grep "uses bug-investigator agent" \
+assert_not_grep "bug-investigator agent no longer referenced" \
   'agent "bug-investigator"' "$DAEMON_SCRIPT"
 
-assert_grep "uses correct tools (Bash,Glob,Grep,Read)" \
-  'allowedTools "Bash,Glob,Grep,Read"' "$DAEMON_SCRIPT"
+assert_not_grep "LABEL_BUG_INVESTIGATE config var removed" \
+  '^LABEL_BUG_INVESTIGATE=' "$DAEMON_SCRIPT"
 
-assert_grep "log file uses bug-investigate prefix" \
-  'bug-investigate-\$\{issue_number\}\.log' "$DAEMON_SCRIPT"
+assert_not_grep "LABEL_BUG_PLANNED config var removed" \
+  '^LABEL_BUG_PLANNED=' "$DAEMON_SCRIPT"
 
-assert_grep "removes LABEL_BUG_INVESTIGATE label" \
-  'remove-label.*LABEL_BUG_INVESTIGATE' "$DAEMON_SCRIPT"
+assert_not_grep "bug-investigate worker type removed" \
+  'record_worker.*"bug-investigate"' "$DAEMON_SCRIPT"
 
-assert_grep "adds LABEL_WIP label" \
-  'add-label.*LABEL_WIP' "$DAEMON_SCRIPT"
-
-assert_grep "handles rate limit detection" \
-  'detect_rate_limit.*exit_code.*log_file' "$DAEMON_SCRIPT"
-
-assert_grep "starts heartbeat" \
-  'start_heartbeat.*issue_number.*claude_pid' "$DAEMON_SCRIPT"
-
-assert_grep "stops heartbeat" \
-  'stop_heartbeat.*hb_pid.*issue_number' "$DAEMON_SCRIPT"
-
-# --- Priority tier -------------------------------------------------------------
+# --- New routing: bug-report → issue-worker -----------------------------------
 echo ""
-echo "Priority tier in main loop:"
+echo "Bug-report routing to issue-worker:"
 
-assert_grep "polls for bug-investigate labeled issues" \
-  'LABEL_BUG_INVESTIGATE' "$DAEMON_SCRIPT"
+assert_grep "LABEL_BUG_REPORT config var exists" \
+  '^LABEL_BUG_REPORT=' "$DAEMON_SCRIPT"
 
-assert_grep "records worker with bug-investigate type" \
-  'record_worker.*bug-investigate' "$DAEMON_SCRIPT"
+assert_grep "LABEL_BUG_REPORT is 'bug-report'" \
+  'LABEL_BUG_REPORT="bug-report"' "$DAEMON_SCRIPT"
 
-# --- Startup log ---------------------------------------------------------------
+assert_grep "run_worker removes bug-report label on pickup" \
+  'remove-label.*LABEL_BUG_REPORT' "$DAEMON_SCRIPT"
+
+assert_grep "CI failure priority checks for bug-report label" \
+  'LABEL_BUG_REPORT' "$DAEMON_SCRIPT"
+
+# --- issue-worker.md has bug investigation mode --------------------------------
 echo ""
-echo "Startup log message:"
+echo "issue-worker.md bug investigation mode:"
 
-assert_grep "startup log mentions bug-investigate" \
-  "bug-investigate" "$DAEMON_SCRIPT"
+WORKER_AGENT="$REPO_ROOT/.claude/agents/issue-worker.md"
 
-# --- Stale detection -----------------------------------------------------------
+assert_grep "issue-worker has Bug Investigation Mode section" \
+  '### Bug Investigation Mode' "$WORKER_AGENT"
+
+assert_grep "triggers on bug-report label" \
+  'bug-report.*bug-investigate' "$WORKER_AGENT"
+
+assert_grep "includes investigation steps" \
+  'Investigate the codebase' "$WORKER_AGENT"
+
+assert_grep "includes escalation path for investigation failure" \
+  'cannot identify a root cause' "$WORKER_AGENT"
+
+# --- Deleted agent files -------------------------------------------------------
 echo ""
-echo "Stale detection:"
+echo "Agent files:"
 
-assert_grep "stale detection handles bug-investigate log file" \
-  'bug-investigate' "$DAEMON_SCRIPT"
+if [ ! -f "$REPO_ROOT/.claude/agents/bug-investigator.md" ]; then
+  pass "bug-investigator.md deleted"
+else
+  fail "bug-investigator.md deleted" "file not found" "file still exists"
+fi
 
 # --- Shellcheck ---------------------------------------------------------------
 echo ""
 echo "Shellcheck:"
 if command -v shellcheck &>/dev/null; then
-  # Exclude SC2034 (unused variables) — config vars like LABEL_BUG_PLANNED,
-  # LABEL_ACTIVE, LABEL_PLAN_REVIEW are defined for external reference
   if shellcheck -x -e SC2034 "$DAEMON_SCRIPT" 2>/dev/null; then
     pass "shellcheck passes on issue-daemon.sh (excluding SC2034)"
   else
