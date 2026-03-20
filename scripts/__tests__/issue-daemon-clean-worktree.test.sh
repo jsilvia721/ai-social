@@ -73,47 +73,49 @@ assert_grep "runs git clean -fd in the worktree" \
 assert_grep "logs what it cleaned" \
   'log.*[Cc]lean' "$DAEMON_SCRIPT"
 
-# --- Integration in run_worker ------------------------------------------------
+# --- Integration via agent_cleanup helper -------------------------------------
+echo ""
+echo "agent_cleanup helper integration:"
+
+# agent_cleanup calls clean_worktree (the helper encapsulates the cleanup chain)
+agent_cleanup_body=$(extract_function "agent_cleanup" "$DAEMON_SCRIPT")
+
+if echo "$agent_cleanup_body" | grep -q 'clean_worktree'; then
+  pass "agent_cleanup calls clean_worktree"
+else
+  fail "agent_cleanup calls clean_worktree" "call found" "not found"
+fi
+
+# Verify ordering: clean_worktree before remove_worker in agent_cleanup
+if echo "$agent_cleanup_body" | \
+   awk '/clean_worktree/{found_clean=1} /remove_worker/{if(found_clean) found_order=1} END{exit !found_order}'; then
+  pass "clean_worktree comes before remove_worker in agent_cleanup"
+else
+  fail "clean_worktree comes before remove_worker in agent_cleanup" "clean before remove" "wrong order or missing"
+fi
+
+# --- Integration in run_worker (via agent_cleanup) ----------------------------
 echo ""
 echo "run_worker integration:"
 
 run_worker_body=$(extract_function "run_worker" "$DAEMON_SCRIPT")
 
-if echo "$run_worker_body" | grep -q 'clean_worktree'; then
-  pass "clean_worktree is called within run_worker function"
+if echo "$run_worker_body" | grep -q 'agent_cleanup'; then
+  pass "run_worker calls agent_cleanup (which calls clean_worktree)"
 else
-  fail "clean_worktree is called within run_worker function" "call found" "not found"
+  fail "run_worker calls agent_cleanup (which calls clean_worktree)" "call found" "not found"
 fi
 
-# --- Integration in run_plan_executor -----------------------------------------
+# --- Integration in run_plan_executor (via agent_cleanup) ---------------------
 echo ""
 echo "run_plan_executor integration:"
 
 run_plan_body=$(extract_function "run_plan_executor" "$DAEMON_SCRIPT")
 
-if echo "$run_plan_body" | grep -q 'clean_worktree'; then
-  pass "clean_worktree is called within run_plan_executor function"
+if echo "$run_plan_body" | grep -q 'agent_cleanup'; then
+  pass "run_plan_executor calls agent_cleanup (which calls clean_worktree)"
 else
-  fail "clean_worktree is called within run_plan_executor function" "call found" "not found"
-fi
-
-# --- Ordering check -----------------------------------------------------------
-echo ""
-echo "Ordering (clean before remove):"
-
-# In run_worker: clean_worktree should come before remove_worker (at end of function)
-if echo "$run_worker_body" | \
-   awk '/clean_worktree/{found_clean=1} /remove_worker/{if(found_clean) found_order=1} END{exit !found_order}'; then
-  pass "clean_worktree comes before remove_worker in run_worker"
-else
-  fail "clean_worktree comes before remove_worker in run_worker" "clean before remove" "wrong order or missing"
-fi
-
-if echo "$run_plan_body" | \
-   awk '/clean_worktree/{found_clean=1} /remove_worker/{if(found_clean) found_order=1} END{exit !found_order}'; then
-  pass "clean_worktree comes before remove_worker in run_plan_executor"
-else
-  fail "clean_worktree comes before remove_worker in run_plan_executor" "clean before remove" "wrong order or missing"
+  fail "run_plan_executor calls agent_cleanup (which calls clean_worktree)" "call found" "not found"
 fi
 
 # --- No-op safety -------------------------------------------------------------

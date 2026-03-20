@@ -483,6 +483,66 @@ clear_session_id() {
   rm -f "$LOG_DIR/.session-${1}"
 }
 
+# --- Agent lifecycle helpers --------------------------------------------------
+# These helpers extract shared boilerplate from run_worker and run_plan_executor.
+# They use global variables to return multiple values (bash limitation).
+
+# Wait for a Claude process to finish and collect results.
+# Sets globals: AGENT_EXIT_CODE, AGENT_RUNTIME, AGENT_SELF_PID
+# Arguments: $1=issue_number, $2=claude_pid, $3=hb_pid, $4=start_time
+agent_wait() {
+  local issue_number="$1"
+  local claude_pid="$2"
+  local hb_pid="$3"
+  local start_time="$4"
+
+  # Wait for Claude to finish
+  wait "$claude_pid"
+  AGENT_EXIT_CODE=$?
+
+  # Stop heartbeat
+  stop_heartbeat "$hb_pid" "$issue_number"
+
+  # Compute runtime
+  local end_time
+  end_time=$(date +%s)
+  AGENT_RUNTIME=$(( end_time - start_time ))
+
+  # Get our own PID for cleanup (Bash 3 compatible)
+  AGENT_SELF_PID=$(sh -c 'echo $PPID')
+}
+
+# Clean up after an agent completes (tmux session, worktree, PID tracking).
+# Arguments: $1=issue_number, $2=self_pid
+agent_cleanup() {
+  local issue_number="$1"
+  local self_pid="$2"
+  kill_worker_tmux_session "$issue_number"
+  clean_worktree "$issue_number"
+  remove_worker "$self_pid"
+}
+
+# Check if agent hit a rate limit and handle if so.
+# Returns 0 if rate limited (caller should return), 1 if not.
+# Arguments: $1=issue_number, $2=exit_code, $3=log_file, $4=runtime,
+#            $5=worker_type_label ("Worker"|"Plan-executor"), $6=self_pid
+agent_check_rate_limit() {
+  local issue_number="$1"
+  local exit_code="$2"
+  local log_file="$3"
+  local runtime="$4"
+  local worker_type="$5"
+  local self_pid="$6"
+
+  if detect_rate_limit "$exit_code" "$log_file"; then
+    commit_wip_if_needed "$issue_number"
+    handle_rate_limit_exit "$issue_number" "$runtime" "$worker_type" "$log_file"
+    agent_cleanup "$issue_number" "$self_pid"
+    return 0
+  fi
+  return 1
+}
+
 # --- Worker function ----------------------------------------------------------
 run_worker() {
   local issue_number="$1"
@@ -604,20 +664,11 @@ EOF
   local hb_pid
   hb_pid=$(start_heartbeat "$issue_number" "$claude_pid")
 
-  # Wait for Claude to finish
-  wait "$claude_pid"
-  local exit_code=$?
-
-  # Stop heartbeat
-  stop_heartbeat "$hb_pid" "$issue_number"
-
-  local end_time
-  end_time=$(date +%s)
-  local runtime=$(( end_time - start_time ))
-
-  # Get our own PID for cleanup (Bash 3 compatible)
-  local self_pid
-  self_pid=$(sh -c 'echo $PPID')
+  # Wait for Claude, stop heartbeat, compute runtime/exit code/self_pid
+  agent_wait "$issue_number" "$claude_pid" "$hb_pid" "$start_time"
+  local exit_code=$AGENT_EXIT_CODE
+  local runtime=$AGENT_RUNTIME
+  local self_pid=$AGENT_SELF_PID
 
   # Verify a PR was actually created for this issue (regardless of exit code)
   local pr_url
@@ -644,14 +695,8 @@ EOF
     log "Worker for issue #${issue_number} completed — no PR needed (issue already marked done/closed)"
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
     clear_session_id "$issue_number"
-  elif detect_rate_limit "$exit_code" "$log_file"; then
-    # Rate limit check after success path — prevents false positives on genuine successes
-    # but catches rate limits that exit 0 (e.g., "You've hit your limit" graceful shutdown)
-    commit_wip_if_needed "$issue_number"
-    handle_rate_limit_exit "$issue_number" "$runtime" "Worker" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    clean_worktree "$issue_number"
-    remove_worker "$self_pid"
+  elif agent_check_rate_limit "$issue_number" "$exit_code" "$log_file" "$runtime" "Worker" "$self_pid"; then
+    # Rate limit detected and handled — caller returned early
     return
   else
     record_failure
@@ -671,9 +716,7 @@ EOF
     fi
   fi
 
-  kill_worker_tmux_session "$issue_number"
-  clean_worktree "$issue_number"
-  remove_worker "$self_pid"
+  agent_cleanup "$issue_number" "$self_pid"
 }
 
 # --- Plan executor function ---------------------------------------------------
@@ -726,32 +769,19 @@ EOF
   local hb_pid
   hb_pid=$(start_heartbeat "$issue_number" "$claude_pid")
 
-  # Wait for Claude to finish
-  wait "$claude_pid"
-  local exit_code=$?
-
-  # Stop heartbeat
-  stop_heartbeat "$hb_pid" "$issue_number"
-
-  local end_time
-  end_time=$(date +%s)
-  local runtime=$(( end_time - start_time ))
-
-  # Get our own PID for cleanup (Bash 3 compatible)
-  local self_pid
-  self_pid=$(sh -c 'echo $PPID')
+  # Wait for Claude, stop heartbeat, compute runtime/exit code/self_pid
+  agent_wait "$issue_number" "$claude_pid" "$hb_pid" "$start_time"
+  local exit_code=$AGENT_EXIT_CODE
+  local runtime=$AGENT_RUNTIME
+  local self_pid=$AGENT_SELF_PID
 
   if [ $exit_code -eq 0 ]; then
     log "Plan-executor for issue #${issue_number} completed successfully"
     # plan-executor handles its own label transitions (approved -> done)
     # but ensure WIP is removed if still present
     gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
-  elif detect_rate_limit "$exit_code" "$log_file"; then
-    # Rate limit check after success path — prevents false positives on genuine successes
-    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-executor" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    clean_worktree "$issue_number"
-    remove_worker "$self_pid"
+  elif agent_check_rate_limit "$issue_number" "$exit_code" "$log_file" "$runtime" "Plan-executor" "$self_pid"; then
+    # Rate limit detected and handled — caller returned early
     return
   else
     record_failure
@@ -764,9 +794,7 @@ EOF
     fi
   fi
 
-  kill_worker_tmux_session "$issue_number"
-  clean_worktree "$issue_number"
-  remove_worker "$self_pid"
+  agent_cleanup "$issue_number" "$self_pid"
 }
 
 # Push a rebased conflict branch and verify CI passes.
@@ -1047,24 +1075,62 @@ while true; do
   available_slots=$(( MAX_WORKERS - active ))
 
   if [ "$available_slots" -gt 0 ]; then
+    # --- Consolidated issue fetch (single API call per cycle) ---
+    # Replaces 8 separate gh issue list calls, saving ~420 API calls/hour.
+    # All open issues fetched once; filtered locally by label for priority routing.
+    all_open_issues=$(gh issue list --state open --limit 100 \
+      --json number,title,body,labels \
+      2>/dev/null || echo "[]")
+
+    # Helper: filter issues by label, excluding WIP, sorted by number.
+    # $1=label. Outputs one compact JSON object per line.
+    issues_with_label() {
+      echo "$all_open_issues" | jq -c \
+        --arg label "$1" \
+        --arg wip "$LABEL_WIP" \
+        '[.[] | select(
+          ([.labels[].name] | index($label)) and
+          ([.labels[].name] | index($wip) | not)
+        )] | sort_by(.number) | .[]'
+    }
+
+    # Helper: filter issues that have BOTH labels, excluding WIP.
+    # $1=label1, $2=label2. Outputs one compact JSON object per line.
+    issues_with_both_labels() {
+      echo "$all_open_issues" | jq -c \
+        --arg l1 "$1" \
+        --arg l2 "$2" \
+        --arg wip "$LABEL_WIP" \
+        '[.[] | select(
+          ([.labels[].name] | index($l1)) and
+          ([.labels[].name] | index($l2)) and
+          ([.labels[].name] | index($wip) | not)
+        )] | sort_by(.number) | .[]'
+    }
+
+    # Helper: filter plan-label issues excluding multiple state labels.
+    issues_plan_eligible() {
+      echo "$all_open_issues" | jq -c \
+        --arg plan "$LABEL_PLAN" \
+        --arg wip "$LABEL_WIP" \
+        --arg nhr "$LABEL_NEEDS_HUMAN_REVIEW" \
+        --arg approved "$LABEL_APPROVED" \
+        --arg blocked "$LABEL_BLOCKED" \
+        --arg ldone "$LABEL_DONE" \
+        --arg active "$LABEL_ACTIVE" \
+        '[.[] | select(
+          ([.labels[].name] | index($plan)) and
+          (([.labels[].name] | index($wip) // index($nhr) // index($approved) // index($blocked) // index($ldone) // index($active)) | not)
+        )] | sort_by(.number) | .[]'
+    }
+
     # --- Priority 0: Resume manually-triggered issues (claude-resume label) ---
-    resume_issues=$(gh issue list \
-      --state open \
-      --label "$LABEL_RESUME" \
-      --limit "$available_slots" \
-      --json number,title \
-      -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
+    resume_issues=$(issues_with_label "$LABEL_RESUME")
 
     if [ -n "$resume_issues" ]; then
       while IFS= read -r issue_json; do
         number=$(echo "$issue_json" | jq -r '.number')
         title=$(echo "$issue_json" | jq -r '.title')
-
-        wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
-        if [ "$wip_check" -gt 0 ]; then
-          log "Skipping resume issue #${number} (already WIP)"
-          continue
-        fi
 
         if echo "$spawned_this_cycle" | grep -qw "$number"; then
           log "Skipping issue #${number} (already spawned this cycle)"
@@ -1086,23 +1152,12 @@ while true; do
     # Re-check rate limit pause (may have been set by kill_all_active_workers_for_rate_limit mid-cycle)
     if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
-    interrupted_issues=$(gh issue list \
-      --state open \
-      --label "$LABEL_INTERRUPTED" \
-      --limit "$available_slots" \
-      --json number,title \
-      -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
+    interrupted_issues=$(issues_with_label "$LABEL_INTERRUPTED")
 
     if [ -n "$interrupted_issues" ]; then
       while IFS= read -r issue_json; do
         number=$(echo "$issue_json" | jq -r '.number')
         title=$(echo "$issue_json" | jq -r '.title')
-
-        wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
-        if [ "$wip_check" -gt 0 ]; then
-          log "Skipping interrupted issue #${number} (already WIP)"
-          continue
-        fi
 
         if echo "$spawned_this_cycle" | grep -qw "$number"; then
           log "Skipping issue #${number} (already spawned this cycle)"
@@ -1124,12 +1179,7 @@ while true; do
     # --- Priority 0.75: CI failure issues (elevated) ---
     if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
-      ci_ready_issues=$(gh issue list \
-        --state open \
-        --label "$LABEL_CI_FAILURE" \
-        --limit "$available_slots" \
-        --json number,title,labels \
-        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
+      ci_ready_issues=$(issues_with_label "$LABEL_CI_FAILURE")
 
       if [ -n "$ci_ready_issues" ]; then
         while IFS= read -r issue_json; do
@@ -1142,11 +1192,6 @@ while true; do
             continue
           fi
 
-          wip_check=$(echo "$issue_labels" | grep -c "$LABEL_WIP" || true)
-          if [ "$wip_check" -gt 0 ]; then
-            log "Skipping CI issue #${number} (already WIP)"
-            continue
-          fi
 
           if echo "$spawned_this_cycle" | grep -qw "$number"; then
             log "Skipping issue #${number} (already spawned this cycle)"
@@ -1168,24 +1213,13 @@ while true; do
     # --- Priority 1: Approved plans (create work issues quickly) ---
     if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
-      approved_issues=$(gh issue list \
-        --state open \
-        --label "$LABEL_APPROVED" \
-        --limit "$available_slots" \
-        --json number,title,body \
-        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
+      approved_issues=$(issues_with_label "$LABEL_APPROVED")
 
       if [ -n "$approved_issues" ]; then
         while IFS= read -r issue_json; do
           number=$(echo "$issue_json" | jq -r '.number')
           title=$(echo "$issue_json" | jq -r '.title')
           body=$(echo "$issue_json" | jq -r '.body')
-
-          wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
-          if [ "$wip_check" -gt 0 ]; then
-            log "Skipping plan #${number} (already WIP)"
-            continue
-          fi
 
           if echo "$spawned_this_cycle" | grep -qw "$number"; then
             log "Skipping issue #${number} (already spawned this cycle)"
@@ -1215,32 +1249,12 @@ while true; do
     # --- Priority 1.5: Stub plan issues (issue-worker in plan-writing mode) ---
     if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
-      # Find issues labeled "plan" that are not already in progress or completed
-      plan_issues=$(gh issue list \
-        --state open \
-        --label "$LABEL_PLAN" \
-        --limit "$available_slots" \
-        --json number,title,labels \
-        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
+      plan_issues=$(issues_plan_eligible)
 
       if [ -n "$plan_issues" ]; then
         while IFS= read -r issue_json; do
           number=$(echo "$issue_json" | jq -r '.number')
           title=$(echo "$issue_json" | jq -r '.title')
-
-          # Filter out issues with exclusion labels
-          issue_labels=$(echo "$issue_json" | jq -r '.labels[].name' 2>/dev/null)
-          skip=false
-          for exclude_label in "$LABEL_NEEDS_HUMAN_REVIEW" "$LABEL_WIP" "$LABEL_APPROVED" "$LABEL_BLOCKED" "$LABEL_DONE" "$LABEL_ACTIVE"; do
-            if echo "$issue_labels" | grep -qx "$exclude_label"; then
-              skip=true
-              break
-            fi
-          done
-          if [ "$skip" = "true" ]; then
-            log "Skipping plan issue #${number} (has exclusion label)"
-            continue
-          fi
 
           if echo "$spawned_this_cycle" | grep -qw "$number"; then
             log "Skipping issue #${number} (already spawned this cycle)"
@@ -1263,23 +1277,12 @@ while true; do
     # bug-report issues are now handled by the issue-worker (investigate + fix in one session)
     if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
-      issues=$(gh issue list \
-        --state open \
-        --label "$LABEL_READY" \
-        --limit "$available_slots" \
-        --json number,title \
-        -q 'sort_by(.number) | .[] | @json' 2>/dev/null || echo "")
+      issues=$(issues_with_label "$LABEL_READY")
 
       if [ -n "$issues" ]; then
         while IFS= read -r issue_json; do
           number=$(echo "$issue_json" | jq -r '.number')
           title=$(echo "$issue_json" | jq -r '.title')
-
-          wip_check=$(gh issue view "$number" --json labels -q '.labels[].name' 2>/dev/null | grep -c "$LABEL_WIP" || true)
-          if [ "$wip_check" -gt 0 ]; then
-            log "Skipping issue #${number} (already WIP)"
-            continue
-          fi
 
           if echo "$spawned_this_cycle" | grep -qw "$number"; then
             log "Skipping issue #${number} (already spawned this cycle)"
