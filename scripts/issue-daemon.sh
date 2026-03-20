@@ -29,8 +29,7 @@ LABEL_INTERRUPTED="claude-interrupted"
 LABEL_RESUME="claude-resume"
 LABEL_HUMAN_REVIEW="needs-human-review"
 LABEL_APPROVED="claude-approved"
-LABEL_BUG_INVESTIGATE="bug-investigate"
-LABEL_BUG_PLANNED="bug-planned"
+LABEL_BUG_REPORT="bug-report"
 LABEL_PLAN="plan"
 LABEL_NEEDS_HUMAN_REVIEW="needs-human-review"
 LOG_DIR="./logs/issue-daemon"  # made absolute after REPO_ROOT is set below
@@ -563,8 +562,8 @@ run_worker() {
     # Remove interrupted label for retry
     gh issue edit "$issue_number" --remove-label "$LABEL_INTERRUPTED" --add-label "$LABEL_WIP" 2>/dev/null || true
   else
-    # Label as in-progress
-    gh issue edit "$issue_number" --remove-label "$LABEL_READY" --add-label "$LABEL_WIP" 2>/dev/null || true
+    # Label as in-progress (remove whichever pickup label applies — extra removes are no-ops)
+    gh issue edit "$issue_number" --remove-label "$LABEL_READY" --remove-label "$LABEL_BUG_REPORT" --add-label "$LABEL_WIP" 2>/dev/null || true
   fi
 
   # Check if we can resume a previous session
@@ -607,6 +606,7 @@ run_worker() {
       local claude_pid
       claude_pid=$(tmux list-panes -t "$tmux_session" -F '#{pane_pid}' 2>/dev/null | head -1)
     else
+      # shellcheck disable=SC2086
       (cd "$worktree_path" && perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
         $STDBUF_PREFIX claude -p "$resume_prompt" \
         --agent "issue-worker" \
@@ -797,88 +797,6 @@ EOF
   agent_cleanup "$issue_number" "$self_pid"
 }
 
-# --- Bug investigator function ------------------------------------------------
-run_bug_investigator() {
-  local issue_number="$1"
-  local issue_title="$2"
-  local log_file="$LOG_DIR/bug-investigate-${issue_number}.log"
-
-  log "Starting bug-investigator for issue #${issue_number}: ${issue_title}"
-
-  # Label as in-progress
-  gh issue edit "$issue_number" --remove-label "$LABEL_BUG_INVESTIGATE" --add-label "$LABEL_WIP" 2>/dev/null || true
-
-  # Record start time
-  local start_time
-  start_time=$(date +%s)
-
-  # Run Claude in background so heartbeat can run concurrently
-  # shellcheck disable=SC2086
-  (perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
-    $STDBUF_PREFIX claude -p "$(cat <<EOF
-You are the bug-investigator agent. Investigate bug issue #${issue_number}.
-
-Read the full issue with: gh issue view ${issue_number} --json title,body,labels
-
-Follow your agent instructions exactly — read the bug issue, investigate the codebase
-to find the root cause, and create a plan issue for fixing it.
-
-If you get stuck, comment on the issue and add the label "claude-blocked".
-EOF
-)" \
-    --agent "bug-investigator" \
-    --worktree \
-    $TMUX_FLAGS \
-    --max-budget-usd "$MAX_BUDGET" \
-    --allowedTools "Bash,Glob,Grep,Read" \
-    2>&1 | tee "$log_file") &
-  local claude_pid=$!
-
-  # Start heartbeat writer
-  local hb_pid
-  hb_pid=$(start_heartbeat "$issue_number" "$claude_pid")
-
-  # Wait for Claude to finish
-  wait "$claude_pid"
-  local exit_code=$?
-
-  # Stop heartbeat
-  stop_heartbeat "$hb_pid" "$issue_number"
-
-  local end_time
-  end_time=$(date +%s)
-  local runtime=$(( end_time - start_time ))
-
-  # Get our own PID for cleanup (Bash 3 compatible)
-  local self_pid
-  self_pid=$(sh -c 'echo $PPID')
-
-  if [ $exit_code -eq 0 ]; then
-    log "Bug-investigator for issue #${issue_number} completed successfully"
-    # bug-investigator handles its own label transitions (bug-investigate -> bug-planned)
-    # but ensure WIP is removed if still present
-    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
-  elif detect_rate_limit "$exit_code" "$log_file"; then
-    # Rate limit check after success path — prevents false positives on genuine successes
-    handle_rate_limit_exit "$issue_number" "$runtime" "Bug-investigator" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    remove_worker "$self_pid"
-    return
-  else
-    record_failure
-    log "Bug-investigator for issue #${issue_number} failed (exit code: $exit_code)"
-    local labels
-    labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
-    if ! echo "$labels" | grep -q "$LABEL_BLOCKED"; then
-      gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
-      gh issue comment "$issue_number" --body "Bug-investigator exited with code $exit_code. Check logs at \`$log_file\` for details." 2>/dev/null || true
-    fi
-  fi
-
-  kill_worker_tmux_session "$issue_number"
-  remove_worker "$self_pid"
-}
-
 # Push a rebased conflict branch and verify CI passes.
 # Handles success/failure via library functions. No worker slot consumed.
 # $1 — PR number, $2 — base branch (default: main)
@@ -979,87 +897,6 @@ EOF
   remove_worker "$self_pid"
 }
 
-# --- Plan writer function -----------------------------------------------------
-run_plan_writer() {
-  local issue_number="$1"
-  local issue_title="$2"
-  local log_file="$LOG_DIR/plan-writer-${issue_number}.log"
-
-  log "Starting plan-writer for issue #${issue_number}: ${issue_title}"
-
-  # Label as in-progress
-  gh issue edit "$issue_number" --add-label "$LABEL_WIP" 2>/dev/null || true
-
-  # Record start time
-  local start_time
-  start_time=$(date +%s)
-
-  # Run Claude in background so heartbeat can run concurrently
-  # shellcheck disable=SC2086
-  (perl -e 'use POSIX; POSIX::setsid(); exec @ARGV' \
-    $STDBUF_PREFIX claude -p "$(cat <<EOF
-You are the plan-writer agent. Write a full plan for stub plan issue #${issue_number}.
-
-Read the full issue with: gh issue view ${issue_number} --json title,body,labels
-
-Follow your agent instructions exactly — research the codebase, write a structured plan
-with PLAN_ITEMS markers, and update the issue.
-
-If you get stuck, comment on the issue and add the label "claude-blocked".
-EOF
-)" \
-    --agent "plan-writer" \
-    --worktree \
-    $TMUX_FLAGS \
-    --max-budget-usd "$MAX_BUDGET" \
-    --allowedTools "Bash,Glob,Grep,Read" \
-    2>&1 | tee "$log_file") &
-  local claude_pid=$!
-
-  # Start heartbeat writer
-  local hb_pid
-  hb_pid=$(start_heartbeat "$issue_number" "$claude_pid")
-
-  # Wait for Claude to finish
-  wait "$claude_pid"
-  local exit_code=$?
-
-  # Stop heartbeat
-  stop_heartbeat "$hb_pid" "$issue_number"
-
-  local end_time
-  end_time=$(date +%s)
-  local runtime=$(( end_time - start_time ))
-
-  # Get our own PID for cleanup (Bash 3 compatible)
-  local self_pid
-  self_pid=$(sh -c 'echo $PPID')
-
-  if [ $exit_code -eq 0 ]; then
-    log "Plan-writer for issue #${issue_number} completed successfully"
-    # plan-writer adds needs-human-review itself; just remove WIP
-    gh issue edit "$issue_number" --remove-label "$LABEL_WIP" 2>/dev/null || true
-  elif detect_rate_limit "$exit_code" "$log_file"; then
-    # Rate limit check after success path — prevents false positives on genuine successes
-    handle_rate_limit_exit "$issue_number" "$runtime" "Plan-writer" "$log_file"
-    kill_worker_tmux_session "$issue_number"
-    remove_worker "$self_pid"
-    return
-  else
-    record_failure
-    log "Plan-writer for issue #${issue_number} failed (exit code: $exit_code)"
-    local labels
-    labels=$(gh issue view "$issue_number" --json labels -q '.labels[].name' 2>/dev/null)
-    if ! echo "$labels" | grep -q "$LABEL_BLOCKED"; then
-      gh issue edit "$issue_number" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
-      gh issue comment "$issue_number" --body "Plan-writer exited with code $exit_code. Check logs at \`$log_file\` for details." 2>/dev/null || true
-    fi
-  fi
-
-  kill_worker_tmux_session "$issue_number"
-  remove_worker "$self_pid"
-}
-
 # --- Worker tracking via PID file ---------------------------------------------
 active_worker_count() {
   local count=0
@@ -1077,7 +914,7 @@ active_worker_count() {
 
 # --- Main loop ----------------------------------------------------------------
 log "Started (workers=$MAX_WORKERS, poll=${POLL_INTERVAL}s, budget=\$${MAX_BUDGET}, timeout=${WALL_TIMEOUT}m, tmux=$TMUX_ENABLED)"
-log "Watching for issues labeled '${LABEL_RESUME}', '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', '${LABEL_PLAN}', '${LABEL_BUG_INVESTIGATE}', and '${LABEL_READY}'..."
+log "Watching for issues labeled '${LABEL_RESUME}', '${LABEL_INTERRUPTED}', '${LABEL_APPROVED}', '${LABEL_PLAN}', '${LABEL_BUG_REPORT}', and '${LABEL_READY}'..."
 log "PID file: ${DAEMON_PID_FILE} (send SIGUSR1 to toggle drain mode)"
 
 while true; do
@@ -1143,7 +980,7 @@ while true; do
           gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_INTERRUPTED" 2>/dev/null || true
           gh issue comment "$w_issue" --body "Worker process died unexpectedly (PID $w_pid no longer running). Transitioning to \`$LABEL_INTERRUPTED\` for auto-retry." 2>/dev/null || true
         else
-          # Non-workers (plan, plan-writer, bug-investigate, conflict-resolver) are not idempotent — block for manual review
+          # Non-workers (plan, conflict-resolver) are not idempotent — block for manual review
           gh issue edit "$w_issue" --remove-label "$LABEL_WIP" --add-label "$LABEL_BLOCKED" 2>/dev/null || true
           gh issue comment "$w_issue" --body "Worker process died unexpectedly (PID $w_pid, type: $w_type). Transitioning to \`$LABEL_BLOCKED\` — manual review required since $w_type tasks are not idempotent." 2>/dev/null || true
         fi
@@ -1220,10 +1057,6 @@ while true; do
         stale_log_file="$LOG_DIR/issue-${w_issue}.log"
         if [ "$w_type" = "plan" ]; then
           stale_log_file="$LOG_DIR/plan-${w_issue}.log"
-        elif [ "$w_type" = "plan-writer" ]; then
-          stale_log_file="$LOG_DIR/plan-writer-${w_issue}.log"
-        elif [ "$w_type" = "bug-investigate" ]; then
-          stale_log_file="$LOG_DIR/bug-investigate-${w_issue}.log"
         elif [ "$w_type" = "conflict-resolver" ]; then
           stale_log_file="$LOG_DIR/conflict-pr-${w_issue}.log"
         fi
@@ -1343,42 +1176,22 @@ while true; do
     fi
     fi
 
-    # --- Priority 0.75a: CI failure investigation (elevated) ---
+    # --- Priority 0.75: CI failure issues (elevated) ---
     if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
-      ci_bug_issues=$(issues_with_both_labels "$LABEL_BUG_INVESTIGATE" "$LABEL_CI_FAILURE")
-
-      if [ -n "$ci_bug_issues" ]; then
-        while IFS= read -r issue_json; do
-          number=$(echo "$issue_json" | jq -r '.number')
-          title=$(echo "$issue_json" | jq -r '.title')
-
-          if echo "$spawned_this_cycle" | grep -qw "$number"; then
-            log "Skipping issue #${number} (already spawned this cycle)"
-            continue
-          fi
-
-          run_bug_investigator "$number" "$title" &
-          record_worker "$!" "$number" "bug-investigate"
-          spawned_this_cycle="$spawned_this_cycle $number"
-          log "Spawned bug-investigator PID $! for CI failure issue #${number}"
-        done <<< "$ci_bug_issues"
-
-        # Recalculate available slots
-        active=$(active_worker_count)
-        available_slots=$(( MAX_WORKERS - active ))
-      fi
-    fi
-
-    # --- Priority 0.75b: CI failure implementation (elevated) ---
-    if is_rate_limit_paused; then available_slots=0; fi
-    if [ "$available_slots" -gt 0 ]; then
-      ci_ready_issues=$(issues_with_both_labels "$LABEL_READY" "$LABEL_CI_FAILURE")
+      ci_ready_issues=$(issues_with_label "$LABEL_CI_FAILURE")
 
       if [ -n "$ci_ready_issues" ]; then
         while IFS= read -r issue_json; do
           number=$(echo "$issue_json" | jq -r '.number')
           title=$(echo "$issue_json" | jq -r '.title')
+          issue_labels=$(echo "$issue_json" | jq -r '.labels[].name' 2>/dev/null)
+
+          # Only pick up issues that have claude-ready or bug-report label
+          if ! echo "$issue_labels" | grep -qxE "$LABEL_READY|$LABEL_BUG_REPORT"; then
+            continue
+          fi
+
 
           if echo "$spawned_this_cycle" | grep -qw "$number"; then
             log "Skipping issue #${number} (already spawned this cycle)"
@@ -1388,7 +1201,7 @@ while true; do
           run_worker "$number" "$title" &
           record_worker "$!" "$number" "worker"
           spawned_this_cycle="$spawned_this_cycle $number"
-          log "Spawned worker PID $! for CI failure ready issue #${number}"
+          log "Spawned worker PID $! for CI failure issue #${number}"
         done <<< "$ci_ready_issues"
 
         # Recalculate available slots
@@ -1433,7 +1246,7 @@ while true; do
       fi
     fi
 
-    # --- Priority 1.25: Stub plan issues (plan-writer) ---
+    # --- Priority 1.5: Stub plan issues (issue-worker in plan-writing mode) ---
     if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       plan_issues=$(issues_plan_eligible)
@@ -1448,10 +1261,10 @@ while true; do
             continue
           fi
 
-          run_plan_writer "$number" "$title" &
-          record_worker "$!" "$number" "plan-writer"
+          run_worker "$number" "$title" &
+          record_worker "$!" "$number" "worker"
           spawned_this_cycle="$spawned_this_cycle $number"
-          log "Spawned plan-writer PID $! for issue #${number}"
+          log "Spawned worker PID $! for plan issue #${number}"
         done <<< "$plan_issues"
 
         # Recalculate available slots
@@ -1460,34 +1273,8 @@ while true; do
       fi
     fi
 
-    # --- Priority 1.5: Bug investigation issues ---
-    if is_rate_limit_paused; then available_slots=0; fi
-    if [ "$available_slots" -gt 0 ]; then
-      bug_issues=$(issues_with_label "$LABEL_BUG_INVESTIGATE")
-
-      if [ -n "$bug_issues" ]; then
-        while IFS= read -r issue_json; do
-          number=$(echo "$issue_json" | jq -r '.number')
-          title=$(echo "$issue_json" | jq -r '.title')
-
-          if echo "$spawned_this_cycle" | grep -qw "$number"; then
-            log "Skipping issue #${number} (already spawned this cycle)"
-            continue
-          fi
-
-          run_bug_investigator "$number" "$title" &
-          record_worker "$!" "$number" "bug-investigate"
-          spawned_this_cycle="$spawned_this_cycle $number"
-          log "Spawned bug-investigator PID $! for issue #${number}"
-        done <<< "$bug_issues"
-
-        # Recalculate available slots
-        active=$(active_worker_count)
-        available_slots=$(( MAX_WORKERS - active ))
-      fi
-    fi
-
-    # --- Priority 2: Ready work issues ---
+    # --- Priority 2: Ready work issues + bug reports ---
+    # bug-report issues are now handled by the issue-worker (investigate + fix in one session)
     if is_rate_limit_paused; then available_slots=0; fi
     if [ "$available_slots" -gt 0 ]; then
       issues=$(issues_with_label "$LABEL_READY")

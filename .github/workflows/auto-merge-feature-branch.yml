@@ -98,6 +98,25 @@ jobs:
               return;
             }
 
+            // Security: Never auto-merge PRs that reference bug-report issues.
+            // Bug fixes from auto-detected errors must always have human merge approval.
+            const prText = `${pr.title}\n${pr.body || ''}`;
+            const closingRefs = [...prText.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)];
+            for (const ref of closingRefs) {
+              const issueNum = parseInt(ref[1], 10);
+              try {
+                const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: issueNum });
+                const labels = issue.labels.map(l => typeof l === 'string' ? l : l.name);
+                if (labels.includes('bug-report')) {
+                  console.log(`PR references bug-report issue #${issueNum}. Skipping auto-merge — requires human approval.`);
+                  core.setOutput('found', 'false');
+                  return;
+                }
+              } catch (e) {
+                console.log(`Could not fetch issue #${issueNum}: ${e.message}. Skipping safety check for this ref.`);
+              }
+            }
+
             core.setOutput('found', 'true');
             core.setOutput('pr_number', pr.number.toString());
             core.setOutput('base_branch', baseBranch);
