@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# issue-daemon-plan-writer.test.sh — Tests for plan-writer support in issue-daemon.sh
+# issue-daemon-plan-writer.test.sh — Tests for plan stub routing in issue-daemon.sh
+#
+# Phase 1 consolidation: plan stub issues now route to issue-worker directly
+# (previously routed to a separate plan-writer agent).
 #
 # Run: bash scripts/__tests__/issue-daemon-plan-writer.test.sh
 
@@ -39,26 +42,36 @@ assert_grep() {
   fi
 }
 
-assert_grep_count() {
+assert_not_grep() {
   local description="$1"
   local pattern="$2"
-  local expected_min="$3"
-  local file="$4"
-  local count
-  count=$(grep -cE "$pattern" "$file" || true)
-  if [ "$count" -ge "$expected_min" ]; then
-    pass "$description"
+  local file="$3"
+  if grep -qE "$pattern" "$file"; then
+    fail "$description" "pattern '$pattern' NOT found" "found"
   else
-    fail "$description" "at least $expected_min matches" "$count matches"
+    pass "$description"
   fi
 }
 
 echo ""
-echo "=== Plan-writer daemon support tests ==="
+echo "=== Plan stub routing tests (Phase 1 consolidation) ==="
 echo ""
 
-# --- Config vars --------------------------------------------------------------
-echo "Configuration variables:"
+# --- Agent consolidation (plan-writer removed) --------------------------------
+echo "Agent consolidation:"
+
+assert_not_grep "run_plan_writer function removed" \
+  '^run_plan_writer\(\)' "$DAEMON_SCRIPT"
+
+assert_not_grep "plan-writer agent no longer referenced" \
+  'agent "plan-writer"' "$DAEMON_SCRIPT"
+
+assert_not_grep "plan-writer worker type removed" \
+  'record_worker.*"plan-writer"' "$DAEMON_SCRIPT"
+
+# --- New routing: plan stubs → issue-worker ------------------------------------
+echo ""
+echo "Plan stub routing to issue-worker:"
 
 assert_grep "LABEL_PLAN config var exists" \
   '^LABEL_PLAN=' "$DAEMON_SCRIPT"
@@ -66,55 +79,15 @@ assert_grep "LABEL_PLAN config var exists" \
 assert_grep "LABEL_PLAN is 'plan'" \
   'LABEL_PLAN="plan"' "$DAEMON_SCRIPT"
 
-assert_grep "LABEL_NEEDS_HUMAN_REVIEW config var exists" \
-  '^LABEL_NEEDS_HUMAN_REVIEW=' "$DAEMON_SCRIPT"
+assert_grep "plan stub priority routes to run_worker" \
+  'run_worker.*number.*title' "$DAEMON_SCRIPT"
 
-assert_grep "LABEL_NEEDS_HUMAN_REVIEW is 'needs-human-review'" \
-  'LABEL_NEEDS_HUMAN_REVIEW="needs-human-review"' "$DAEMON_SCRIPT"
+assert_grep "plan stub priority records as worker type" \
+  'record_worker.*"worker"' "$DAEMON_SCRIPT"
 
-# --- Function definition ------------------------------------------------------
+# --- Label filtering still works -----------------------------------------------
 echo ""
-echo "run_plan_writer function:"
-
-assert_grep "run_plan_writer function defined" \
-  '^run_plan_writer\(\)' "$DAEMON_SCRIPT"
-
-assert_grep "uses plan-writer agent" \
-  'agent "plan-writer"' "$DAEMON_SCRIPT"
-
-assert_grep "uses correct tools (Bash,Glob,Grep,Read)" \
-  'allowedTools "Bash,Glob,Grep,Read"' "$DAEMON_SCRIPT"
-
-assert_grep "log file uses plan-writer prefix" \
-  'plan-writer-\$\{issue_number\}\.log' "$DAEMON_SCRIPT"
-
-assert_grep "adds LABEL_WIP label on pickup" \
-  'add-label.*LABEL_WIP' "$DAEMON_SCRIPT"
-
-assert_grep "removes LABEL_WIP on success" \
-  'remove-label.*LABEL_WIP' "$DAEMON_SCRIPT"
-
-assert_grep "handles rate limit detection" \
-  'detect_rate_limit.*exit_code.*log_file' "$DAEMON_SCRIPT"
-
-assert_grep "starts heartbeat" \
-  'start_heartbeat.*issue_number.*claude_pid' "$DAEMON_SCRIPT"
-
-assert_grep "stops heartbeat" \
-  'stop_heartbeat.*hb_pid.*issue_number' "$DAEMON_SCRIPT"
-
-assert_grep "uses stdbuf wrapping" \
-  'STDBUF_PREFIX.*claude' "$DAEMON_SCRIPT"
-
-assert_grep "transitions to claude-blocked on failure" \
-  'add-label.*LABEL_BLOCKED' "$DAEMON_SCRIPT"
-
-assert_grep "comments on failure" \
-  'Plan-writer exited with code' "$DAEMON_SCRIPT"
-
-# --- Label filtering ----------------------------------------------------------
-echo ""
-echo "Label-based detection (no body inspection):"
+echo "Label filtering for plan stubs:"
 
 assert_grep "filters by plan label in main loop" \
   'label.*LABEL_PLAN' "$DAEMON_SCRIPT"
@@ -137,53 +110,38 @@ assert_grep "filters out claude-done" \
 assert_grep "filters out claude-active" \
   'LABEL_ACTIVE' "$DAEMON_SCRIPT"
 
-# --- Priority ordering --------------------------------------------------------
+# --- issue-worker.md has plan-writing mode -------------------------------------
 echo ""
-echo "Priority ordering:"
+echo "issue-worker.md plan-writing mode:"
 
-# Verify plan-writer tier appears between approved-plans and bug-investigate
-# by checking the order of priority comments in the file
-plan_writer_line=$(grep -n "Priority 1.25" "$DAEMON_SCRIPT" | head -1 | cut -d: -f1)
-bug_investigate_line=$(grep -n "Priority 1.5" "$DAEMON_SCRIPT" | head -1 | cut -d: -f1)
-approved_plans_line=$(grep -n "Priority 1:" "$DAEMON_SCRIPT" | head -1 | cut -d: -f1)
+WORKER_AGENT="$REPO_ROOT/.claude/agents/issue-worker.md"
 
-if [ -n "$plan_writer_line" ] && [ -n "$bug_investigate_line" ] && [ -n "$approved_plans_line" ]; then
-  if [ "$approved_plans_line" -lt "$plan_writer_line" ] && [ "$plan_writer_line" -lt "$bug_investigate_line" ]; then
-    pass "plan-writer tier (1.25) is between approved-plans (1) and bug-investigate (1.5)"
-  else
-    fail "plan-writer tier ordering" "approved < plan-writer < bug-investigate" "lines: approved=$approved_plans_line, plan-writer=$plan_writer_line, bug=$bug_investigate_line"
-  fi
+assert_grep "issue-worker has Plan-Writing Mode section" \
+  '### Plan-Writing Mode' "$WORKER_AGENT"
+
+assert_grep "triggers on plan label" \
+  'label.*plan' "$WORKER_AGENT"
+
+assert_grep "includes PLAN_ITEMS format" \
+  'PLAN_ITEMS_START' "$WORKER_AGENT"
+
+assert_grep "includes escalation path for decomposition failure" \
+  'cannot create independently testable work items' "$WORKER_AGENT"
+
+# --- Deleted agent files -------------------------------------------------------
+echo ""
+echo "Agent files:"
+
+if [ ! -f "$REPO_ROOT/.claude/agents/plan-writer.md" ]; then
+  pass "plan-writer.md deleted"
 else
-  fail "plan-writer tier ordering" "all priority comments found" "missing: approved=$approved_plans_line, plan-writer=$plan_writer_line, bug=$bug_investigate_line"
+  fail "plan-writer.md deleted" "file not found" "file still exists"
 fi
-
-# --- Worker tracking ----------------------------------------------------------
-echo ""
-echo "Worker tracking:"
-
-assert_grep "records worker with plan-writer type" \
-  'record_worker.*plan-writer' "$DAEMON_SCRIPT"
-
-# --- Startup log ---------------------------------------------------------------
-echo ""
-echo "Startup log message:"
-
-assert_grep "startup log mentions plan label" \
-  'LABEL_PLAN' "$DAEMON_SCRIPT"
-
-# --- Stale detection -----------------------------------------------------------
-echo ""
-echo "Stale detection:"
-
-assert_grep "stale detection handles plan-writer log file" \
-  'plan-writer' "$DAEMON_SCRIPT"
 
 # --- Shellcheck ---------------------------------------------------------------
 echo ""
 echo "Shellcheck:"
 if command -v shellcheck &>/dev/null; then
-  # Exclude SC2034 (unused variables) — config vars like LABEL_BUG_PLANNED,
-  # LABEL_ACTIVE, LABEL_PLAN_REVIEW are defined for external reference
   if shellcheck -x -e SC2034 "$DAEMON_SCRIPT" 2>/dev/null; then
     pass "shellcheck passes on issue-daemon.sh (excluding SC2034)"
   else
