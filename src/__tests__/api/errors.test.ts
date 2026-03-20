@@ -1,4 +1,5 @@
 import { prismaMock, resetPrismaMock } from "@/__tests__/mocks/prisma";
+import { _resetAllLimits } from "@/lib/rate-limit";
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 
@@ -8,10 +9,16 @@ import crypto from "crypto";
 import type { ErrorReport } from "@prisma/client";
 import { normalizeMessage } from "@/lib/normalize-error";
 
-function makeRequest(body: unknown) {
+function makeRequest(body: unknown, ip?: string) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (ip) {
+    headers["x-forwarded-for"] = ip;
+  }
   return new NextRequest("http://localhost/api/errors", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
 }
@@ -46,6 +53,7 @@ function mockReport(overrides: Partial<ErrorReport> = {}): ErrorReport {
 
 beforeEach(() => {
   resetPrismaMock();
+  _resetAllLimits();
   jest.clearAllMocks();
 });
 
@@ -174,5 +182,66 @@ describe("POST /api/errors", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe("Failed to record error report");
+  });
+
+  describe("rate limiting", () => {
+    const ip = "192.168.1.100";
+
+    it("allows requests within the rate limit", async () => {
+      const fp = fingerprint("CLIENT", validPayload.message);
+      prismaMock.errorReport.upsert.mockResolvedValue(
+        mockReport({ fingerprint: fp, count: 1 })
+      );
+
+      const res = await POST(makeRequest(validPayload, ip));
+      expect(res.status).toBe(201);
+    });
+
+    it("returns 429 when rate limit exceeded", async () => {
+      const fp = fingerprint("CLIENT", validPayload.message);
+      prismaMock.errorReport.upsert.mockResolvedValue(
+        mockReport({ fingerprint: fp, count: 1 })
+      );
+
+      // Send 10 requests (the limit)
+      for (let i = 0; i < 10; i++) {
+        await POST(makeRequest(validPayload, ip));
+      }
+
+      // 11th request should be rate limited
+      const res = await POST(makeRequest(validPayload, ip));
+      expect(res.status).toBe(429);
+
+      const body = await res.json();
+      expect(body.error).toBe("Too many requests");
+      expect(res.headers.get("Retry-After")).toBeDefined();
+    });
+
+    it("tracks rate limits per IP independently", async () => {
+      const fp = fingerprint("CLIENT", validPayload.message);
+      prismaMock.errorReport.upsert.mockResolvedValue(
+        mockReport({ fingerprint: fp, count: 1 })
+      );
+
+      // Exhaust limit for IP A
+      for (let i = 0; i < 10; i++) {
+        await POST(makeRequest(validPayload, "10.0.0.1"));
+      }
+
+      // IP B should still be allowed
+      const res = await POST(makeRequest(validPayload, "10.0.0.2"));
+      expect(res.status).toBe(201);
+    });
+
+    it("uses 'anonymous' as fallback when no IP header present", async () => {
+      const fp = fingerprint("CLIENT", validPayload.message);
+      prismaMock.errorReport.upsert.mockResolvedValue(
+        mockReport({ fingerprint: fp, count: 1 })
+      );
+
+      // First request without IP should succeed
+      const res = await POST(makeRequest(validPayload));
+      expect(res.status).toBe(201);
+    });
   });
 });
