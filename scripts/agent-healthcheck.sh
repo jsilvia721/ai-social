@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 # agent-healthcheck.sh — Docker health check for the agent container.
 #
-# Checks:
-#   1. The issue-daemon process is running
-#   2. Node.js is available
-#   3. gh CLI is authenticated (if GITHUB_TOKEN is set)
-#   4. The workspace is mounted
+# Strategy: query the status server first (fast, no side effects).
+# Fall back to process check during startup before the status server is ready.
 #
 # Exit codes:
 #   0 — healthy
@@ -13,31 +10,17 @@
 
 set -euo pipefail
 
-# Check 1: issue-daemon or node process is running
-if ! pgrep -f "issue-daemon\.sh" > /dev/null 2>&1; then
-  echo "UNHEALTHY: No agent process found"
-  exit 1
+STATUS_PORT="${AGENT_STATUS_PORT:-7420}"
+
+# Primary: status server health endpoint
+if curl -sf "http://127.0.0.1:${STATUS_PORT}/health" > /dev/null 2>&1; then
+  exit 0
 fi
 
-# Check 2: Node.js is available
-if ! node --version > /dev/null 2>&1; then
-  echo "UNHEALTHY: Node.js not available"
-  exit 1
+# Fallback during startup: check if daemon process is alive
+if pgrep -f "issue-daemon\.sh" > /dev/null 2>&1; then
+  exit 0
 fi
 
-# Check 3: gh CLI works (if token is set)
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-  if ! gh api /rate_limit > /dev/null 2>&1; then
-    echo "UNHEALTHY: gh CLI not authenticated"
-    exit 1
-  fi
-fi
-
-# Check 4: Workspace is mounted and contains package.json
-if [ ! -f /workspace/package.json ]; then
-  echo "UNHEALTHY: Workspace not mounted or missing package.json"
-  exit 1
-fi
-
-echo "HEALTHY: All checks passed"
-exit 0
+echo "UNHEALTHY: No agent process found"
+exit 1

@@ -72,8 +72,8 @@ describe("Dockerfile.agent", () => {
       expect(content).toMatch(/HEALTHCHECK/);
     });
 
-    it("uses the issue-daemon as entrypoint", () => {
-      expect(content).toMatch(/ENTRYPOINT.*issue-daemon/);
+    it("uses agent-entrypoint as entrypoint", () => {
+      expect(content).toMatch(/ENTRYPOINT.*agent-entrypoint/);
     });
 
     it("supports pinnable Claude CLI version via build arg", () => {
@@ -117,12 +117,9 @@ describe("docker-compose.agent.yml", () => {
       expect(content).toMatch(/memory:/);
     });
 
-    it("passes ANTHROPIC_API_KEY from environment", () => {
-      expect(content).toMatch(/ANTHROPIC_API_KEY/);
-    });
-
-    it("passes GITHUB_TOKEN from environment", () => {
-      expect(content).toMatch(/GITHUB_TOKEN/);
+    it("references env_file for credentials", () => {
+      expect(content).toMatch(/env_file/);
+      expect(content).toMatch(/\.env\.docker/);
     });
 
     it("does NOT hardcode any secrets", () => {
@@ -167,8 +164,8 @@ describe("scripts/agent-healthcheck.sh", () => {
     expect(content).toMatch(/pgrep.*issue-daemon/);
   });
 
-  it("checks workspace mount", () => {
-    expect(content).toMatch(/\/workspace\/package\.json/);
+  it("checks the status server health endpoint", () => {
+    expect(content).toMatch(/health/);
   });
 });
 

@@ -1,30 +1,29 @@
 # Agent Docker Setup
 
-Run the autonomous issue-daemon agent in a Docker container with resource limits, volume mounts, and health checks.
+Run the autonomous issue-daemon agent in a Docker container with resource limits, credential isolation, and a status endpoint.
 
 ## Prerequisites
 
 - Docker and Docker Compose v2
 - `ANTHROPIC_API_KEY` — Claude API key
 - `GITHUB_TOKEN` — GitHub personal access token with `repo` scope
-- `DATABASE_URL` — (optional) database connection string
+- `~/.claude` — Claude CLI auth directory (mounted read-only)
 
 ## Quick Start
 
 ```bash
-# Build the image
-docker build -f Dockerfile.agent -t ai-social-agent .
+# 1. Copy and fill in credentials
+cp .env.docker.example .env.docker
+# Edit .env.docker with your ANTHROPIC_API_KEY and GITHUB_TOKEN
 
-# Build with pinned Claude CLI version (recommended for production)
-docker build -f Dockerfile.agent --build-arg CLAUDE_CLI_VERSION=1.0.0 -t ai-social-agent .
+# 2. Build and run
+docker compose -f docker-compose.agent.yml up --build
 
-# Run with docker-compose (recommended)
-ANTHROPIC_API_KEY=sk-... GITHUB_TOKEN=ghp_... \
-  docker compose -f docker-compose.agent.yml up --build
+# 3. Check status
+curl http://localhost:7420/status | jq .
 
 # Run detached
-ANTHROPIC_API_KEY=sk-... GITHUB_TOKEN=ghp_... \
-  docker compose -f docker-compose.agent.yml up -d --build
+docker compose -f docker-compose.agent.yml up -d --build
 
 # View logs
 docker compose -f docker-compose.agent.yml logs -f agent
@@ -38,13 +37,38 @@ docker compose -f docker-compose.agent.yml down
 ```
 Host machine
 ├── Repo (mounted read-only at /workspace)
+├── ~/.claude (mounted read-only for CLI auth)
 └── Docker container (ai-social-agent)
-    ├── /workspace (ro)          ← mounted repo
-    ├── /agent-workdir/worktrees ← writable git worktrees
-    └── /agent-workdir/logs      ← daemon logs
+    ├── /workspace (ro)             ← mounted repo
+    ├── /agent-workdir/repo         ← writable clone (created by entrypoint)
+    ├── /agent-workdir/logs         ← daemon logs
+    └── :7420                       ← HTTP status endpoint
 ```
 
-The repo is mounted **read-only**. The agent creates git worktrees in `/agent-workdir/worktrees` for each issue it works on. This prevents the agent from accidentally modifying the host repo.
+The repo is mounted **read-only**. On startup, the entrypoint script (`agent-entrypoint.sh`) clones the repo into `/agent-workdir/repo` — a writable location that supports git worktree operations. The daemon runs from the clone and pushes to GitHub via the `GITHUB_TOKEN`.
+
+### Startup Flow
+
+1. **Validate** — Check required env vars (`ANTHROPIC_API_KEY`, `GITHUB_TOKEN`)
+2. **Clone** — `git clone --reference /workspace` into writable volume (fast, uses local objects)
+3. **Configure** — Set git user, remote URL, gh auth
+4. **Install** — `npm ci` for dependencies
+5. **Status server** — Start HTTP status endpoint in background
+6. **Daemon** — `exec` the issue-daemon with CLI args
+
+## Credentials
+
+All secrets live in `.env.docker` (gitignored). Never baked into the image.
+
+```bash
+cp .env.docker.example .env.docker
+```
+
+| Credential | Where it goes | How it's protected |
+|-----------|---------------|-------------------|
+| `ANTHROPIC_API_KEY` | `.env.docker` → container env | Runtime-only, gitignored file |
+| `GITHUB_TOKEN` | `.env.docker` → container env | Runtime-only, gitignored file |
+| Claude CLI auth | `~/.claude` → `/home/agent/.claude` | Read-only volume mount |
 
 ## Configuration
 
@@ -58,6 +82,8 @@ The repo is mounted **read-only**. The agent creates git worktrees in `/agent-wo
 | `AGENT_MAX_WORKERS` | No | `1` | Max parallel agent workers |
 | `AGENT_POLL_INTERVAL` | No | `60` | Seconds between issue polls |
 | `AGENT_MAX_BUDGET` | No | `50` | Max USD budget per issue |
+| `AGENT_STATUS_PORT` | No | `7420` | HTTP status endpoint port |
+| `CLAUDE_CONFIG_DIR` | No | `~/.claude` | Host path to Claude CLI config |
 
 ### Resource Limits
 
@@ -66,7 +92,7 @@ The repo is mounted **read-only**. The agent creates git worktrees in `/agent-wo
 | `AGENT_CPU_LIMIT` | `2.0` | CPU cores limit |
 | `AGENT_MEMORY_LIMIT` | `4G` | Memory limit |
 
-Override via environment:
+Override via `.env.docker` or environment:
 
 ```bash
 AGENT_CPU_LIMIT=4.0 AGENT_MEMORY_LIMIT=8G \
@@ -75,14 +101,43 @@ AGENT_CPU_LIMIT=4.0 AGENT_MEMORY_LIMIT=8G \
 
 Tmpfs disk is capped at 256MB for `/tmp`.
 
+## Status Endpoint
+
+The container runs a lightweight HTTP status server on port 7420.
+
+### `GET /status`
+
+Returns full daemon status as JSON:
+
+```json
+{
+  "timestamp": "2026-03-20T12:00:00.000Z",
+  "daemon": { "pid": 42, "running": true, "uptime_seconds": 3600 },
+  "mode": "normal",
+  "workers": {
+    "active": 1,
+    "total_tracked": 1,
+    "details": [{
+      "pid": 123, "issue": 42, "type": "worker",
+      "alive": true, "elapsed_seconds": 600,
+      "heartbeat": { "status": "fresh", "age_seconds": 15 },
+      "log_file": "issue-42.log", "log_size_bytes": 1024
+    }]
+  },
+  "circuit_breaker": { "failures_in_window": 0, "tripped": false }
+}
+```
+
+### `GET /health`
+
+Simple health check — returns `200` if daemon is running, `503` if not.
+
 ## Health Check
 
-The container includes a health check that runs every 30 seconds and verifies:
+The container includes a Docker HEALTHCHECK that runs every 30 seconds:
 
-1. An agent process (issue-daemon, node, or claude) is running
-2. Node.js is available
-3. `gh` CLI is authenticated (if `GITHUB_TOKEN` is set)
-4. The workspace volume is mounted
+1. Queries the status endpoint (`/health`)
+2. Falls back to process checks during startup
 
 Check health status:
 
@@ -92,7 +147,7 @@ docker inspect --format='{{.State.Health.Status}}' ai-social-agent
 
 ## Security
 
-- **No secrets in the image** — all credentials are passed via environment variables at runtime.
+- **No secrets in the image** — all credentials are passed via `.env.docker` at runtime.
 - **Non-root user** — the container runs as `agent` (UID 1000), not root.
 - **Read-only repo mount** — the host repo cannot be modified by the agent.
 - **Resource limits** — CPU, memory, and disk are capped to prevent runaway processes.
@@ -107,7 +162,7 @@ docker inspect --format='{{.State.Health.Status}}' ai-social-agent
 Check the logs: `docker compose -f docker-compose.agent.yml logs agent`
 
 Common causes:
-- Missing `ANTHROPIC_API_KEY` or `GITHUB_TOKEN`
+- Missing `ANTHROPIC_API_KEY` or `GITHUB_TOKEN` in `.env.docker`
 - Repo not mounted (run from repo root)
 
 ### Health check failing
@@ -115,6 +170,9 @@ Common causes:
 ```bash
 # Run the health check manually
 docker exec ai-social-agent /usr/local/bin/agent-healthcheck
+
+# Check the status endpoint directly
+curl http://localhost:7420/status | jq .
 ```
 
 ### Worktree disk usage growing
