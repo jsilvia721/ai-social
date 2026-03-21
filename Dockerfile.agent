@@ -1,7 +1,8 @@
 # Dockerfile.agent — Container for running the autonomous issue-daemon agent.
 #
 # Installs Node.js 22, git, Claude CLI, gh CLI, and jq.
-# The repo is mounted as a volume at runtime — NOT copied into the image.
+# The repo is mounted read-only at /workspace. The entrypoint script clones
+# it into a writable location (/agent-workdir/repo) for git worktree support.
 # Secrets are passed via environment variables — NEVER baked into the image.
 #
 # Build:
@@ -10,14 +11,11 @@
 # Run:
 #   See docker-compose.agent.yml for the recommended way to run.
 
-# Pin to tag for reproducibility. Update periodically.
-# To pin to digest: docker pull node:22-bookworm-slim && docker inspect --format='{{index .RepoDigests 0}}' node:22-bookworm-slim
 FROM node:22-bookworm-slim
 
 LABEL maintainer="ai-social team"
 LABEL description="Autonomous agent worker for ai-social issue daemon"
 
-# Avoid interactive prompts during package installation
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
@@ -51,25 +49,28 @@ RUN groupadd --gid 1000 agent \
     && useradd --uid 1000 --gid agent --shell /bin/bash --create-home agent
 
 # Create directories for worktrees and logs
-RUN mkdir -p /workspace /agent-workdir/worktrees /agent-workdir/logs \
+RUN mkdir -p /workspace /agent-workdir/repo /agent-workdir/logs \
     && chown -R agent:agent /agent-workdir
 
-# Health check script
-COPY scripts/agent-healthcheck.sh /usr/local/bin/agent-healthcheck
-RUN chmod +x /usr/local/bin/agent-healthcheck
+# Copy scripts into the image (entrypoint, healthcheck, status server)
+COPY --chown=agent:agent scripts/agent-entrypoint.sh /usr/local/bin/agent-entrypoint
+COPY --chown=agent:agent scripts/agent-healthcheck.sh /usr/local/bin/agent-healthcheck
+COPY --chown=agent:agent scripts/agent-status-server.js /usr/local/bin/agent-status-server.js
+RUN chmod +x /usr/local/bin/agent-entrypoint /usr/local/bin/agent-healthcheck
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD /usr/local/bin/agent-healthcheck
+
+# Expose the status server port
+EXPOSE 7420
 
 # Switch to non-root user
 USER agent
 
-# Workspace is where the repo gets mounted (read-only)
-# Agent workdir is for writable worktrees and logs
 WORKDIR /workspace
 
-# Default entrypoint runs the issue daemon
-ENTRYPOINT ["bash", "scripts/issue-daemon.sh"]
+# Entrypoint handles repo clone, git config, status server, then execs daemon
+ENTRYPOINT ["agent-entrypoint"]
 
-# Default args (can be overridden at runtime)
+# Default daemon args (can be overridden at runtime)
 CMD ["-w", "1", "-i", "60"]

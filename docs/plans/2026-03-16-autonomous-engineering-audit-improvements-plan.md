@@ -113,17 +113,19 @@ Create `.claude/skills/metrics/SKILL.md` that queries GitHub for:
 
 Output as a formatted dashboard. Track over time in `docs/metrics/` markdown files.
 
-### 7. Docker sandbox for autonomous execution
+### 7. Docker sandbox for autonomous execution ✅
 **Time:** Half-day | **Impact:** Limits blast radius for overnight/unattended runs
 
-Create a `Dockerfile.agent` that:
-- Installs Node.js 22, git, Claude CLI
-- Mounts the repo as a volume (read-only base, writable worktree overlay)
-- Sets resource limits (CPU, memory, disk)
-- Runs the issue-daemon inside the container
-- Exposes daemon-status via a simple HTTP endpoint
+~~Create a `Dockerfile.agent` that:~~
+- ~~Installs Node.js 22, git, Claude CLI~~
+- ~~Mounts the repo as a volume (read-only base, writable worktree overlay)~~
+- ~~Sets resource limits (CPU, memory, disk)~~
+- ~~Runs the issue-daemon inside the container~~
+- ~~Exposes daemon-status via a simple HTTP endpoint~~
 
-Start with a single-worker container. Scale to multi-worker later.
+~~Start with a single-worker container. Scale to multi-worker later.~~
+
+**Completed:** Full Docker Compose setup with entrypoint script (clones repo into writable location for git worktree support), HTTP status endpoint (GET /status, GET /health on port 7420), credential isolation via `.env.docker` (gitignored) + read-only `~/.claude` mount, resource limits, and non-root execution.
 
 ---
 
@@ -178,7 +180,7 @@ Wire the daemon to run overnight with:
 4. Hygiene hook             → prevents worktree recurrence
    ─── foundation set ───
 5. Workflow handbook        → agents make better routing decisions
-6. /metrics skill           → visibility into what to improve next
+6. /metrics skill           → visibility into what to improve next ✅
 7. Docker sandbox           → safety for overnight runs
    ─── scaling ready ───
 8. Error recovery taxonomy  → reduces blocked rate

@@ -1,17 +1,21 @@
 # docker-compose.agent.yml — Run the autonomous issue-daemon agent in Docker.
 #
 # Usage:
-#   docker compose -f docker-compose.agent.yml up --build
-#   docker compose -f docker-compose.agent.yml up -d        # detached
-#   docker compose -f docker-compose.agent.yml logs -f agent # follow logs
-#   docker compose -f docker-compose.agent.yml down          # stop
+#   # First, copy and fill in credentials:
+#   cp .env.docker.example .env.docker
 #
-# Environment variables (set in shell or .env file):
-#   ANTHROPIC_API_KEY  — Required. Claude API key.
-#   GITHUB_TOKEN       — Required. GitHub personal access token with repo scope.
-#   DATABASE_URL       — Optional. Database connection string.
+#   docker compose -f docker-compose.agent.yml up --build        # build + run
+#   docker compose -f docker-compose.agent.yml up -d             # detached
+#   docker compose -f docker-compose.agent.yml logs -f agent     # follow logs
+#   docker compose -f docker-compose.agent.yml down               # stop
 #
-# Resource limits can be adjusted below or via environment variables.
+#   # Status endpoint (while running):
+#   curl http://localhost:7420/status | jq .
+#   curl http://localhost:7420/health
+#
+# Credentials:
+#   All secrets are loaded from .env.docker (gitignored, never committed).
+#   See .env.docker.example for the full list of required/optional variables.
 
 services:
   agent:
@@ -20,6 +24,16 @@ services:
       dockerfile: Dockerfile.agent
     container_name: ai-social-agent
     restart: unless-stopped
+
+    # Load credentials from gitignored env file (required: true means fail if missing)
+    env_file:
+      - path: .env.docker
+        required: true
+
+    # Non-secret environment config
+    environment:
+      - NODE_ENV=production
+      - AGENT_STATUS_PORT=7420
 
     # Resource limits — adjust based on your machine
     deploy:
@@ -31,29 +45,36 @@ services:
           cpus: "0.5"
           memory: 512M
 
-    # Tmpfs for /tmp to limit disk usage (256MB max)
+    # Tmpfs for /tmp to limit disk usage
     tmpfs:
       - /tmp:size=256M
 
-    # Environment variables — secrets passed at runtime, never baked in
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - DATABASE_URL=${DATABASE_URL:-}
-      - NODE_ENV=production
-      # Agent-specific config
-      - AGENT_MAX_WORKERS=${AGENT_MAX_WORKERS:-1}
-      - AGENT_POLL_INTERVAL=${AGENT_POLL_INTERVAL:-60}
-      - AGENT_MAX_BUDGET=${AGENT_MAX_BUDGET:-50}
+    ports:
+      # Status endpoint — bound to localhost only (not exposed to network)
+      - "127.0.0.1:${AGENT_STATUS_PORT:-7420}:7420"
+
+    # Container security hardening
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
     volumes:
-      # Mount the repo read-only — agent uses worktrees for writes
+      # Repo mounted read-only — entrypoint clones into writable location
       - .:/workspace:ro
-      # Writable volume for agent worktrees and logs
+      # Writable volume for cloned repo, worktrees, and logs
       - agent-workdir:/agent-workdir
+      # Claude CLI auth (read-only) — keeps credentials on host
+      - ${CLAUDE_CONFIG_DIR:-~/.claude}:/home/agent/.claude:ro
 
     # Override default CMD to use env-configurable workers
-    command: ["-w", "${AGENT_MAX_WORKERS:-1}", "-i", "${AGENT_POLL_INTERVAL:-60}", "-b", "${AGENT_MAX_BUDGET:-50}"]
+    command:
+      - "-w"
+      - "${AGENT_MAX_WORKERS:-1}"
+      - "-i"
+      - "${AGENT_POLL_INTERVAL:-60}"
+      - "-b"
+      - "${AGENT_MAX_BUDGET:-50}"
 
     # Logging limits to prevent disk exhaustion
     logging:
