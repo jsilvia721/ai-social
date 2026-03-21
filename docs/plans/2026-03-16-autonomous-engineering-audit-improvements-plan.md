@@ -131,34 +131,43 @@ Output as a formatted dashboard. Track over time in `docs/metrics/` markdown fil
 
 ## Future Endeavors (Week 3+)
 
-### 8. Structured error recovery taxonomy in issue-worker
+### 8. Structured error recovery taxonomy in issue-worker ✅
 **Time:** Half-day | **Impact:** Reduces `claude-blocked` rate by handling common failures intelligently
 
-Add error categorization: CI failure → read output → fix → retry; type error → run tsc → fix; test failure → analyze if test or implementation is wrong; timeout → save WIP.
+~~Add error categorization: CI failure → read output → fix → retry; type error → run tsc → fix; test failure → analyze if test or implementation is wrong; timeout → save WIP.~~
 
-### 9. Extract agent framework to standalone repo
+**Completed:** Error Recovery Taxonomy added to issue-worker agent (PR #776, PR #784) with 5 categories: CI lint/format failure, type errors, test failures, timeout/wall-clock budget, and merge conflicts. Each category has detection criteria, recovery steps, max retries (3), and escalation paths.
+
+### 9. Extract agent framework to standalone repo ✅
 **Time:** Multi-day | **Impact:** Reusable across projects, independent version control
 
-**What to extract (project-agnostic):**
-- `scripts/issue-daemon.sh` + `scripts/lib/daemon-state.sh` + `scripts/daemon-status.sh`
-- `.claude/agents/issue-worker.md`, `plan-writer.md`, `plan-executor.md`, `bug-investigator.md`, `conflict-resolver.md`
-- `.claude/skills/` (create-issue, batch-work, status, preflight, complexity-router, swarm)
-- `.claude/hooks/block-destructive.sh`, `hygiene-check.sh`
-- `.github/workflows/` (issue-approve, auto-merge, unblock-dependents, close-completed-plans, finalize-wip)
-- `.github/ISSUE_TEMPLATE/claude-task.yml`
+~~**What to extract (project-agnostic):**~~
+~~- `scripts/issue-daemon.sh` + `scripts/lib/daemon-state.sh` + `scripts/daemon-status.sh`~~
+~~- `.claude/agents/issue-worker.md`, `plan-writer.md`, `plan-executor.md`, `bug-investigator.md`, `conflict-resolver.md`~~
+~~- `.claude/skills/` (create-issue, batch-work, status, preflight, complexity-router, swarm)~~
+~~- `.claude/hooks/block-destructive.sh`, `hygiene-check.sh`~~
+~~- `.github/workflows/` (issue-approve, auto-merge, unblock-dependents, close-completed-plans, finalize-wip)~~
+~~- `.github/ISSUE_TEMPLATE/claude-task.yml`~~
 
-**What stays project-specific:**
-- CLAUDE.md content (architecture, commands, hard rules specific to this codebase)
-- `.claude/rules/` (testing patterns, deployment config, design system, etc.)
-- `docs/solutions/` (institutional knowledge)
-- `.claude/skills/` (qa-audit, brainstorm-agent, pr-screenshots — project-specific)
+**Completed:** Framework extracted to https://github.com/jsilvia721/claude-agent-framework (36 files, 6,337 lines).
 
-**Approach:**
-1. Create a new repo (e.g., `claude-agent-framework` or `autonomous-engineering-kit`)
-2. Move project-agnostic files there
-3. Use git submodule or a setup script to install into target projects
-4. Template variables for project-specific values (repo name, test command, coverage thresholds)
-5. Version with semver tags so projects can pin to stable releases
+**Architecture:**
+- `claude-agent.config.json` — project-specific config (commands, labels, paths, daemon settings)
+- `scripts/lib/load-config.sh` — reads JSON config, exports shell variables at runtime
+- `bin/setup.sh` — install script that copies framework files into target projects with template variable replacement
+- All agents/skills use `{{PLACEHOLDER}}` variables replaced during setup
+
+**Extracted components:**
+- 4 agents: issue-worker, plan-writer, plan-executor, conflict-resolver
+- 7 skills: create-issue, batch-work, status, metrics, preflight, complexity-router, swarm
+- 3 hooks: block-destructive, hygiene-check, block-brainstorm-work
+- 5 workflows: issue-approve, auto-merge, unblock-dependents, close-completed-plans, finalize-wip
+- 6 script libraries: daemon-state, rate-limit-helpers, daemon-reconcile, conflict-resolver, load-config + main daemon
+- 3 rules: agent-teams, autonomous-loops, brainstorm-approval-gate
+- Issue template, example config, README, configuration docs
+
+**What stays in ai-social (project-specific):**
+- CLAUDE.md, project-specific rules, docs/solutions/, project-specific skills (qa-audit, brainstorm-agent, pr-screenshots)
 
 ### 10. Overnight autonomous pipeline
 **Time:** Multi-day | **Impact:** Level 5 transition — fully autonomous development cycles
@@ -183,8 +192,8 @@ Wire the daemon to run overnight with:
 6. /metrics skill           → visibility into what to improve next ✅
 7. Docker sandbox           → safety for overnight runs
    ─── scaling ready ───
-8. Error recovery taxonomy  → reduces blocked rate
-9. Framework extraction     → reuse across projects
+8. Error recovery taxonomy  → reduces blocked rate ✅
+9. Framework extraction     → reuse across projects ✅
 10. Overnight pipeline      → Level 5 autonomy
 ```
 
